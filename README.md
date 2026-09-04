@@ -23,3 +23,13 @@ In order to ensure that the Laravel community is welcoming to all, please review
 ## License
 
 The Laravel + Vue starter kit is open-sourced software licensed under the MIT license.
+
+## Download Package of OpenAI API
+
+## npm install @zxing/browser @zxing/library (Barcode Reader)
+## npm install tesseract.js (OCR)
+## npm install pdfjs-dist ()
+## composer require smalot/pdfparser
+## composer require openai-php/laravel
+## php artisan openai:install
+## php artisan vendor:publish --provider="OpenAI\Laravel\ServiceProvider"

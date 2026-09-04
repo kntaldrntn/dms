@@ -22,6 +22,7 @@ import {
     Settings,
     Users,
     Building2,
+    Clock,
 } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
@@ -41,35 +42,35 @@ const mainNavItems = computed<NavItem[]>(() => {
             roles: ['system_administrator', 'records_manager', 'user'],
         },
         {
-            title: 'New Document',
-            href: '/documents/create',
+            title: 'Document',
+            href: route('documents.index'),
             icon: FilePlus,
             roles: ['system_administrator', 'records_manager', 'user'],
         },
-        {
-            title: 'Transaction',
-            href: '/transactions',
-            icon: ArrowLeftRight,
-            roles: ['system_administrator', 'records_manager', 'user'],
-        },
-        {
-            title: 'Archive',
-            href: '/archive',
-            icon: Archive,
-            roles: ['system_administrator', 'records_manager', 'user'],
-        },
-        {
-            title: 'Previous Archive',
-            href: '/archive/previous',
-            icon: Archive,
-            roles: ['system_administrator', 'records_manager', 'user'],
-        },
-        {
-            title: 'Report',
-            href: '/reports',
-            icon: ClipboardList,
-            roles: ['system_administrator', 'records_manager'],
-        },
+        // {
+        //     title: 'Transaction',
+        //     href: '/transactions',
+        //     icon: ArrowLeftRight,
+        //     roles: ['system_administrator', 'records_manager', 'user'],
+        // },
+        // {
+        //     title: 'Archive',
+        //     href: '/archive',
+        //     icon: Archive,
+        //     roles: ['system_administrator', 'records_manager', 'user'],
+        // },
+        // {
+        //     title: 'Previous Archive',
+        //     href: '/archive/previous',
+        //     icon: Archive,
+        //     roles: ['system_administrator', 'records_manager', 'user'],
+        // },
+        // {
+        //     title: 'Report',
+        //     href: '/reports',
+        //     icon: ClipboardList,
+        //     roles: ['system_administrator', 'records_manager'],
+        // },
         // Collapsible Settings Dropdown
         {
             title: 'Settings',
@@ -79,6 +80,7 @@ const mainNavItems = computed<NavItem[]>(() => {
                       route().current('users.*') ||
                       route().current('document-classifications.*') ||
                       route().current('document-types.*') ||
+                      route().current('performance-standards.*') ||
                       route().current('transaction-types.*') ||
                       route().current('delivery-methods.*'),
             items: [
@@ -101,6 +103,11 @@ const mainNavItems = computed<NavItem[]>(() => {
                     title: 'Document Types',
                     href: route('document-types.index'),
                     icon: ClipboardList,
+                },
+                {
+                    title: 'Performance Standards',
+                    href: route('performance-standards.index'),
+                    icon: Clock,
                 },
                 {
                     title: 'Transaction Types',

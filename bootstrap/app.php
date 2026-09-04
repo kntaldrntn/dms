@@ -4,6 +4,7 @@ use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use Illuminate\Foundation\Application;
 use App\Http\Middleware\HandleRoles;
+use App\Http\Middleware\CheckWorkingHours;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
@@ -26,7 +27,8 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->alias([
-            'role' => HandleRoles::class, // Alias for Middleware
+            'role' => HandleRoles::class, 
+            'working_hours' => CheckWorkingHours::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
