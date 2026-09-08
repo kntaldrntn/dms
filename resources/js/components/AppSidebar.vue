@@ -1,20 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { usePage, Link } from '@inertiajs/vue3';
+import { usePage } from '@inertiajs/vue3';
 import NavMain from '@/components/NavMain.vue';
-import NavUser from '@/components/NavUser.vue';
 import {
     Sidebar,
     SidebarContent,
-    SidebarFooter,
-    SidebarHeader,
     SidebarMenu,
     SidebarMenuButton,
     SidebarMenuItem
 } from '@/components/ui/sidebar';
 import { type NavItem } from '@/types';
 import {
-    Archive,
     ArrowLeftRight,
     FilePlus,
     LayoutGrid,
@@ -24,7 +20,6 @@ import {
     Building2,
     Clock,
 } from 'lucide-vue-next';
-import AppLogo from './AppLogo.vue';
 
 const page = usePage();
 const user = computed(() => page.props.auth.user);
@@ -47,31 +42,6 @@ const mainNavItems = computed<NavItem[]>(() => {
             icon: FilePlus,
             roles: ['system_administrator', 'records_manager', 'user'],
         },
-        // {
-        //     title: 'Transaction',
-        //     href: '/transactions',
-        //     icon: ArrowLeftRight,
-        //     roles: ['system_administrator', 'records_manager', 'user'],
-        // },
-        // {
-        //     title: 'Archive',
-        //     href: '/archive',
-        //     icon: Archive,
-        //     roles: ['system_administrator', 'records_manager', 'user'],
-        // },
-        // {
-        //     title: 'Previous Archive',
-        //     href: '/archive/previous',
-        //     icon: Archive,
-        //     roles: ['system_administrator', 'records_manager', 'user'],
-        // },
-        // {
-        //     title: 'Report',
-        //     href: '/reports',
-        //     icon: ClipboardList,
-        //     roles: ['system_administrator', 'records_manager'],
-        // },
-        // Collapsible Settings Dropdown
         {
             title: 'Settings',
             icon: Settings,
@@ -128,26 +98,10 @@ const mainNavItems = computed<NavItem[]>(() => {
 </script>
 
 <template>
-    <Sidebar collapsible="icon" variant="inset" class="border-slate-100 bg-white">
-        <SidebarHeader class="border-b border-slate-100">
-            <SidebarMenu>
-                <SidebarMenuItem>
-                    <SidebarMenuButton size="lg" as-child class="hover:bg-slate-50 data-[active=true]:bg-emerald-50 data-[active=true]:text-emerald-600">
-                        <Link :href="route('dashboard')">
-                            <AppLogo />
-                        </Link>
-                    </SidebarMenuButton>
-                </SidebarMenuItem>
-            </SidebarMenu>
-        </SidebarHeader>
-
-        <SidebarContent class="px-1.5 pt-4">
+    <Sidebar collapsible="icon" class="border-r border-slate-200 bg-white">
+        <!-- SidebarHeader with Logo has been removed. -->
+        <SidebarContent class="px-1.5 pt-16">
             <NavMain :items="mainNavItems" />
         </SidebarContent>
-
-        <SidebarFooter class="border-t border-slate-100">
-            <NavUser />
-        </SidebarFooter>
     </Sidebar>
-    <slot />
 </template>

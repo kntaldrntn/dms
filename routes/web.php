@@ -31,6 +31,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('documents/{document}/edit', [DocumentController::class, 'edit'])->name('documents.edit');
         Route::put('documents/{document}', [DocumentController::class, 'update'])->name('documents.update');
         Route::delete('documents/{document}', [DocumentController::class, 'destroy'])->name('documents.destroy');
+        Route::post('/documents/{document}/route', [DocumentController::class, 'routeDocument'])->name('documents.route');
     });
 
     // 2. READ-ONLY ROUTES (Must go LAST)

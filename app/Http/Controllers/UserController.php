@@ -19,6 +19,9 @@ class UserController extends Controller
             'department',
             'loginHistories' => function ($q) {
                 $q->latest('login_at')->take(10);
+            },
+            'auditLogs' => function ($q) {
+                $q->with('actor')->latest()->take(15);
             }
         ]);
 
@@ -84,7 +87,7 @@ class UserController extends Controller
             'email' => 'required|email|max:255|unique:users,email,' . $user->id,
             'role' => ['required', Rule::in(['system_administrator', 'records_manager', 'user'])],
             'sex' => ['nullable', Rule::in(['Male', 'Female'])],
-            'state' => ['required', 'in:0,1'], // Replaced status
+            'state' => ['required', 'in:0,1'],
             'department_id' => 'nullable|exists:departments,id',
         ]);
 
@@ -96,7 +99,43 @@ class UserController extends Controller
         }
 
         $user->fill($validated);
-        $user->save();
+
+        // --- AUDIT TRAIL LOGIC: Full Snapshot ---
+        $dirty = $user->getDirty(); 
+        
+        if (!empty($dirty)) {
+            unset($dirty['updated_at']);
+
+            if (!empty($dirty)) {
+                // 1. Grab the COMPLETE old and new states
+                $oldValues = $user->getOriginal();
+                $newValues = $user->getAttributes();
+
+                // 2. Strip out sensitive/noisy fields from the logs
+                    // In UserController @update
+                $hiddenFields = ['password', 'remember_token', 'updated_at', 'created_at', 'email_verified_at'];
+                foreach ($hiddenFields as $field) {
+                    unset($oldValues[$field], $newValues[$field]);
+                }
+
+                // 3. Save the user
+                $user->save();
+
+                // 4. Create the full-context audit log
+                \App\Models\AuditLog::create([
+                    'actor_id' => auth()->id(),
+                    'model_type' => User::class,
+                    'model_id' => $user->id,
+                    'action' => 'updated',
+                    'old_values' => $oldValues,
+                    'new_values' => $newValues,
+                ]);
+            } else {
+                $user->save(); 
+            }
+        } else {
+            $user->save();
+        }
 
         return redirect()->back()->with('success', 'User updated successfully.');
     }

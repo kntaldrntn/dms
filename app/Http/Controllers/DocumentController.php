@@ -80,7 +80,7 @@ class DocumentController extends Controller
             'email' => 'nullable|email',
             'subject_matter' => 'required|string',
             'classification_id' => 'nullable|exists:document_classifications,id',
-            'department_id' => 'required|exists:departments,id',
+            'department_id' => 'nullable|exists:departments,id',
             'linked_documents' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
             'access_code' => 'required|string|max:20',
             'ai_routing_suggestions' => 'nullable|array',
@@ -160,7 +160,7 @@ class DocumentController extends Controller
             'email' => 'nullable|email',
             'subject_matter' => 'required|string',
             'classification_id' => 'nullable|exists:document_classifications,id',
-            'department_id' => 'required|exists:departments,id',
+            'department_id' => 'nullable|exists:departments,id',
             'access_code' => 'required|string|max:20',
             'ai_routing_suggestions' => 'nullable|array',
         ];
@@ -247,12 +247,16 @@ class DocumentController extends Controller
               'document_type_id': 'null or integer ID matching the best document type',
               'transaction_type_id': 'null or integer ID matching the best transaction type based on ease of business law in the Philippines',
               'classification_id': 'null or integer ID matching the best classification',
+              'department_id': 'Integer or null. Strictly return 31 (Office of the City Mayor), 3 (Office of the City Administrator), or null (Other Departments). ONLY use 31 or 3 if the document is explicitly ADDRESSED TO or REQUIRES APPROVAL FROM them. CRITICAL: Do NOT route it to 3 or 31 if they are the ones SENDING the document. If it is going to a regular department, return null.',
+              'approval_reason': 'String or null. If you selected 3 or 31, briefly explain why.',
               'routing_suggestions': [
                 {
                   'department_id': 'Integer ID',
-                  'reason': 'Brief explanation'
+                  'priority': 'String. Strictly output Primary, Secondary, or FYI.',
+                  'reason': 'Detailed explanation'
                 }
               ],
+              'NOTE_FOR_ROUTING': 'Provide 1 to 4 highly relevant routing suggestions. CRITICAL: DO NOT guess or invent hypothetical scenarios. Assign EXACTLY ONE office as Primary (the main executor of the request). Any other offices must be Secondary or FYI (like Budget/Accounting for records). STRICT RULE: If you selected 3 or 31 for the main department_id, DO NOT include them again here.',
               'confidence_score': 'Integer between 1 and 100.'
             }";
 
@@ -316,5 +320,34 @@ class DocumentController extends Controller
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to analyze document: ' . $e->getMessage()], 500);
         }
+    }
+
+    public function routeDocument(Request $request, Document $document)
+    {
+        // 1. Validate that we received an array of offices
+        $validated = $request->validate([
+            'routed_to' => 'required|array|min:1',
+            'routed_to.*' => 'exists:departments,id',
+        ]);
+
+        $now = Carbon::now('Asia/Manila');
+
+        // 2. Loop through every selected office and create a parallel trail
+        foreach ($validated['routed_to'] as $departmentId) {
+            
+            DocumentTrail::create([
+                'document_id' => $document->id,
+                'department_id' => Auth::user()->department_id, // The office releasing it
+                'received_by' => Auth::id(),
+                'received_at' => $now,
+                'received_action' => 'Routed via Fast Forward distribution',
+                'released_by' => Auth::id(),
+                'released_at' => $now,
+                'released_to' => $departmentId, // The target execution office
+            ]);
+        }
+
+        // 3. Return back to the page so the Vue modal triggers onSuccess and closes
+        return redirect()->back()->with('success', 'Document successfully routed to selected offices.');
     }
 }

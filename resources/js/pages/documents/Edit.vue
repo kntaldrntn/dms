@@ -49,6 +49,7 @@ const isAnalyzing = ref(false);
 const analysisError = ref('');
 const routingSuggestions = ref<Array<{ department_id: number, reason: string }>>([]);
 const aiMetrics = ref<{ tokens: number, confidence: number } | null>(null);
+const executiveSuggestion = ref<{ route: string, reason: string } | null>(null);
 
 const getDepartmentName = (id: number) => {
     const dept = props.departments.find(d => d.id === id);
@@ -184,8 +185,21 @@ const handleFileUpload = async (event: Event) => {
         if (data.document_type_id) form.document_type_id = data.document_type_id;
         if (data.transaction_type_id) form.transaction_type_id = data.transaction_type_id;
         if (data.classification_id) form.classification_id = data.classification_id;
-        // if (data.department_id) form.department_id = data.department_id;
         
+        // 1. Handle Executive Approval (Mayor=31 / Admin=3)
+        if (data.department_id === 3 || data.department_id === 31) {
+            form.department_id = data.department_id;
+            executiveSuggestion.value = {
+                route: data.department_id === 31 ? 'Office of the City Mayor' : 'Office of the City Administrator',
+                reason: data.approval_reason || 'Identified as requiring executive approval.'
+            };
+        } else {
+            // Nullable for other departments
+            form.department_id = ''; 
+            executiveSuggestion.value = null;
+        }
+        
+        // 2. Silently queue the executing departments
         if (data.routing_suggestions && Array.isArray(data.routing_suggestions)) {
             routingSuggestions.value = data.routing_suggestions;
             if (typeof (form as any).ai_routing_suggestions !== 'undefined') {
@@ -348,11 +362,21 @@ const formatLocalTime = (dateString: string) => {
                                 
                                 <!-- Routing Destinations & Smart Cards -->
                                 <div>
-                                    <label class="block text-sm font-medium text-slate-700 mb-1.5">Direct To (Routing)</label>
-                                    <select v-model="form.department_id" class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" required>
-                                        <option value="" disabled>Select Destination Office</option>
-                                        <option v-for="dept in departments" :key="dept.id" :value="dept.id">{{ dept.name }}</option>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1.5">Route for Approval</label>
+                                    <select v-model="form.department_id" class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm">
+                                        <option value="">Other Departments</option>
+                                        <option :value="3">Office of the City Administrator</option>
+                                        <option :value="31">Office of the City Mayor</option>
                                     </select>
+                                    
+                                    <!-- AI Executive Preview -->
+                                    <div v-if="executiveSuggestion" class="mt-3 p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
+                                        <span class="text-[11px] font-bold uppercase tracking-wider text-indigo-700 flex items-center gap-1.5 mb-1">
+                                            <Sparkles class="w-3 h-3" /> AI Suggested Approval
+                                        </span>
+                                        <p class="text-xs text-indigo-900 font-medium">Auto-selected: {{ executiveSuggestion.route }}</p>
+                                        <p class="text-[11px] text-indigo-700/80 mt-0.5 leading-relaxed">{{ executiveSuggestion.reason }}</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>

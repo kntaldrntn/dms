@@ -68,4 +68,9 @@ class User extends Authenticatable
     {
         return $this->hasOne(LoginHistory::class)->latestOfMany('login_at');
     }
+
+    public function auditLogs()
+    {
+        return $this->hasMany(AuditLog::class, 'model_id')->where('model_type', static::class)->latest();
+    }
 }

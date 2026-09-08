@@ -3,7 +3,7 @@ import DeleteConfirmationModal from '@/components/DeleteConfirmationModal.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router, useForm } from '@inertiajs/vue3';
-import { Pencil, Plus, Search, Trash2, RotateCcw, History } from 'lucide-vue-next';
+import { Pencil, Plus, Search, Trash2, RotateCcw, History, X } from 'lucide-vue-next';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
 import { ref, watch } from 'vue';
@@ -130,6 +130,7 @@ const itemToDeleteName = ref('');
 
 const showHistoryModal = ref(false);
 const historyUser = ref<any>(null);
+const activeHistoryTab = ref<'logins' | 'audit'>('logins');
 
 // Form state
 const form = useForm({
@@ -176,6 +177,7 @@ function openDeleteModal(user: any) {
 
 function openHistoryModal(user: any) {
     historyUser.value = user;
+    activeHistoryTab.value = 'logins';
     showHistoryModal.value = true;
 }
 
@@ -395,10 +397,23 @@ const formatRelativeTime = (dateString: string) => {
             <!-- Form Modal -->
             <Transition name="fade">
                 <div v-if="showDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
-                    <div class="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl border border-slate-100 max-h-[90vh] overflow-y-auto">
-                        <h2 class="mb-6 text-lg font-bold text-slate-800 tracking-tight">
+                    <!-- Added 'relative' to the container -->
+                    <div class="relative w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+                        
+                        <!-- New Absolute Close Button -->
+                        <button
+                            @click="showDialog = false"
+                            class="absolute top-4 right-4 rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                            title="Close"
+                        >
+                            <X class="h-5 w-5" />
+                        </button>
+
+                        <!-- Added pr-8 to prevent text overlap -->
+                        <h2 class="mb-6 pr-8 text-lg font-bold text-slate-800 tracking-tight">
                             {{ isEdit ? 'Edit User' : 'Add New User' }}
                         </h2>
+                        
                         <form @submit.prevent="submitForm" class="space-y-5">
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -482,46 +497,142 @@ const formatRelativeTime = (dateString: string) => {
                 </div>
             </Transition>
 
-            <!-- History Modal -->
+            <!-- History & Audit Modal -->
             <Transition name="fade">
                 <div v-if="showHistoryModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
-                    <div class="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-xl border border-slate-100 max-h-[90vh] flex flex-col">
-                        <div class="flex justify-between items-center mb-6">
-                            <h2 class="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-2">
-                                <History class="h-5 w-5 text-amber-500" />
-                                Audit Trail: {{ historyUser?.name }}
-                            </h2>
-                            <button @click="showHistoryModal = false" class="text-slate-400 hover:text-slate-600">×</button>
+                    <div class="w-full max-w-3xl rounded-2xl bg-white shadow-xl border border-slate-100 flex flex-col max-h-[85vh]">
+                        
+                        <!-- Header -->
+                        <div class="px-6 py-5 border-b border-slate-100">
+                            <div class="flex justify-between items-start mb-4">
+                                <h2 class="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-2">
+                                    <History class="h-5 w-5 text-indigo-500" />
+                                    Activity Record: <span class="text-slate-500 font-normal">{{ historyUser?.name }}</span>
+                                </h2>
+                                
+                                <!-- Upgraded Flex Close Button -->
+                                <button 
+                                    @click="showHistoryModal = false" 
+                                    class="rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                                    title="Close"
+                                >
+                                    <X class="h-5 w-5" />
+                                </button>
+                            </div>
+                            
+                            <!-- Tabs -->
+                            <div class="flex space-x-1 rounded-xl bg-slate-100 p-1 w-full sm:w-fit">
+                                <button 
+                                    @click="activeHistoryTab = 'logins'"
+                                    :class="['px-4 py-2 text-sm font-medium rounded-lg transition-all', activeHistoryTab === 'logins' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700']"
+                                >
+                                    Login History
+                                </button>
+                                <button 
+                                    @click="activeHistoryTab = 'audit'"
+                                    :class="['px-4 py-2 text-sm font-medium rounded-lg transition-all', activeHistoryTab === 'audit' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700']"
+                                >
+                                    Audit Trail
+                                </button>
+                            </div>
                         </div>
                         
-                        <div class="overflow-y-auto flex-1 pr-2 border rounded-xl">
-                            <table class="w-full text-left text-sm text-slate-700">
-                                <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100 sticky top-0">
-                                    <tr>
-                                        <th class="px-6 py-3 font-semibold">Date & Time</th>
-                                        <th class="px-6 py-3 font-semibold">IP Address</th>
-                                        <th class="px-6 py-3 font-semibold">Device / Browser</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y divide-slate-100">
-                                    <tr v-for="log in historyUser?.login_histories" :key="log.id" class="hover:bg-slate-50/50 transition-colors">
-                                        <td class="px-6 py-3 whitespace-nowrap font-medium text-slate-800">{{ formatDate(log.login_at) }}</td>
-                                        <td class="px-6 py-3 text-slate-500">{{ log.ip_address || 'Unknown' }}</td>
-                                        <td class="px-6 py-3 text-slate-500 max-w-xs truncate" :title="log.user_agent || ''">{{ log.user_agent || 'Unknown' }}</td>
-                                    </tr>
-                                    <tr v-if="!historyUser?.login_histories || historyUser.login_histories.length === 0">
-                                        <td colspan="3" class="px-6 py-8 text-center text-slate-500">
-                                            No login history found for this user.
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
+                        <!-- Scrollable Content -->
+                        <div class="overflow-y-auto flex-1 p-6 bg-slate-50/50">
+                            
+                            <!-- LOGIN TAB -->
+                            <div v-if="activeHistoryTab === 'logins'" class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                                <table class="w-full text-left text-sm text-slate-700">
+                                    <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+                                        <tr>
+                                            <th class="px-6 py-3 font-semibold">Date & Time</th>
+                                            <th class="px-6 py-3 font-semibold">IP Address</th>
+                                            <th class="px-6 py-3 font-semibold">Device / Browser</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        <tr v-for="log in historyUser?.login_histories" :key="log.id" class="hover:bg-slate-50/50 transition-colors">
+                                            <td class="px-6 py-3 whitespace-nowrap font-medium text-slate-800">{{ formatDate(log.login_at) }}</td>
+                                            <td class="px-6 py-3 text-slate-500">{{ log.ip_address || 'Unknown' }}</td>
+                                            <td class="px-6 py-3 text-slate-500 max-w-xs truncate" :title="log.user_agent || ''">{{ log.user_agent || 'Unknown' }}</td>
+                                        </tr>
+                                        <tr v-if="!historyUser?.login_histories || historyUser.login_histories.length === 0">
+                                            <td colspan="3" class="px-6 py-8 text-center text-slate-500">
+                                                No login history found for this user.
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
 
-                        <div class="pt-4 flex justify-end mt-2">
-                            <button type="button" class="rounded-xl bg-white border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50" @click="showHistoryModal = false">
-                                Close
-                            </button>
+                            <!-- AUDIT TRAIL TAB -->
+                            <div v-if="activeHistoryTab === 'audit'" class="space-y-4">
+                                <div v-for="log in historyUser?.audit_logs" :key="log.id" class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                                    <div class="flex items-center justify-between mb-3 pb-3 border-b border-slate-50">
+                                        <div class="flex items-center gap-2">
+                                            <div class="w-8 h-8 rounded-full bg-indigo-50 flex items-center justify-center">
+                                                <span class="text-indigo-600 font-bold text-xs">{{ log.actor?.name?.charAt(0) || '?' }}</span>
+                                            </div>
+                                            <div>
+                                                <p class="text-sm font-bold text-slate-800">{{ log.actor?.name || 'System' }}</p>
+                                                <p class="text-[11px] text-slate-500 font-medium uppercase tracking-wider">Updated Profile</p>
+                                            </div>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-slate-500">{{ formatDate(log.created_at) }}</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- JSON Split-View Visualizer -->
+                                    <div class="mt-6 border border-slate-200 rounded-xl overflow-hidden bg-slate-50/30 shadow-sm">
+                                        <!-- Split Header -->
+                                        <div class="grid grid-cols-2 gap-4 px-4 py-2.5 bg-slate-100/80 border-b border-slate-200">
+                                            <div class="text-xs font-bold text-slate-500 uppercase tracking-wider">Previous State</div>
+                                            <div class="text-xs font-bold text-slate-500 uppercase tracking-wider pl-2">New State</div>
+                                        </div>
+
+                                        <!-- Rows -->
+                                        <div class="p-2 space-y-0.5">
+                                            <div v-for="(newValue, key) in log.new_values" :key="key" class="grid grid-cols-2 gap-4 px-2 py-1.5 font-mono text-xs rounded-lg transition-colors hover:bg-slate-100/50">
+                                                
+                                                <!-- LEFT COLUMN (OLD) -->
+                                                <div class="flex items-center pr-4 border-r border-slate-200/60">
+                                                    <span class="font-bold text-slate-500 uppercase tracking-wider w-36 shrink-0">{{ key }}</span>
+                                                    
+                                                    <span v-if="log.old_values[key] == newValue" class="text-slate-700 break-all">
+                                                        = {{ log.old_values[key] === null || log.old_values[key] === '' ? 'null' : log.old_values[key] }}
+                                                    </span>
+                                                    
+                                                    <div v-else class="flex items-center gap-1.5 bg-rose-50 text-rose-700 px-2.5 py-1 rounded border border-rose-100 shadow-sm break-all flex-1">
+                                                        <span class="text-rose-400 font-bold leading-none">-</span>
+                                                        <span class="line-through opacity-70 leading-none">{{ log.old_values[key] === null || log.old_values[key] === '' ? 'null' : log.old_values[key] }}</span>
+                                                    </div>
+                                                </div>
+
+                                                <!-- RIGHT COLUMN (NEW) -->
+                                                <div class="flex items-center pl-2">
+                                                    <span class="font-bold text-slate-500 uppercase tracking-wider w-36 shrink-0">{{ key }}</span>
+                                                    
+                                                    <span v-if="log.old_values[key] == newValue" class="text-slate-700 break-all">
+                                                        = {{ newValue === null || newValue === '' ? 'null' : newValue }}
+                                                    </span>
+                                                    
+                                                    <div v-else class="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded border border-emerald-100 shadow-sm break-all flex-1">
+                                                        <span class="text-emerald-400 font-bold leading-none">+</span>
+                                                        <span class="font-semibold leading-none">{{ newValue === null || newValue === '' ? 'null' : newValue }}</span>
+                                                    </div>
+                                                </div>
+
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div v-if="!historyUser?.audit_logs || historyUser.audit_logs.length === 0" class="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-500">
+                                    No changes have been recorded for this user yet.
+                                </div>
+                            </div>
+                            
                         </div>
                     </div>
                 </div>
