@@ -26,7 +26,7 @@ class DepartmentController extends Controller
         
         // Paginate with 10 items per page (adjust as needed)
         $departments = $query->orderBy('id', 'asc')
-                           ->paginate(10)
+                           ->paginate(14)
                            ->withQueryString();
         
         return Inertia::render('departments/Index', [

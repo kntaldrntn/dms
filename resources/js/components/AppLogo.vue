@@ -1,23 +1,25 @@
 <script setup lang="ts">
-import AppLogoIcon from '@/components/AppLogoIcon.vue';
-
-interface Props {
-    class?: string;
-}
-
-defineProps<Props>();
+import { Files } from 'lucide-vue-next';
 </script>
 
 <template>
-    <!-- Wrapper div to center both elements as a group -->
-    <div class="flex w-full items-center justify-center gap-2">
-        <div class="flex aspect-square size-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-            <AppLogoIcon class="size-5 fill-current text-white dark:text-black" />
+    <div class="flex items-center gap-3">
+        <!-- Modern App Icon Block -->
+        <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-sm transition-transform group-hover:scale-105">
+            <!-- Using your specific blue for the icon color -->
+            <Files class="h-5 w-5 text-[#265f92]" stroke-width="2.5" />
         </div>
         
-        <!-- Removed 'flex-1', 'ml-1', and 'text-left', added 'text-center' -->
-        <div class="grid text-center text-sm">
-            <span class="mb-0.5 truncate font-semibold leading-none">DMS</span>
+        <!-- Stacked Typographic Treatment -->
+        <div class="flex flex-col justify-center">
+            <!-- Main Title with an emerald accent dot to match your system's buttons -->
+            <span class="text-[16px] font-black tracking-wide text-white leading-none">
+                DMS<span class="text-emerald-400"></span>
+            </span>
+            <!-- Subtext: Much cleaner than the long "Market Management System" pipe format -->
+            <span class="text-[9px] font-bold uppercase tracking-[0.2em] text-white/60 leading-tight mt-1">
+                City of San Fernando
+            </span>
         </div>
     </div>
 </template>

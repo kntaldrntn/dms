@@ -30,30 +30,30 @@ const formatRole = (role: string) => {
 <template>
     <AppShell variant="sidebar">
         
-        <!-- FIXED 100% WIDTH TOP NAVBAR -->
-        <header class="fixed top-0 inset-x-0 z-50 flex h-16 items-center bg-white border-b border-slate-200 shadow-sm">
+        <!-- FIXED 100% WIDTH TOP NAVBAR (CUSTOM BLUE THEME) -->
+        <header class="fixed top-0 inset-x-0 z-50 flex h-16 items-center bg-[#265f92] border-b border-white/10 shadow-sm">
             
             <!-- Static Logo Area (Perfectly matches Sidebar width) -->
-            <div class="flex h-full items-center px-4 w-[var(--sidebar-width,16rem)] shrink-0 border-r border-slate-200 bg-white">
-                <Link :href="route('dashboard')" class="flex items-center transition hover:opacity-80">
+            <div class="flex h-full items-center px-4 w-[var(--sidebar-width,16rem)] shrink-0 border-r border-white/10 bg-[#265f92]">
+                <Link :href="route('dashboard')" class="flex items-center transition hover:opacity-80 text-white">
                     <AppLogo />
                 </Link>
             </div>
             
             <!-- Navbar Content (Trigger, Breadcrumbs, Profile) -->
-            <div class="flex flex-1 items-center justify-between px-4 sm:px-6 bg-white h-full">
+            <div class="flex flex-1 items-center justify-between px-4 sm:px-6 h-full">
                 
                 <!-- Left Side: Trigger & Breadcrumbs -->
                 <div class="flex items-center gap-5">
-                    <SidebarTrigger class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-slate-900" />
+                    <SidebarTrigger class="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 bg-white/5 text-white/80 shadow-sm transition hover:bg-white/15 hover:text-white" />
                     
-                    <div class="hidden sm:flex items-center gap-2 text-sm font-medium text-slate-500">
+                    <div class="hidden sm:flex items-center gap-2 text-sm font-medium text-white/80">
                         <template v-for="(item, index) in breadcrumbs" :key="index">
-                            <Link v-if="item.href" :href="item.href" class="hover:text-emerald-600 transition">
+                            <Link v-if="item.href" :href="item.href" class="hover:text-white transition">
                                 {{ item.title }}
                             </Link>
-                            <span v-else class="text-slate-800 font-semibold">{{ item.title }}</span>
-                            <ChevronRight v-if="index < breadcrumbs.length - 1" class="w-4 h-4 text-slate-300" />
+                            <span v-else class="text-white font-semibold">{{ item.title }}</span>
+                            <ChevronRight v-if="index < breadcrumbs.length - 1" class="w-4 h-4 text-white/40" />
                         </template>
                     </div>
                 </div>
@@ -61,23 +61,24 @@ const formatRole = (role: string) => {
                 <!-- Right Side: Icons & Profile -->
                 <div class="flex items-center gap-4 sm:gap-6">
                     
-                    <div class="hidden sm:flex items-center gap-4 text-slate-400">
-                        <button class="hover:text-slate-600 transition"><Search class="w-5 h-5" /></button>
-                        <button class="hover:text-slate-600 transition relative">
+                    <div class="hidden sm:flex items-center gap-4 text-white/80">
+                        <button class="hover:text-white transition"><Search class="w-5 h-5" /></button>
+                        <button class="hover:text-white transition relative">
                             <Bell class="w-5 h-5" />
-                            <span class="absolute top-0 right-0 w-2 h-2 bg-emerald-500 rounded-full border border-white"></span>
+                            <!-- Notification dot adapted for dark theme -->
+                            <span class="absolute top-0 right-0 w-2 h-2 bg-rose-500 rounded-full border border-[#265f92]"></span>
                         </button>
-                        <button class="hover:text-slate-600 transition"><Grid class="w-5 h-5" /></button>
+                        <button class="hover:text-white transition"><Grid class="w-5 h-5" /></button>
                     </div>
 
-                    <div class="hidden sm:block h-6 w-px bg-slate-200"></div>
+                    <div class="hidden sm:block h-6 w-px bg-white/20"></div>
 
                     <!-- Profile Dropdown -->
                     <div class="relative">
-                        <!-- Trigger Icon -->
+                        <!-- Trigger Icon (Adapted for Custom Dark Theme) -->
                         <button 
                             @click="isProfileOpen = !isProfileOpen" 
-                            class="flex items-center justify-center h-9 w-9 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 shadow-sm focus:outline-none transition transform hover:scale-105"
+                            class="flex items-center justify-center h-9 w-9 rounded-full bg-white/5 border border-white/20 text-white/90 shadow-sm focus:outline-none transition transform hover:scale-105 hover:bg-white/15 hover:text-white"
                         >
                             <User class="w-4 h-4" />
                         </button>
@@ -92,6 +93,7 @@ const formatRole = (role: string) => {
                             leave-from-class="transform opacity-100 scale-100"
                             leave-to-class="transform opacity-0 scale-95"
                         >
+                            <!-- The dropdown keeps the original white background so it pops over the workspace -->
                             <div v-if="isProfileOpen" class="absolute right-0 mt-3 w-72 origin-top-right rounded-2xl bg-white shadow-[0_10px_40px_-10px_rgba(0,0,0,0.1)] border border-slate-100 z-50 overflow-hidden">
                                 
                                 <div class="flex items-center gap-3 p-4 border-b border-slate-100 bg-slate-50/50">
@@ -136,7 +138,6 @@ const formatRole = (role: string) => {
 
         <AppSidebar />
         
-        <!-- Added pt-16 to push the main content down below the fixed header -->
         <AppContent variant="sidebar" class="relative flex flex-col min-h-screen pt-16">
             <main class="flex-1 overflow-x-hidden bg-slate-50/50">
                 <slot />

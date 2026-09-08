@@ -3,7 +3,7 @@ import DeleteConfirmationModal from '@/components/DeleteConfirmationModal.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router, useForm } from '@inertiajs/vue3';
-import { Pencil, Plus, Search, Trash2, RotateCcw } from 'lucide-vue-next';
+import { Pencil, Plus, Search, Trash2, RotateCcw, X } from 'lucide-vue-next';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
 import { ref, watch } from 'vue';
@@ -126,7 +126,7 @@ const showDeleteModal = ref(false);
 const itemToDeleteUrl = ref('');
 const itemToDeleteName = ref('');
 
-// Form state (Added 'state' since controller requires it)
+// Form state
 const form = useForm({
     code: '',
     name: '',
@@ -194,8 +194,8 @@ function submitForm() {
     <Head title="Departments" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
-        <!-- Main Wrapper aligned with Dashboard theme -->
-        <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-50/50 min-h-screen">
+        <!-- Main Wrapper: Changed from bg-slate-50/50 to a solid bg-slate-100 for better contrast -->
+        <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-100 min-h-screen">
             
             <!-- Header & Actions Toolbar -->
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -212,7 +212,7 @@ function submitForm() {
                             v-model="searchTerm"
                             type="text"
                             placeholder="Search departments..."
-                            class="block w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-10 text-sm placeholder-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm"
+                            class="block w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-10 text-sm placeholder-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm"
                         />
                         <button
                             v-if="searchTerm"
@@ -234,63 +234,61 @@ function submitForm() {
                 </div>
             </div>
 
-            <!-- Table Card -->
-            <div class="bg-white rounded-2xl border border-slate-100 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)] overflow-hidden">
+            <!-- Table Card: Darkened border to border-slate-200 and increased shadow -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-left text-sm text-slate-700">
-                        <thead class="bg-slate-50/80 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+                        <!-- Header: Changed to solid bg-slate-100 and border-slate-200 -->
+                        <thead class="bg-slate-100 text-xs text-slate-600 uppercase tracking-wider border-b border-slate-200">
                             <tr>
-                                <th class="px-6 py-4 font-semibold">ID</th>
-                                <th class="px-6 py-4 font-semibold">Department Name</th>
-                                <th class="px-6 py-4 font-semibold">Routing Code</th>
-                                <th class="px-6 py-4 font-semibold">Status</th>
-                                <th class="px-6 py-4 text-center font-semibold">Actions</th>
+                                <th class="px-4 py-2.5 font-bold">ID</th>
+                                <th class="px-4 py-2.5 font-bold">Department Name</th>
+                                <th class="px-4 py-2.5 font-bold">Routing Code</th>
+                                <th class="px-4 py-2.5 font-bold">Status</th>
+                                <th class="px-4 py-2.5 text-center font-bold">Actions</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-slate-100">
-                            <!-- Notice the dynamic opacity class if state === 0 -->
-                            <tr v-for="department in departments.data" :key="department.id" class="transition-colors hover:bg-slate-50/50" :class="{'opacity-60 bg-slate-50/30': department.state === 0}">
-                                <td class="px-6 py-4 font-mono text-xs text-slate-500">{{ department.id }}</td>
-                                <td class="px-6 py-4 font-medium text-slate-800">{{ department.name }}</td>
-                                <td class="px-6 py-4">
-                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-md font-mono text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                        <!-- Body: Darkened row dividers to divide-slate-200 -->
+                        <tbody class="divide-y divide-slate-200">
+                            <!-- Rows: Changed hover to solid bg-slate-50 and adjusted inactive opacity for better reading -->
+                            <tr v-for="department in departments.data" :key="department.id" class="transition-colors hover:bg-slate-50" :class="{'opacity-75 bg-slate-50': department.state === 0}">
+                                <td class="px-4 py-2 font-mono text-sm text-slate-500">{{ department.id }}</td>
+                                <td class="px-4 py-2 font-medium text-slate-800">{{ department.name }}</td>
+                                <td class="px-4 py-2">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-sm font-medium bg-slate-100 text-slate-700 border border-slate-200">
                                         {{ department.code || 'N/A' }}
                                     </span>
                                 </td>
-                                <!-- New Status Column -->
-                                <td class="px-6 py-4">
-                                    <span v-if="department.state === 1" class="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                <td class="px-4 py-2">
+                                    <span v-if="department.state === 1" class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
                                         <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1.5"></span> Active
                                     </span>
-                                    <span v-else class="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                                    <span v-else class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
                                         <span class="w-1.5 h-1.5 bg-slate-400 rounded-full mr-1.5"></span> Inactive
                                     </span>
                                 </td>
-                                <td class="px-6 py-4">
-                                    <div class="flex justify-center gap-2">
-                                        <!-- Edit Button -->
+                                <td class="px-4 py-2">
+                                    <div class="flex justify-center gap-1.5">
                                         <button
-                                            class="rounded-lg bg-slate-50 p-2 text-slate-600 transition hover:bg-slate-100 border border-slate-200"
+                                            class="rounded-md bg-slate-50 p-1.5 text-slate-600 transition hover:bg-slate-100 border border-slate-200"
                                             @click="openEditDialog(department)"
                                             title="Edit"
                                         >
                                             <Pencil class="h-4 w-4" />
                                         </button>
                                         
-                                        <!-- Delete (Deactivate) Button -->
                                         <button
                                             v-if="department.state === 1"
-                                            class="rounded-lg bg-red-50 p-2 text-red-600 transition hover:bg-red-100 border border-red-100"
+                                            class="rounded-md bg-red-50 p-1.5 text-red-600 transition hover:bg-red-100 border border-red-100"
                                             @click="openDeleteModal(department)"
                                             title="Deactivate"
                                         >
                                             <Trash2 class="h-4 w-4" />
                                         </button>
 
-                                        <!-- Reactivate Button -->
                                         <button
                                             v-else
-                                            class="rounded-lg bg-blue-50 p-2 text-blue-600 transition hover:bg-blue-100 border border-blue-100"
+                                            class="rounded-md bg-blue-50 p-1.5 text-blue-600 transition hover:bg-blue-100 border border-blue-100"
                                             @click="reactivateDepartment(department)"
                                             title="Reactivate"
                                         >
@@ -303,13 +301,13 @@ function submitForm() {
                     </table>
 
                     <!-- Empty State -->
-                    <div v-if="departments.data.length === 0" class="py-16 text-center">
+                    <div v-if="departments.data.length === 0" class="py-12 text-center">
                         <div class="flex flex-col items-center">
-                            <div class="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                            <div class="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3 border border-slate-200">
                                 <Search class="h-6 w-6 text-slate-400" />
                             </div>
                             <h3 class="text-base font-semibold text-slate-900">No departments found</h3>
-                            <p class="mt-1 mb-6 text-sm text-slate-500 max-w-sm">
+                            <p class="mt-1 mb-5 text-sm text-slate-500 max-w-sm">
                                 {{ searchTerm ? 'We couldn’t find anything matching your search. Try adjusting your keywords.' : 'Get started by creating your first internal department routing location.' }}
                             </p>
                             <button
@@ -323,8 +321,8 @@ function submitForm() {
                     </div>
                 </div>
 
-                <!-- Pagination -->
-                <div v-if="departments.last_page > 1" class="flex items-center justify-between border-t border-slate-100 bg-slate-50/50 px-6 py-4">
+                <!-- Pagination: Solidified the background and border -->
+                <div v-if="departments.last_page > 1" class="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3">
                     <p class="text-sm text-slate-500">
                         Showing <span class="font-medium text-slate-700">{{ departments.from }}</span>
                         to <span class="font-medium text-slate-700">{{ departments.to }}</span> of
@@ -336,9 +334,9 @@ function submitForm() {
                             :key="index"
                             @click="goToPage(String(link.url))"
                             :disabled="!link.url"
-                            class="rounded-lg px-3.5 py-1.5 text-sm font-medium transition"
+                            class="rounded-lg px-3 py-1 text-sm font-medium transition border"
                             :class="[
-                                link.active ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50',
+                                link.active ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50',
                             ]"
                         >
                             {{ link.label }}
@@ -357,12 +355,22 @@ function submitForm() {
 
             <!-- Form Modal -->
             <Transition name="fade">
-                <div v-if="showDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-                    <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-slate-100">
-                        <h2 class="mb-6 text-lg font-bold text-slate-800 tracking-tight">
+                <div v-if="showDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
+                    <div class="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-slate-200">
+                        
+                        <button
+                            @click="showDialog = false"
+                            class="absolute top-4 right-4 rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                            title="Close"
+                        >
+                            <X class="h-5 w-5" />
+                        </button>
+
+                        <h2 class="mb-6 pr-8 text-lg font-bold text-slate-800 tracking-tight">
                             {{ isEdit ? 'Edit Department' : 'Create Department' }}
                         </h2>
-                        <form @submit.prevent="submitForm" class="space-y-5">
+                        
+                        <form @submit.prevent="submitForm" class="space-y-4">
                             <div>
                                 <label class="mb-1.5 block text-sm font-medium text-slate-700" for="name">Department Name</label>
                                 <input
@@ -373,7 +381,7 @@ function submitForm() {
                                     required
                                     placeholder="e.g. Office of the City Mayor"
                                 />
-                                <p v-if="form.errors.name" class="mt-1.5 text-xs text-red-500">{{ form.errors.name }}</p>
+                                <p v-if="form.errors.name" class="mt-1 text-xs text-red-500">{{ form.errors.name }}</p>
                             </div>
                             <div>
                                 <label class="mb-1.5 block text-sm font-medium text-slate-700" for="code">Routing Code</label>
@@ -385,11 +393,10 @@ function submitForm() {
                                     required
                                     placeholder="e.g. OCM"
                                 />
-                                <p v-if="form.errors.code" class="mt-1.5 text-xs text-red-500">{{ form.errors.code }}</p>
+                                <p v-if="form.errors.code" class="mt-1 text-xs text-red-500">{{ form.errors.code }}</p>
                             </div>
-                            <!-- State Hidden Input OR Checkbox can go here if you want to allow manual toggling on edit -->
                             
-                            <div class="pt-2 flex justify-end gap-3">
+                            <div class="pt-3 flex justify-end gap-3">
                                 <button
                                     type="button"
                                     class="rounded-xl bg-white border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
@@ -402,7 +409,7 @@ function submitForm() {
                                     class="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
                                     :disabled="form.processing"
                                 >
-                                    {{ form.processing ? 'Saving...' : isEdit ? 'Update Department' : 'Create Department' }}
+                                    {{ form.processing ? 'Saving...' : isEdit ? 'Update' : 'Create' }}
                                 </button>
                             </div>
                         </form>
