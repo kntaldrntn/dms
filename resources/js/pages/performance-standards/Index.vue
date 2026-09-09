@@ -88,7 +88,8 @@ function saveStandards() {
     <Head title="Performance Standards" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
-        <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-50/50 min-h-screen max-w-[105rem]">
+        <!-- Main Wrapper: Solid bg-slate-100 for better contrast -->
+        <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-100 min-h-screen max-w-[105rem]">
             
             <!-- Error Banner -->
             <div v-if="Object.keys(form.errors).length > 0" class="p-4 bg-red-50 text-red-600 rounded-xl border border-red-100 text-sm font-medium">
@@ -110,7 +111,7 @@ function saveStandards() {
                             v-model="searchTerm"
                             type="text"
                             placeholder="Search departments..."
-                            class="block w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-10 text-sm placeholder-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm"
+                            class="block w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-10 text-sm placeholder-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm"
                         />
                         <button
                             v-if="searchTerm"
@@ -133,26 +134,29 @@ function saveStandards() {
                 </div>
             </div>
 
-            <!-- Table Card -->
-            <div class="bg-white rounded-2xl border border-slate-100 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)] overflow-hidden">
+            <!-- Table Card: Solid border-slate-200 and explicit shadow -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div class="overflow-auto max-h-[calc(100vh-240px)] custom-scrollbar">
                     <table class="w-full text-left text-sm text-slate-700 relative border-collapse min-w-max">
-                        <thead class="bg-slate-50/80 text-[11px] text-slate-500 uppercase tracking-wider sticky top-0 z-20 shadow-sm backdrop-blur-sm border-b border-slate-100">
+                        <!-- Header: Removed translucency, applied solid bg-slate-100, updated padding -->
+                        <thead class="bg-slate-100 text-[11px] text-slate-600 uppercase tracking-wider sticky top-0 z-20 border-b border-slate-200">
                             <tr>
-                                <!-- Compacted Left Column Header -->
-                                <th class="px-4 py-3 font-semibold border-r border-slate-100 bg-slate-50/90 min-w-[220px] max-w-[280px] sticky left-0 z-30">
+                                <!-- Compacted Left Column Header (Solidified background) -->
+                                <th class="px-4 py-2.5 font-bold border-r border-slate-200 bg-slate-100 min-w-[220px] max-w-[280px] sticky left-0 z-30 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
                                     Department / Office
                                 </th>
                                 <!-- Compacted Dynamic Columns -->
-                                <th v-for="doc in documentTypes" :key="doc.id" class="px-2 py-3 font-semibold border-slate-100 text-center min-w-[70px]" :title="doc.document_code">
+                                <th v-for="doc in documentTypes" :key="doc.id" class="px-2 py-2.5 font-bold border-slate-200 text-center min-w-[70px]" :title="doc.document_code">
                                     {{ doc.document_code }}
                                 </th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-slate-100">
-                            <tr v-for="dept in filteredDepartments" :key="dept.id" class="transition-colors hover:bg-slate-50/50">
+                        <!-- Body: Darkened divider lines -->
+                        <tbody class="divide-y divide-slate-200">
+                            <!-- Rows: Solid hover background -->
+                            <tr v-for="dept in filteredDepartments" :key="dept.id" class="transition-colors hover:bg-slate-50">
                                 <!-- Compacted Left Column Data -->
-                                <td class="px-4 py-2 text-xs font-medium text-slate-800 border-r border-slate-100 bg-white sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.02)] truncate max-w-[280px]" :title="dept.name">
+                                <td class="px-4 py-2 text-xs font-medium text-slate-800 border-r border-slate-200 bg-white sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.02)] truncate max-w-[280px]" :title="dept.name">
                                     {{ dept.name }}
                                 </td>
                                 <!-- Compacted Inputs -->
@@ -170,13 +174,14 @@ function saveStandards() {
                     </table>
 
                     <!-- Empty State -->
-                    <div v-if="filteredDepartments.length === 0" class="py-16 text-center">
+                    <div v-if="filteredDepartments.length === 0" class="py-12 text-center">
                         <div class="flex flex-col items-center">
-                            <div class="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                            <!-- Outlined Icon Block to match the new standard -->
+                            <div class="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3 border border-slate-200">
                                 <Search class="h-6 w-6 text-slate-400" />
                             </div>
                             <h3 class="text-base font-semibold text-slate-900">No departments found</h3>
-                            <p class="mt-1 mb-6 text-sm text-slate-500 max-w-sm">
+                            <p class="mt-1 mb-5 text-sm text-slate-500 max-w-sm">
                                 {{ searchTerm ? 'We couldn’t find anything matching your search. Try adjusting your keywords.' : 'No departments are currently available to configure.' }}
                             </p>
                         </div>

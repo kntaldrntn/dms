@@ -334,7 +334,6 @@ class DocumentController extends Controller
 
         // 2. Loop through every selected office and create a parallel trail
         foreach ($validated['routed_to'] as $departmentId) {
-            
             DocumentTrail::create([
                 'document_id' => $document->id,
                 'department_id' => Auth::user()->department_id, // The office releasing it
@@ -347,7 +346,11 @@ class DocumentController extends Controller
             ]);
         }
 
-        // 3. Return back to the page so the Vue modal triggers onSuccess and closes
+        $document->update([
+            'department_id' => $validated['routed_to'][0],
+        ]);
+
+        // 4. Return back to the page so the Vue modal triggers onSuccess and closes
         return redirect()->back()->with('success', 'Document successfully routed to selected offices.');
     }
 }

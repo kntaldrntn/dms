@@ -24,7 +24,7 @@ class DocumentClassificationController extends Controller
         
         // Paginate with 10 items per page, ordered by ID
         $classifications = $query->orderBy('id', 'asc')
-                           ->paginate(10)
+                           ->paginate(14)
                            ->withQueryString();
         
         return Inertia::render('document-classifications/Index', [

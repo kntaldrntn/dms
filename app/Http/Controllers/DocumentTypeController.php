@@ -24,7 +24,7 @@ class DocumentTypeController extends Controller
         
         // Paginate with 10 items per page (adjust as needed)
         $documenttypes = $query->orderBy('id', 'asc')
-                           ->paginate(10)
+                           ->paginate(14)
                            ->withQueryString();
         
         return Inertia::render('document-types/Index', [
