@@ -12,6 +12,7 @@ return new class extends Migration {
             $table->string('name');
             $table->string('email')->unique();
             $table->enum('role', [
+                'approving_officer',
                 'system_administrator',
                 'records_manager',
                 'user'

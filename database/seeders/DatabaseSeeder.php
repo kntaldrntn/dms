@@ -112,6 +112,14 @@ class DatabaseSeeder extends Seeder
                 'state' => 1,
                 'password' => bcrypt('password'), // Default password for seeding
             ],
+            [
+                'name' => 'Approving Officer',
+                'email' => 'ao@gmail.com',
+                'role' => 'approving_officer',
+                'department_id' => null,
+                'state' => 1,
+                'password' => bcrypt('password'),
+            ],
         ];
 
         foreach ($users as $data) {
@@ -126,7 +134,6 @@ class DatabaseSeeder extends Seeder
         $deliveryMethods = [
 
             ['delivery_method_name' => 'Email', 'state' => 1],
-            ['delivery_method_name' => 'Fax', 'state' => 1],
             ['delivery_method_name' => 'Hand Carry', 'state' => 1],
             ['delivery_method_name' => 'Post Mail', 'state' => 1],
         ];

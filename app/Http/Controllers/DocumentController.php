@@ -15,7 +15,6 @@ use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Str;
 use OpenAI\Laravel\Facades\OpenAI;
-use Smalot\PdfParser\Parser;
 
 class DocumentController extends Controller
 {
@@ -33,16 +32,24 @@ class DocumentController extends Controller
             });
         }
 
-        $documents = $query->latest()->paginate(10)->withQueryString();
+        // Changed pagination to 6 to fit compactly on one screen without scrolling
+        $documents = $query->latest()->paginate(6)->withQueryString();
 
         return Inertia::render('documents/Index', [
-            'documents' => $documents,
+            // Table Data
+            'documents' => $documents, 
             'departments' => Department::where('state', 1)->get(),
             'filters' => $request->only(['search']),
             'flash' => [
                 'success' => session('success'),
                 'error' => session('error')
-            ]
+            ],
+            // Form Data
+            'transactionTypes' => TransactionType::where('state', 1)->get(),
+            'documentTypes' => DocumentType::where('state', 1)->get(),
+            'classifications' => DocumentClassification::where('state', 1)->get(),
+            'deliveryMethods' => DeliveryMethod::where('state', 1)->get(),
+            'generatedAccessCode' => strtoupper(Str::random(6)),
         ]);
     }
 
@@ -81,14 +88,17 @@ class DocumentController extends Controller
             'subject_matter' => 'required|string',
             'classification_id' => 'nullable|exists:document_classifications,id',
             'department_id' => 'nullable|exists:departments,id',
-            'linked_documents' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
             'access_code' => 'required|string|max:20',
             'ai_routing_suggestions' => 'nullable|array',
+            
+            // Separated text field for barcodes and actual file for upload
+            'linked_documents' => 'nullable|string',
+            'attached_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
         ]);
 
-        if ($request->hasFile('linked_documents')) {
-            $path = $request->file('linked_documents')->store('documents', 'public');
-            $validated['linked_documents'] = $path; 
+        if ($request->hasFile('attached_file')) {
+            $path = $request->file('attached_file')->store('documents', 'public');
+            $validated['attached_file'] = $path; 
         }
 
         $transactionType = TransactionType::findOrFail($validated['transaction_type_id']);
@@ -108,6 +118,7 @@ class DocumentController extends Controller
             'released_by' => Auth::id(),
             'released_at' => $now, 
             'released_to' => $validated['department_id'], 
+            'released_action' => null, 
         ]);
 
         return redirect()->route('documents.index')->with('success', 'Document registered successfully.');
@@ -163,21 +174,18 @@ class DocumentController extends Controller
             'department_id' => 'nullable|exists:departments,id',
             'access_code' => 'required|string|max:20',
             'ai_routing_suggestions' => 'nullable|array',
+            'linked_documents' => 'nullable|string',
         ];
 
-        if ($request->hasFile('linked_documents')) {
-            $rules['linked_documents'] = 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240';
-        } else {
-            $rules['linked_documents'] = 'nullable|string';
+        if ($request->hasFile('attached_file')) {
+            $rules['attached_file'] = 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240';
         }
 
         $validated = $request->validate($rules);
 
-        if ($request->hasFile('linked_documents')) {
-            $path = $request->file('linked_documents')->store('documents', 'public');
-            $validated['linked_documents'] = $path;
-        } elseif (!array_key_exists('linked_documents', $validated)) {
-            $validated['linked_documents'] = $document->linked_documents;
+        if ($request->hasFile('attached_file')) {
+            $path = $request->file('attached_file')->store('documents', 'public');
+            $validated['attached_file'] = $path;
         }
 
         if ($document->transaction_type_id != $validated['transaction_type_id']) {
@@ -292,20 +300,16 @@ class DocumentController extends Controller
 
             $result = json_decode($response->choices[0]->message->content, true);
             
-            // --- NEW: BARCODE ZERO-PADDING FIX ---
             if (!empty($result['barcode']) && is_string($result['barcode'])) {
-                // Remove any accidental spaces or dashes the AI included
                 $cleanBarcode = preg_replace('/[-\s]/', '', $result['barcode']);
                 
-                // If it matches exactly 1 Letter followed by ANY amount of numbers
                 if (preg_match('/^([A-Z])([0-9]+)$/i', $cleanBarcode, $matches)) {
                     $letter = strtoupper($matches[1]);
-                    // Force the number portion to be exactly 9 digits by adding leading zeros
+
                     $digits = str_pad($matches[2], 9, '0', STR_PAD_LEFT);
                     $result['barcode'] = $letter . $digits;
                 }
             }
-            // -------------------------------------
 
             if (isset($response->usage)) {
                 $result['meta'] = [
@@ -324,7 +328,6 @@ class DocumentController extends Controller
 
     public function routeDocument(Request $request, Document $document)
     {
-        // 1. Validate that we received an array of offices
         $validated = $request->validate([
             'routed_to' => 'required|array|min:1',
             'routed_to.*' => 'exists:departments,id',
@@ -332,17 +335,24 @@ class DocumentController extends Controller
 
         $now = Carbon::now('Asia/Manila');
 
-        // 2. Loop through every selected office and create a parallel trail
+        $arrivalTrail = DocumentTrail::where('document_id', $document->id)
+            ->where('released_to', Auth::user()->department_id)
+            ->latest()
+            ->first();
+
+        $receivedAt = $arrivalTrail ? ($arrivalTrail->released_at ?? $arrivalTrail->created_at) : $document->created_at;
+
         foreach ($validated['routed_to'] as $departmentId) {
             DocumentTrail::create([
                 'document_id' => $document->id,
-                'department_id' => Auth::user()->department_id, // The office releasing it
+                'department_id' => Auth::user()->department_id, 
                 'received_by' => Auth::id(),
-                'received_at' => $now,
-                'received_action' => 'Routed via Fast Forward distribution',
+                'received_at' => $receivedAt, 
+                'received_action' => 'Receive Document', 
                 'released_by' => Auth::id(),
-                'released_at' => $now,
-                'released_to' => $departmentId, // The target execution office
+                'released_at' => $now,        
+                'released_to' => $departmentId, 
+                'released_action' => 'Routed via Fast Forward distribution',
             ]);
         }
 
@@ -350,7 +360,24 @@ class DocumentController extends Controller
             'department_id' => $validated['routed_to'][0],
         ]);
 
-        // 4. Return back to the page so the Vue modal triggers onSuccess and closes
         return redirect()->back()->with('success', 'Document successfully routed to selected offices.');
+    }
+
+    // --- SMART SEARCH API ---
+    public function searchBarcodes(Request $request)
+    {
+        $query = $request->get('q');
+        
+        // Prevent unnecessary queries for very short strings
+        if (!$query || strlen($query) < 2) {
+            return response()->json([]);
+        }
+
+        $results = Document::where('barcode', 'LIKE', "%{$query}%")
+                           ->select('barcode', 'subject_matter')
+                           ->take(5) // Limit to top 5 results for speed
+                           ->get();
+                           
+        return response()->json($results);
     }
 }

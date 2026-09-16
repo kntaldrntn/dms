@@ -6,6 +6,7 @@ use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DocumentTypeController;
 use App\Http\Controllers\TransactionTypeController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\DocumentClassificationController;
 use App\Http\Controllers\Settings\PerformanceStandardController;
 use Illuminate\Support\Facades\Route;
@@ -23,15 +24,22 @@ Route::get('dashboard', function () {
 // CORE DOCUMENT ROUTES
 Route::middleware(['auth', 'verified'])->group(function () {
     
-    // 1. PROCESSING ROUTES (Must go FIRST so /create is caught before /{document})
+    // 1. PROCESSING & API ROUTES (Must go FIRST so wildcards don't catch them)
     Route::middleware(['working_hours'])->group(function () {
-        Route::get('documents/create', [DocumentController::class, 'create'])->name('documents.create');
+        
+        // NEW: Smart Barcode Search API
+        Route::get('documents/search-barcodes', [DocumentController::class, 'searchBarcodes'])->name('documents.searchBarcodes');
+        
         Route::post('documents', [DocumentController::class, 'store'])->name('documents.store');
         Route::post('documents/analyze', [DocumentController::class, 'analyze'])->name('documents.analyze');
         Route::get('documents/{document}/edit', [DocumentController::class, 'edit'])->name('documents.edit');
         Route::put('documents/{document}', [DocumentController::class, 'update'])->name('documents.update');
         Route::delete('documents/{document}', [DocumentController::class, 'destroy'])->name('documents.destroy');
         Route::post('/documents/{document}/route', [DocumentController::class, 'routeDocument'])->name('documents.route');
+        
+        Route::get('/transactions/inbox', [TransactionController::class, 'index'])->name('transactions.inbox');
+        Route::post('/transactions/{document}/process', [TransactionController::class, 'process'])->name('transactions.process');
+
     });
 
     // 2. READ-ONLY ROUTES (Must go LAST)

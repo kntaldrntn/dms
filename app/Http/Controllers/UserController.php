@@ -59,7 +59,7 @@ class UserController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|lowercase|email|max:255|unique:' . User::class,
-            'role' => ['required', Rule::in(['system_administrator', 'records_manager', 'user'])],
+            'role' => ['required', Rule::in(['approving_officer', 'system_administrator', 'records_manager', 'user'])],
             'sex' => ['nullable', Rule::in(['Male', 'Female'])],
             'state' => ['required', 'in:0,1'], // Replaced status
             'department_id' => 'nullable|exists:departments,id',
@@ -85,7 +85,7 @@ class UserController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|max:255|unique:users,email,' . $user->id,
-            'role' => ['required', Rule::in(['system_administrator', 'records_manager', 'user'])],
+            'role' => ['required', Rule::in(['approving_officer', 'system_administrator', 'records_manager', 'user'])],
             'sex' => ['nullable', Rule::in(['Male', 'Female'])],
             'state' => ['required', 'in:0,1'],
             'department_id' => 'nullable|exists:departments,id',

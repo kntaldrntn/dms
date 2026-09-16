@@ -19,6 +19,7 @@ import {
     Users,
     Building2,
     Clock,
+    Inbox,
 } from 'lucide-vue-next';
 
 const page = usePage();
@@ -40,6 +41,12 @@ const mainNavItems = computed<NavItem[]>(() => {
             title: 'Document',
             href: route('documents.index'),
             icon: FilePlus,
+            roles: ['system_administrator', 'records_manager', 'user'],
+        },
+        {
+            title: 'Transactions',
+            href: route('transactions.inbox'),
+            icon: Inbox,
             roles: ['system_administrator', 'records_manager', 'user'],
         },
         {
