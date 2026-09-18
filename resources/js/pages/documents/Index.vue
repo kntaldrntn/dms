@@ -149,6 +149,7 @@ const handleFileUpload = async (event: Event) => {
     routingSuggestions.value = []; 
     analysisError.value = '';
     aiMetrics.value = null;
+    form.clearErrors(); // Clear validation errors if they start AI scan
 
     const payload = new FormData();
     payload.append('file', file);
@@ -208,7 +209,6 @@ const handleFileUpload = async (event: Event) => {
         if (data.transaction_type_id) form.transaction_type_id = data.transaction_type_id;
         if (data.classification_id) form.classification_id = data.classification_id;
         
-        // 1. Handle Executive Approval (Mayor=31 / Admin=3)
         if (data.department_id === 3 || data.department_id === 31) {
             form.department_id = data.department_id;
             executiveSuggestion.value = {
@@ -216,12 +216,10 @@ const handleFileUpload = async (event: Event) => {
                 reason: data.approval_reason || 'Identified as requiring executive approval.'
             };
         } else {
-            // Nullable for other departments
             form.department_id = ''; 
             executiveSuggestion.value = null;
         }
         
-        // 2. Silently queue the executing departments
         if (data.routing_suggestions && Array.isArray(data.routing_suggestions)) {
             routingSuggestions.value = data.routing_suggestions;
             if (typeof (form as any).ai_routing_suggestions !== 'undefined') {
@@ -254,6 +252,10 @@ function submitDocument() {
             routingSuggestions.value = [];
             analysisError.value = '';
         },
+        onError: (errors) => {
+            // Trigger Notyf if validation fails!
+            notyf.error('Please check the highlighted fields.');
+        }
     });
 }
 </script>
@@ -294,21 +296,31 @@ function submitDocument() {
                         <div class="grid grid-cols-3 gap-3">
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Barcode</label>
-                                <input v-model="form.barcode" type="text" maxlength="10" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" required />
+                                <input v-model="form.barcode" type="text" maxlength="10" 
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.barcode ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'" 
+                                />
+                                <p v-if="form.errors.barcode" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.barcode }}</p>
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Transaction Type</label>
-                                <select v-model="form.transaction_type_id" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" required>
+                                <select v-model="form.transaction_type_id" 
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.transaction_type_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
                                     <option value="" disabled>Select</option>
                                     <option v-for="type in transactionTypes" :key="type.id" :value="type.id">{{ type.name }}</option>
                                 </select>
+                                <p v-if="form.errors.transaction_type_id" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Document Type</label>
-                                <select v-model="form.document_type_id" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" required>
+                                <select v-model="form.document_type_id" 
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.document_type_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
                                     <option value="" disabled>Select</option>
                                     <option v-for="type in documentTypes" :key="type.id" :value="type.id">{{ type.document_type }}</option>
                                 </select>
+                                <p v-if="form.errors.document_type_id" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
                             </div>
                         </div>
 
@@ -316,42 +328,58 @@ function submitDocument() {
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Source Type</label>
-                                <select v-model="form.source_type" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm">
+                                <select v-model="form.source_type" 
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.source_type ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
                                     <option value="External">External</option>
                                     <option value="Internal">Internal</option>
                                 </select>
+                                <p v-if="form.errors.source_type" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.source_type }}</p>
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Source Location</label>
                                 <input v-if="form.source_type === 'External'" v-model="form.source_location" type="text" disabled class="w-full rounded-xl border border-slate-200 px-3 py-2 bg-slate-100 text-sm text-slate-500 cursor-not-allowed shadow-sm" />
-                                <select v-else v-model="form.source_location" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" required>
+                                <select v-else v-model="form.source_location" 
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.source_location ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
                                     <option value="" disabled>Select Department</option>
                                     <option v-for="dept in departments" :key="dept.id" :value="dept.id">{{ dept.name }}</option>
                                 </select>
+                                <p v-if="form.errors.source_location && form.source_type === 'Internal'" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
                             </div>
                         </div>
 
                         <!-- Row 3 -->
                         <div>
                             <label class="block text-xs font-medium text-slate-700 mb-1">Document Classification</label>
-                            <select v-model="form.classification_id" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm">
+                            <select v-model="form.classification_id" 
+                                class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                :class="form.errors.classification_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
                                 <option value="" disabled>Select Classification</option>
                                 <option v-for="classif in classifications" :key="classif.id" :value="classif.id">{{ classif.name }}</option>
                             </select>
+                            <p v-if="form.errors.classification_id" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.classification_id }}</p>
                         </div>
 
                         <!-- Row 4 -->
                         <div class="grid grid-cols-3 gap-3">
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Delivery Method</label>
-                                <select v-model="form.delivery_method_id" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm">
+                                <select v-model="form.delivery_method_id" 
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.delivery_method_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
                                     <option value="" disabled>Select</option>
                                     <option v-for="method in deliveryMethods" :key="method.id" :value="method.id">{{ method.delivery_method_name }}</option>
                                 </select>
+                                <p v-if="form.errors.delivery_method_id" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.delivery_method_id }}</p>
                             </div>
                             <div class="col-span-2">
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Source Name</label>
-                                <input v-model="form.source_name" type="text" placeholder="Name/Company/Agency" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" required />
+                                <input v-model="form.source_name" type="text" placeholder="Name/Company/Agency" 
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.source_name ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'" 
+                                />
+                                <p v-if="form.errors.source_name" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
                             </div>
                         </div>
 
@@ -359,26 +387,40 @@ function submitDocument() {
                         <div class="grid grid-cols-3 gap-3">
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Gender</label>
-                                <select v-model="form.gender" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm">
+                                <select v-model="form.gender" 
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.gender ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
                                     <option value="" disabled>Select</option>
                                     <option value="Male">Male</option>
                                     <option value="Female">Female</option>
                                 </select>
+                                <p v-if="form.errors.gender" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.gender }}</p>
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Contact No.</label>
-                                <input v-model="form.contact_no" type="text" placeholder="Optional" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" />
+                                <input v-model="form.contact_no" type="text" placeholder="Optional" 
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.contact_no ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'" 
+                                />
+                                <p v-if="form.errors.contact_no" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.contact_no }}</p>
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Email</label>
-                                <input v-model="form.email" type="email" placeholder="Optional" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" />
+                                <input v-model="form.email" type="email" placeholder="Optional" 
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.email ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'" 
+                                />
+                                <p v-if="form.errors.email" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.email }}</p>
                             </div>
                         </div>
 
                         <!-- Row 6 -->
                         <div>
                             <label class="block text-xs font-medium text-slate-700 mb-1">Subject Matter</label>
-                            <textarea v-model="form.subject_matter" rows="2" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" required></textarea>
+                            <textarea v-model="form.subject_matter" rows="2" 
+                                class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                :class="form.errors.subject_matter ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'"></textarea>
+                            <p v-if="form.errors.subject_matter" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
                         </div>
 
                         <!-- Row 7: Smart Barcode Search -->
@@ -393,9 +435,12 @@ function submitDocument() {
                                     type="text" 
                                     autocomplete="off"
                                     placeholder="Type barcode to search, separate multiple with space" 
-                                    class="w-full rounded-xl border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" 
+                                    class="w-full rounded-xl border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm transition-colors"
+                                    :class="{'border-red-500 focus:border-red-500 focus:ring-red-500': form.errors.linked_documents}" 
                                 />
                             </div>
+                            <p v-if="form.errors.linked_documents" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.linked_documents }}</p>
+                            
                             <div v-if="showBarcodeDropdown" class="absolute z-10 mt-1 w-full bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
                                 <ul class="max-h-48 overflow-y-auto py-1">
                                     <li v-for="res in barcodeResults" :key="res.barcode" @click="selectBarcode(res.barcode)" class="px-4 py-2 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors">
@@ -426,8 +471,12 @@ function submitDocument() {
                             <!-- State 2: No file attached (Manual Entry Mode) -->
                             <div v-else class="relative flex items-center">
                                 <FileUp class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                                <input type="file" accept=".pdf,.jpg,.jpeg,.png" @change="(e: any) => form.attached_file = e.target.files[0]" class="w-full rounded-xl border border-slate-300 py-1.5 pl-9 pr-3 text-sm bg-white shadow-sm file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200" />
+                                <input type="file" accept=".pdf,.jpg,.jpeg,.png" @change="(e: any) => form.attached_file = e.target.files[0]" 
+                                    class="w-full rounded-xl border py-1.5 pl-9 pr-3 text-sm bg-white shadow-sm file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 transition-colors"
+                                    :class="form.errors.attached_file ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300'"
+                                />
                             </div>
+                            <p v-if="form.errors.attached_file" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.attached_file }}</p>
                         </div>
 
                         <hr class="border-slate-100 my-1" />
@@ -438,7 +487,9 @@ function submitDocument() {
                                 Code: <span class="font-bold text-slate-800 ml-1">{{ form.access_code }}</span>
                             </div>
                             <div class="flex items-center gap-3">
-                                <select v-model="form.department_id" class="rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm">
+                                <select v-model="form.department_id" 
+                                    class="rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.department_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
                                     <option value="">Direct To (Optional)</option>
                                     <option :value="3">City Administrator</option>
                                     <option :value="31">City Mayor</option>

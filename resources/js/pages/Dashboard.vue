@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head } from '@inertiajs/vue3';
+import { Head, router } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -11,88 +11,32 @@ const breadcrumbs: BreadcrumbItem[] = [
     },
 ];
 
-defineProps<{
-    name?: string;
+// Receive the live data from our new DashboardController
+const props = defineProps<{
+    selectedMonth: string;
+    months: string[];
+    summaryCards: Array<any>;
+    delinquent: any;
+    pipeline: Array<any>;
+    processingTimes: Array<any>;
 }>();
 
-// TODO: replace with real prop/controller data
-const selectedMonth = ref('August');
+const currentMonth = ref(props.selectedMonth);
 
-const summaryCards = [
-    { label: 'Monthly Documents', value: '1,517', badge: 'Total', badgeColor: 'emerald' },
-    { label: 'External Clients', value: '646', suffix: 'Served' },
-    { label: 'Internal Clients', value: '871', suffix: 'Served' },
-];
-
-const delinquent = {
-    value: 46,
-    label: 'Transactions',
-    todo: 1,
-    dueTomorrow: 0,
-};
-
-// Status pipeline broken down by complexity, matching the legacy system's On-Time / On-Going / Delayed cards
-const pipeline = [
-    {
-        title: 'On-Time',
-        subtitle: 'Documents',
-        status: 'Healthy',
-        statusColor: 'emerald',
-        rows: [
-            { label: 'Simple', value: 383 },
-            { label: 'Complex', value: 43 },
-            { label: 'Highly Technical', value: 0 },
-        ],
-    },
-    {
-        title: 'On-Going',
-        subtitle: 'Documents',
-        status: 'In Progress',
-        statusColor: 'blue',
-        rows: [
-            { label: 'Simple', value: 637 },
-            { label: 'Complex', value: 173 },
-            { label: 'Highly Technical', value: 1 },
-        ],
-    },
-    {
-        title: 'Delayed',
-        subtitle: 'Documents',
-        status: 'Attention',
-        statusColor: 'orange',
-        rows: [
-            { label: 'Simple', value: 278 },
-            { label: 'Complex', value: 2 },
-            { label: 'Highly Technical', value: 0 },
-        ],
-    },
-];
+// Refetches data from the controller when they click generate
+function generateReport() {
+    router.get(route('dashboard'), { month: currentMonth.value }, { preserveState: true });
+}
 
 // Static class strings (not interpolated) so Tailwind's JIT scanner can detect them
-const toneClass = {
+const toneClass: Record<string, string> = {
     'emerald-600': 'bg-emerald-600',
     'emerald-500': 'bg-emerald-500',
     'emerald-400': 'bg-emerald-400',
     'emerald-300': 'bg-emerald-300',
     'emerald-200': 'bg-emerald-200',
     'slate-200': 'bg-slate-200',
-} as const;
-
-// Average processing time per real document type
-const processingTimes = [
-    { label: 'AIR/RIS', value: 8.71, width: 100, tone: 'emerald-600' },
-    { label: 'Purchase Order', value: 5.03, width: 58, tone: 'emerald-500' },
-    { label: 'IPW', value: 5.3, width: 61, tone: 'emerald-500' },
-    { label: 'Payroll', value: 4.71, width: 54, tone: 'emerald-400' },
-    { label: 'Voucher', value: 4.66, width: 54, tone: 'emerald-400' },
-    { label: 'Obligation Request', value: 4.24, width: 49, tone: 'emerald-400' },
-    { label: 'Project Proposal', value: 4.07, width: 47, tone: 'emerald-300' },
-    { label: 'Purchase Request', value: 3.75, width: 43, tone: 'emerald-300' },
-    { label: 'BAC Resolution', value: 2.61, width: 30, tone: 'emerald-300' },
-    { label: 'Permits', value: 2.16, width: 25, tone: 'emerald-200' },
-    { label: 'Communication', value: 1.71, width: 20, tone: 'emerald-200' },
-    { label: 'Abstract of Canvass', value: 1.42, width: 16, tone: 'emerald-200' },
-] as const;
+};
 </script>
 
 <template>
@@ -100,6 +44,7 @@ const processingTimes = [
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex w-full min-h-screen flex-col gap-6 bg-slate-50/50 p-6">
+            
             <!-- Header & Filters -->
             <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                 <div>
@@ -108,11 +53,15 @@ const processingTimes = [
                 </div>
                 <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
                     <span class="pl-3 text-sm font-medium text-slate-500">Dashboard Report:</span>
-                    <select v-model="selectedMonth" class="cursor-pointer rounded-lg border-none bg-slate-50 py-1.5 pl-3 pr-8 text-sm font-semibold focus:ring-0">
-                        <option>August</option>
-                        <option>September</option>
+                    
+                    <!-- Dynamic Month Dropdown -->
+                    <select v-model="currentMonth" class="cursor-pointer rounded-lg border-none bg-slate-50 py-1.5 pl-3 pr-8 text-sm font-semibold focus:ring-0">
+                        <option v-for="month in months" :key="month" :value="month">{{ month }}</option>
                     </select>
-                    <button class="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-slate-800">Generate</button>
+                    
+                    <button @click="generateReport" :disabled="currentMonth === selectedMonth" class="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50">
+                        Generate
+                    </button>
                 </div>
             </div>
 
@@ -133,10 +82,10 @@ const processingTimes = [
                     </div>
                 </div>
 
-                <!-- Delinquent / Alerts -->
+                <!-- Delinquent / Alerts (Specific to Auth User's Department) -->
                 <div class="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)]">
                     <div class="flex items-start justify-between">
-                        <span class="text-sm font-semibold text-slate-500">Delinquent</span>
+                        <span class="text-sm font-semibold text-slate-500">Delinquent (My Dept)</span>
                         <span class="rounded-md bg-red-50 px-2 py-1 text-xs font-bold text-red-600">Action Req</span>
                     </div>
                     <div class="mt-4 flex items-end justify-between">
@@ -206,22 +155,27 @@ const processingTimes = [
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         </div>
-                        <h3 class="text-lg font-bold text-slate-800">Average Processing Times</h3>
+                        <h3 class="text-lg font-bold text-slate-800">Average Processing Times (Completed)</h3>
                     </div>
-                    <span class="cursor-pointer text-xs font-medium text-slate-400 hover:text-slate-600">View full report &rarr;</span>
+                    <Link :href="route('documents.index')" class="cursor-pointer text-xs font-medium text-slate-400 hover:text-slate-600 transition">View Full Registry &rarr;</Link>
                 </div>
 
-                <div class="grid grid-cols-2 gap-x-6 gap-y-8 md:grid-cols-4 lg:grid-cols-6">
+                <div v-if="processingTimes.length > 0" class="grid grid-cols-2 gap-x-6 gap-y-8 md:grid-cols-4 lg:grid-cols-6">
                     <div v-for="item in processingTimes" :key="item.label">
-                        <span class="mb-1 block truncate text-xs font-semibold uppercase tracking-wider text-slate-400">{{ item.label }}</span>
+                        <span class="mb-1 block truncate text-xs font-semibold uppercase tracking-wider text-slate-400" :title="item.label">{{ item.label }}</span>
                         <div class="flex items-baseline gap-1">
-                            <span class="text-2xl font-bold text-slate-800">{{ item.value.toFixed(2) }}</span>
+                            <span class="text-2xl font-bold text-slate-800">{{ item.value }}</span>
                             <span class="text-xs text-slate-400">days</span>
                         </div>
                         <div class="mt-2 h-1.5 w-full rounded-full bg-slate-100">
-                            <div class="h-1.5 rounded-full" :class="toneClass[item.tone]" :style="`width: ${item.width}%`"></div>
+                            <div class="h-1.5 rounded-full transition-all duration-1000" :class="toneClass[item.tone]" :style="`width: ${item.width}%`"></div>
                         </div>
                     </div>
+                </div>
+                
+                <div v-else class="text-center py-10">
+                    <p class="text-sm font-semibold text-slate-600">No documents completed in {{ selectedMonth }}.</p>
+                    <p class="text-xs text-slate-400 mt-1">Check back once files finish their routing life cycle.</p>
                 </div>
             </div>
         </div>

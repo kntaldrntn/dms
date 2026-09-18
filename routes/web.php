@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DeliveryMethodController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\DocumentController;
@@ -45,6 +46,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // 2. READ-ONLY ROUTES (Must go LAST)
     Route::get('documents', [DocumentController::class, 'index'])->name('documents.index');
     Route::get('documents/{document}', [DocumentController::class, 'show'])->name('documents.show');
+
+    // 3. DASHBOARD
+    Route::get('dashboard', DashboardController::class)->name('dashboard');
 });
 
 

@@ -70,68 +70,75 @@ const getTransitDuration = (trail: any, index: number) => {
     <Head :title="`Document - ${document.barcode}`" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
-        <div class="p-6 w-full mx-auto bg-slate-50/50 min-h-screen flex flex-col gap-6">
+        <!-- Changed to a solid, slightly darker background for better contrast -->
+        <div class="p-6 w-full mx-auto bg-slate-100 min-h-screen flex flex-col gap-6">
             
             <!-- Action Bar -->
             <div class="flex items-center justify-between">
-                <Link :href="route('documents.index')" class="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-emerald-600 transition">
-                    <ArrowLeft class="w-4 h-4" /> Back to List
+                <Link :href="route('documents.index')" class="flex items-center gap-2 text-base font-bold text-slate-800 hover:text-[#1e4e79] transition">
+                    <ArrowLeft class="w-5 h-5" /> Back to List
                 </Link>
-                <button class="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium shadow-sm hover:bg-slate-50 transition">
-                    <Printer class="w-4 h-4" /> Print Routing Slip
+                <button class="flex items-center gap-2 bg-white border-2 border-slate-300 text-slate-800 px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm hover:bg-slate-50 transition">
+                    <Printer class="w-5 h-5" /> Print Routing Slip
                 </button>
             </div>
 
             <!-- Top Section: Document Details (3 Columns) -->
-            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-                <h2 class="text-lg font-bold text-slate-800 border-b border-slate-100 pb-4 mb-4">Document Details</h2>
+            <!-- Darkened border and increased shadow for clear visibility -->
+            <div class="bg-white rounded-2xl border-2 border-slate-200 shadow-md p-6">
+                <h2 class="text-xl font-extrabold text-slate-900 border-b-2 border-slate-200 pb-4 mb-5">Document Details</h2>
                 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                     <!-- Column 1 -->
-                    <div class="flex flex-col gap-3 text-sm">
-                        <div class="grid grid-cols-3 gap-2"><span class="font-semibold text-slate-700">Barcode:</span> <span class="col-span-2 text-emerald-600 font-bold">{{ document.barcode }}</span></div>
-                        <div class="grid grid-cols-3 gap-2"><span class="font-semibold text-slate-700">Access Code:</span> <span class="col-span-2 text-slate-600">{{ document.access_code }}</span></div>
-                        <div class="grid grid-cols-3 gap-2"><span class="font-semibold text-slate-700">Date Start:</span> <span class="col-span-2 text-slate-600">{{ formatDate(document.created_at) }}</span></div>
-                        <div class="grid grid-cols-3 gap-2"><span class="font-semibold text-slate-700">Date End:</span> <span class="col-span-2 text-slate-600">{{ formatDate(document.due_date) }}</span></div>
-                        <div class="grid grid-cols-3 gap-2"><span class="font-semibold text-slate-700">Transaction Type:</span> <span class="col-span-2 text-slate-600">{{ document.transaction_type?.name }}</span></div>
-                        <div class="grid grid-cols-3 gap-2"><span class="font-semibold text-slate-700">Document Type:</span> <span class="col-span-2 text-slate-600">{{ document.document_type?.document_type }}</span></div>
-                        <div class="grid grid-cols-3 gap-2"><span class="font-semibold text-slate-700">Delivery Method:</span> <span class="col-span-2 text-slate-600">{{ document.delivery_method?.delivery_method_name }}</span></div>
-                        <div class="grid grid-cols-3 gap-2"><span class="font-semibold text-slate-700">Source Type:</span> <span class="col-span-2 text-slate-600">{{ document.source_type }}</span></div>
+                    <!-- Increased text base sizes and darkened colors -->
+                    <div class="flex flex-col gap-4 text-sm">
+                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Barcode:</span> <span class="col-span-2 text-[#1e4e79] font-extrabold text-base tracking-wide">{{ document.barcode }}</span></div>
+                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Access Code:</span> <span class="col-span-2 text-slate-900 font-medium">{{ document.access_code }}</span></div>
+                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Date Start:</span> <span class="col-span-2 text-slate-900 font-medium">{{ formatDate(document.created_at) }}</span></div>
+                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Date End:</span> <span class="col-span-2 text-slate-900 font-medium">{{ formatDate(document.due_date) }}</span></div>
+                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Trans. Type:</span> <span class="col-span-2 text-slate-900 font-medium">{{ document.transaction_type?.name }}</span></div>
+                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Doc. Type:</span> <span class="col-span-2 text-slate-900 font-medium">{{ document.document_type?.document_type }}</span></div>
+                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Delivery:</span> <span class="col-span-2 text-slate-900 font-medium">{{ document.delivery_method?.delivery_method_name }}</span></div>
+                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Source Type:</span> <span class="col-span-2 text-slate-900 font-medium">{{ document.source_type }}</span></div>
                     </div>
 
                     <!-- Column 2 -->
-                    <div class="flex flex-col gap-3 text-sm">
+                    <div class="flex flex-col gap-4 text-sm">
                         <div class="flex flex-col gap-1">
-                            <span class="font-semibold text-slate-700">Source:</span>
-                            <span class="text-slate-600">{{ document.source_name }} <span v-if="document.gender">- {{ document.gender }}</span></span>
-                            <span class="text-slate-500 text-xs">{{ document.source_location }}</span>
+                            <span class="font-bold text-slate-800">Source:</span>
+                            <span class="text-slate-900 font-medium">{{ document.source_name }} <span v-if="document.gender">- {{ document.gender }}</span></span>
+                            <span class="text-slate-700 font-medium text-sm">{{ document.source_location }}</span>
                         </div>
                         <div class="flex flex-col gap-1 mt-2">
-                            <span class="font-semibold text-slate-700">Subject Matter:</span>
-                            <span class="text-slate-600 leading-relaxed">{{ document.subject_matter }}</span>
+                            <span class="font-bold text-slate-800">Subject Matter:</span>
+                            <span class="text-slate-900 font-medium leading-relaxed">{{ document.subject_matter }}</span>
                         </div>
                     </div>
 
                     <!-- Column 3 -->
-                    <div class="flex flex-col gap-3 text-sm">
+                    <div class="flex flex-col gap-4 text-sm">
                         <div class="flex flex-col gap-1">
-                            <span class="font-semibold text-slate-700">Document/s Linked:</span>
-                            <span class="text-slate-600">{{ document.linked_documents || 'N/A' }}</span>
+                            <span class="font-bold text-slate-800">Linked Barcodes:</span>
+                            <span class="text-slate-900 font-medium">{{ document.linked_documents || 'None' }}</span>
                         </div>
                         <div class="flex flex-col gap-1 mt-2">
-                            <span class="font-semibold text-slate-700">Attachments:</span>
-                            <span class="text-slate-600">N/A</span>
+                            <span class="font-bold text-slate-800">Attached File:</span>
+                            <a v-if="document.attached_file" :href="`/storage/${document.attached_file}`" target="_blank" class="text-[#1e4e79] font-bold underline hover:text-blue-800 transition">
+                                View Scanned Document
+                            </a>
+                            <span v-else class="text-slate-900 font-medium">None</span>
                         </div>
                     </div>
                 </div>
             </div>
 
             <!-- Bottom Section: Document Routing Trail Table -->
-            <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div class="bg-white rounded-2xl border-2 border-slate-200 shadow-md overflow-hidden">
                 <div class="overflow-x-auto">
-                    <table class="w-full text-center text-xs text-slate-700 border-collapse min-w-max">
+                    <!-- Increased base text size to text-sm -->
+                    <table class="w-full text-center text-sm text-slate-800 border-collapse min-w-max">
                         <!-- Complex Header Grouping -->
-                        <thead class="bg-[#1e4e79] text-white font-medium tracking-wide">
+                        <thead class="bg-[#1e4e79] text-white font-bold tracking-wide">
                             <tr>
                                 <th colspan="4" class="px-4 py-3 border-r border-[#153a5b]">RECEIVED</th>
                                 <th colspan="4" class="px-4 py-3 border-r border-[#153a5b]">RELEASED</th>
@@ -140,64 +147,65 @@ const getTransitDuration = (trail: any, index: number) => {
                                 <th rowspan="2" class="px-4 py-3 align-middle w-10"></th>
                             </tr>
                             <tr class="bg-[#245b8c] text-blue-50">
-                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-medium">Office</th>
-                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-medium">By</th>
-                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-medium">Date/Time</th>
-                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-medium">Action</th>
+                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">Office</th>
+                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">By</th>
+                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">Date/Time</th>
+                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">Action</th>
                                 
-                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-medium">By</th>
-                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-medium">Date/Time</th>
-                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-medium">Action</th>
-                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-medium">Released To</th>
+                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">By</th>
+                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">Date/Time</th>
+                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">Action</th>
+                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">Released To</th>
                                 
-                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-medium">Office</th>
-                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-medium">Transit</th>
+                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">Office</th>
+                                <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">Transit</th>
                             </tr>
                         </thead>
                         
-                        <tbody class="divide-y divide-slate-200 text-slate-600">
+                        <tbody class="divide-y-2 divide-slate-200 text-slate-800">
                             <!-- Render the dynamic trails from the database -->
                             <tr v-for="(trail, index) in trails" :key="trail.id" class="hover:bg-slate-50 transition-colors">
                                 <!-- Received -->
-                                <td class="px-3 py-3 border-r border-slate-200 font-semibold">{{ trail.office?.name || 'N/A' }}</td>
-                                <td class="px-3 py-3 border-r border-slate-200">{{ trail.receiver?.name || 'System' }}</td>
-                                <td class="px-3 py-3 border-r border-slate-200 whitespace-nowrap">
+                                <td class="px-3 py-4 border-r border-slate-200 font-bold text-slate-900">{{ trail.office?.name || 'N/A' }}</td>
+                                <td class="px-3 py-4 border-r border-slate-200 font-medium">{{ trail.receiver?.name || 'System' }}</td>
+                                <td class="px-3 py-4 border-r border-slate-200 whitespace-nowrap">
                                     <div class="flex flex-col">
-                                        <span>{{ formatDate(trail.received_at).split(' ')[0] + ' ' + formatDate(trail.received_at).split(' ')[1] + ' ' + formatDate(trail.received_at).split(' ')[2] }}</span>
-                                        <span class="text-[10px] text-slate-400">{{ formatDate(trail.received_at).split(' ')[3] + ' ' + formatDate(trail.received_at).split(' ')[4] }}</span>
+                                        <span class="font-bold text-slate-900">{{ formatDate(trail.received_at).split(' ')[0] + ' ' + formatDate(trail.received_at).split(' ')[1] + ' ' + formatDate(trail.received_at).split(' ')[2] }}</span>
+                                        <!-- Adjusted sub-text size and weight for readability -->
+                                        <span class="text-xs font-semibold text-slate-600 mt-0.5">{{ formatDate(trail.received_at).split(' ')[3] + ' ' + formatDate(trail.received_at).split(' ')[4] }}</span>
                                     </div>
                                 </td>
-                                <td class="px-3 py-3 border-r border-slate-200">{{ trail.received_action || '-' }}</td>
+                                <td class="px-3 py-4 border-r border-slate-200 font-medium">{{ trail.received_action || '-' }}</td>
                                 
                                 <!-- Released -->
-                                <td class="px-3 py-3 border-r border-slate-200">{{ trail.releaser?.name || '-' }}</td>
-                                <td class="px-3 py-3 border-r border-slate-200 whitespace-nowrap">
+                                <td class="px-3 py-4 border-r border-slate-200 font-medium">{{ trail.releaser?.name || '-' }}</td>
+                                <td class="px-3 py-4 border-r border-slate-200 whitespace-nowrap">
                                     <div v-if="trail.released_at" class="flex flex-col">
-                                        <span>{{ formatDate(trail.released_at).split(' ')[0] + ' ' + formatDate(trail.released_at).split(' ')[1] + ' ' + formatDate(trail.released_at).split(' ')[2] }}</span>
-                                        <span class="text-[10px] text-slate-400">{{ formatDate(trail.released_at).split(' ')[3] + ' ' + formatDate(trail.released_at).split(' ')[4] }}</span>
+                                        <span class="font-bold text-slate-900">{{ formatDate(trail.released_at).split(' ')[0] + ' ' + formatDate(trail.released_at).split(' ')[1] + ' ' + formatDate(trail.released_at).split(' ')[2] }}</span>
+                                        <span class="text-xs font-semibold text-slate-600 mt-0.5">{{ formatDate(trail.released_at).split(' ')[3] + ' ' + formatDate(trail.released_at).split(' ')[4] }}</span>
                                     </div>
-                                    <span v-else>-</span>
+                                    <span v-else class="font-bold text-slate-400">-</span>
                                 </td>
-                                <td class="px-3 py-3 border-r border-slate-200">{{ trail.released_action || '-' }}</td>
-                                <td class="px-3 py-3 border-r border-slate-200 font-semibold">{{ trail.released_to_office?.name || '-' }}</td>
+                                <td class="px-3 py-4 border-r border-slate-200 font-medium">{{ trail.released_action || '-' }}</td>
+                                <td class="px-3 py-4 border-r border-slate-200 font-bold text-slate-900">{{ trail.released_to_office?.name || '-' }}</td>
                                 
                                 <!-- Duration -->
-                                <td class="px-3 py-3 border-r border-slate-200">{{ getOfficeDuration(trail) }}</td>
-                                <td class="px-3 py-3 border-r border-slate-200">{{ getTransitDuration(trail, index) }}</td>
+                                <td class="px-3 py-4 border-r border-slate-200 font-bold text-[#1e4e79]">{{ getOfficeDuration(trail) }}</td>
+                                <td class="px-3 py-4 border-r border-slate-200 font-medium text-slate-600">{{ getTransitDuration(trail, index) }}</td>
                                 
                                 <!-- Remarks -->
-                                <td class="px-3 py-3 border-r border-slate-200 text-left max-w-xs truncate" :title="trail.remarks">
+                                <td class="px-3 py-4 border-r border-slate-200 text-left font-medium max-w-xs" :title="trail.remarks">
                                     {{ trail.remarks || '-' }}
                                 </td>
                                 
-                                <!-- Action Button (e.g., Update/Edit Trail) -->
-                                <td class="px-3 py-3 text-center text-slate-400 hover:text-[#1e4e79] cursor-pointer transition">
-                                    <RotateCcw class="w-4 h-4 mx-auto" />
+                                <!-- Action Button -->
+                                <td class="px-3 py-4 text-center text-slate-600 hover:text-[#1e4e79] cursor-pointer transition">
+                                    <RotateCcw class="w-5 h-5 mx-auto" stroke-width="2.5" />
                                 </td>
                             </tr>
                             
                             <tr v-if="!trails || trails.length === 0">
-                                <td colspan="12" class="px-4 py-12 text-center text-slate-500">No routing history available for this document.</td>
+                                <td colspan="12" class="px-4 py-12 text-center text-base font-bold text-slate-500">No routing history available for this document.</td>
                             </tr>
                         </tbody>
                     </table>
