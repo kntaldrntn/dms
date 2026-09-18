@@ -96,6 +96,12 @@ const form = useForm({
     access_code: props.generatedAccessCode,
 });
 
+// Helper for UI display
+const getDepartmentName = (id: number) => {
+    const dept = props.departments.find(d => d.id === id);
+    return dept ? dept.name : 'Unknown Office';
+};
+
 // --- SMART BARCODE SEARCH ---
 const showBarcodeDropdown = ref(false);
 const barcodeResults = ref<Array<{ barcode: string, subject_matter: string }>>([]);
@@ -130,9 +136,16 @@ const selectBarcode = (barcode: string) => {
 // --- AI LOGIC ---
 const isAnalyzing = ref(false);
 const analysisError = ref('');
-const routingSuggestions = ref<Array<{ department_id: number, reason: string }>>([]);
-const aiMetrics = ref<{ tokens: number, confidence: number } | null>(null);
+const routingSuggestions = ref<Array<{ department_id: number, priority: string, reason: string }>>([]);
 const executiveSuggestion = ref<{ route: string, reason: string } | null>(null);
+
+// NEW: Expanded AI Metrics interface to hold all the token data
+const aiMetrics = ref<{ 
+    total_tokens: number, 
+    prompt_tokens: number, 
+    completion_tokens: number, 
+    confidence: number 
+} | null>(null);
 
 watch(() => form.source_type, (newType) => {
     if (newType === 'External') form.source_location = 'N/A';
@@ -147,9 +160,10 @@ const handleFileUpload = async (event: Event) => {
     form.attached_file = file; 
     isAnalyzing.value = true;
     routingSuggestions.value = []; 
+    executiveSuggestion.value = null;
     analysisError.value = '';
     aiMetrics.value = null;
-    form.clearErrors(); // Clear validation errors if they start AI scan
+    form.clearErrors(); 
 
     const payload = new FormData();
     payload.append('file', file);
@@ -209,10 +223,11 @@ const handleFileUpload = async (event: Event) => {
         if (data.transaction_type_id) form.transaction_type_id = data.transaction_type_id;
         if (data.classification_id) form.classification_id = data.classification_id;
         
+        // Ensure UI catches the AI's logic
         if (data.department_id === 3 || data.department_id === 31) {
             form.department_id = data.department_id;
             executiveSuggestion.value = {
-                route: data.department_id === 31 ? 'Office of the City Mayor' : 'Office of the City Administrator',
+                route: data.department_id === 31 ? 'City Mayor' : 'City Administrator',
                 reason: data.approval_reason || 'Identified as requiring executive approval.'
             };
         } else {
@@ -222,14 +237,15 @@ const handleFileUpload = async (event: Event) => {
         
         if (data.routing_suggestions && Array.isArray(data.routing_suggestions)) {
             routingSuggestions.value = data.routing_suggestions;
-            if (typeof (form as any).ai_routing_suggestions !== 'undefined') {
-                (form as any).ai_routing_suggestions = data.routing_suggestions; 
-            }
+            form.ai_routing_suggestions = data.routing_suggestions; 
         }
-        
+
+        // NEW: Map all token data to the debug state
         if (data.meta) {
             aiMetrics.value = {
-                tokens: data.meta.total_tokens,
+                total_tokens: data.meta.total_tokens,
+                prompt_tokens: data.meta.prompt_tokens,
+                completion_tokens: data.meta.completion_tokens,
                 confidence: data.confidence_score || 0
             };
         }
@@ -250,10 +266,11 @@ function submitDocument() {
             form.reset();
             form.access_code = Math.random().toString(36).substring(2, 8).toUpperCase();
             routingSuggestions.value = [];
+            executiveSuggestion.value = null;
+            aiMetrics.value = null;
             analysisError.value = '';
         },
         onError: (errors) => {
-            // Trigger Notyf if validation fails!
             notyf.error('Please check the highlighted fields.');
         }
     });
@@ -479,7 +496,45 @@ function submitDocument() {
                             <p v-if="form.errors.attached_file" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.attached_file }}</p>
                         </div>
 
-                        <hr class="border-slate-100 my-1" />
+                        <!-- AI Routing Suggestions UI -->
+                        <div v-if="executiveSuggestion || routingSuggestions.length > 0" class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mt-1 flex flex-col gap-2">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-700 flex items-center gap-1.5">
+                                <Sparkles class="w-3 h-3" /> AI Routing Analysis
+                            </span>
+                            
+                            <div v-if="executiveSuggestion" class="bg-white/60 rounded-lg p-2 border border-indigo-50">
+                                <p class="text-[11px] text-indigo-900 font-bold">Executive Routing: {{ executiveSuggestion.route }}</p>
+                                <p class="text-[10px] text-indigo-700 mt-0.5 leading-tight">{{ executiveSuggestion.reason }}</p>
+                            </div>
+
+                            <div v-if="routingSuggestions.length > 0" class="flex flex-col gap-1.5">
+                                <div v-for="(sug, idx) in routingSuggestions" :key="idx" class="bg-white/60 rounded-lg p-2 border border-indigo-50 flex flex-col">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-[11px] font-bold text-indigo-900">{{ getDepartmentName(sug.department_id) }}</span>
+                                        <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm"
+                                              :class="sug.priority === 'Primary' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'">
+                                            {{ sug.priority }}
+                                        </span>
+                                    </div>
+                                    <p class="text-[10px] text-indigo-700 mt-0.5 leading-tight">{{ sug.reason }}</p>
+                                </div>
+                                <p class="text-[9px] text-indigo-500 font-medium italic mt-1">* Suggestions attached to document for dispatcher reference.</p>
+                            </div>
+                        </div>
+
+                        <!-- ========================================== -->
+                        <!-- TEMPORARY AI METRICS DISPLAY (Comment out to hide) -->
+                        <!-- ========================================== -->
+                        <div v-if="aiMetrics" class="bg-slate-800 text-slate-200 border border-slate-700 rounded-xl p-3 flex flex-wrap items-center gap-4 text-[11px] font-mono shadow-inner mb-4 mt-2 mx-1">
+                            <div class="text-emerald-400 font-bold">🛠️ DEBUG METRICS:</div>
+                            <div>Accuracy: <span :class="aiMetrics.confidence > 80 ? 'text-emerald-400' : 'text-amber-400'" class="font-bold">{{ aiMetrics.confidence }}%</span></div>
+                            <div>Total: <span class="text-white">{{ aiMetrics.total_tokens }}</span></div>
+                            <div>Prompt: <span class="text-white">{{ aiMetrics.prompt_tokens }}</span></div>
+                            <div>Completion: <span class="text-white">{{ aiMetrics.completion_tokens }}</span></div>
+                        </div>
+                        <!-- ========================================== -->
+
+                        <hr class="border-slate-100 mt-1" />
 
                         <!-- Footer -->
                         <div class="flex items-center justify-between">

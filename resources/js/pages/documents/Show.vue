@@ -6,7 +6,7 @@ import { Printer, ArrowLeft, RotateCcw } from 'lucide-vue-next';
 
 const props = defineProps<{
     document: any;
-    trails: any[]; // The routing history array from the controller
+    trails: any[]; 
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -16,28 +16,44 @@ const breadcrumbs: BreadcrumbItem[] = [
 
 // --- HELPER FUNCTIONS ---
 
-// Formats date to: "Sep. 02, 2026 10:58 AM"
-const formatDate = (dateString: string) => {
-    if (!dateString) return '-';
+// Smart Date Formatter - Returns an object to prevent template string splitting errors
+const formatDateTime = (dateString: string) => {
+    if (!dateString) return { date: '-', time: '' };
     
-    // Strip the 'Z' (UTC marker) to prevent JS from double-adding GMT+8
-    const rawLocalString = dateString.replace('Z', '');
+    // 1. Replace space with 'T' (Fixes Safari/iOS "Invalid Date" bug)
+    // 2. Strip 'Z' (Prevents browser from aggressively double-adding GMT+8)
+    const safeString = dateString.replace(' ', 'T').replace('Z', '');
     
-    const date = new Date(rawLocalString);
+    const date = new Date(safeString);
     
-    return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) + 
-           ' ' + 
-           date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    if (isNaN(date.getTime())) return { date: 'Invalid Date', time: '' };
+    
+    return {
+        date: date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
+        time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    };
+};
+
+// Simple string return for the top details panel
+const formatDateStr = (dateString: string) => {
+    const parsed = formatDateTime(dateString);
+    if (parsed.date === '-') return '-';
+    return `${parsed.date} ${parsed.time}`;
 };
 
 // Calculates duration dynamically (seconds, minutes, hours, or days)
 const calculateDuration = (startStr: string, endStr: string) => {
     if (!startStr || !endStr) return '-';
     
-    const start = new Date(startStr).getTime();
-    const end = new Date(endStr).getTime();
+    // Apply the same safety sanitation to duration calculations!
+    const safeStart = startStr.replace(' ', 'T').replace('Z', '');
+    const safeEnd = endStr.replace(' ', 'T').replace('Z', '');
+    
+    const start = new Date(safeStart).getTime();
+    const end = new Date(safeEnd).getTime();
     const diffMs = end - start;
     
+    if (isNaN(diffMs)) return '-';
     if (diffMs <= 0) return '0.00 sec.';
     
     const diffSec = diffMs / 1000;
@@ -70,7 +86,6 @@ const getTransitDuration = (trail: any, index: number) => {
     <Head :title="`Document - ${document.barcode}`" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
-        <!-- Changed to a solid, slightly darker background for better contrast -->
         <div class="p-6 w-full mx-auto bg-slate-100 min-h-screen flex flex-col gap-6">
             
             <!-- Action Bar -->
@@ -78,24 +93,19 @@ const getTransitDuration = (trail: any, index: number) => {
                 <Link :href="route('documents.index')" class="flex items-center gap-2 text-base font-bold text-slate-800 hover:text-[#1e4e79] transition">
                     <ArrowLeft class="w-5 h-5" /> Back to List
                 </Link>
-                <button class="flex items-center gap-2 bg-white border-2 border-slate-300 text-slate-800 px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm hover:bg-slate-50 transition">
-                    <Printer class="w-5 h-5" /> Print Routing Slip
-                </button>
             </div>
 
             <!-- Top Section: Document Details (3 Columns) -->
-            <!-- Darkened border and increased shadow for clear visibility -->
             <div class="bg-white rounded-2xl border-2 border-slate-200 shadow-md p-6">
                 <h2 class="text-xl font-extrabold text-slate-900 border-b-2 border-slate-200 pb-4 mb-5">Document Details</h2>
                 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                     <!-- Column 1 -->
-                    <!-- Increased text base sizes and darkened colors -->
                     <div class="flex flex-col gap-4 text-sm">
                         <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Barcode:</span> <span class="col-span-2 text-[#1e4e79] font-extrabold text-base tracking-wide">{{ document.barcode }}</span></div>
                         <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Access Code:</span> <span class="col-span-2 text-slate-900 font-medium">{{ document.access_code }}</span></div>
-                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Date Start:</span> <span class="col-span-2 text-slate-900 font-medium">{{ formatDate(document.created_at) }}</span></div>
-                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Date End:</span> <span class="col-span-2 text-slate-900 font-medium">{{ formatDate(document.due_date) }}</span></div>
+                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Date Start:</span> <span class="col-span-2 text-slate-900 font-medium">{{ formatDateStr(document.created_at) }}</span></div>
+                        <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Date End:</span> <span class="col-span-2 text-slate-900 font-medium">{{ formatDateStr(document.due_date) }}</span></div>
                         <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Trans. Type:</span> <span class="col-span-2 text-slate-900 font-medium">{{ document.transaction_type?.name }}</span></div>
                         <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Doc. Type:</span> <span class="col-span-2 text-slate-900 font-medium">{{ document.document_type?.document_type }}</span></div>
                         <div class="grid grid-cols-3 gap-2"><span class="font-bold text-slate-800">Delivery:</span> <span class="col-span-2 text-slate-900 font-medium">{{ document.delivery_method?.delivery_method_name }}</span></div>
@@ -135,16 +145,14 @@ const getTransitDuration = (trail: any, index: number) => {
             <!-- Bottom Section: Document Routing Trail Table -->
             <div class="bg-white rounded-2xl border-2 border-slate-200 shadow-md overflow-hidden">
                 <div class="overflow-x-auto">
-                    <!-- Increased base text size to text-sm -->
                     <table class="w-full text-center text-sm text-slate-800 border-collapse min-w-max">
-                        <!-- Complex Header Grouping -->
                         <thead class="bg-[#1e4e79] text-white font-bold tracking-wide">
                             <tr>
                                 <th colspan="4" class="px-4 py-3 border-r border-[#153a5b]">RECEIVED</th>
                                 <th colspan="4" class="px-4 py-3 border-r border-[#153a5b]">RELEASED</th>
                                 <th colspan="2" class="px-4 py-3 border-r border-[#153a5b]">DURATION</th>
                                 <th rowspan="2" class="px-4 py-3 border-r border-[#153a5b] align-middle">REMARKS</th>
-                                <th rowspan="2" class="px-4 py-3 align-middle w-10"></th>
+                                <!-- <th rowspan="2" class="px-4 py-3 align-middle w-10"></th> -->
                             </tr>
                             <tr class="bg-[#245b8c] text-blue-50">
                                 <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">Office</th>
@@ -163,16 +171,15 @@ const getTransitDuration = (trail: any, index: number) => {
                         </thead>
                         
                         <tbody class="divide-y-2 divide-slate-200 text-slate-800">
-                            <!-- Render the dynamic trails from the database -->
                             <tr v-for="(trail, index) in trails" :key="trail.id" class="hover:bg-slate-50 transition-colors">
                                 <!-- Received -->
                                 <td class="px-3 py-4 border-r border-slate-200 font-bold text-slate-900">{{ trail.office?.name || 'N/A' }}</td>
                                 <td class="px-3 py-4 border-r border-slate-200 font-medium">{{ trail.receiver?.name || 'System' }}</td>
                                 <td class="px-3 py-4 border-r border-slate-200 whitespace-nowrap">
                                     <div class="flex flex-col">
-                                        <span class="font-bold text-slate-900">{{ formatDate(trail.received_at).split(' ')[0] + ' ' + formatDate(trail.received_at).split(' ')[1] + ' ' + formatDate(trail.received_at).split(' ')[2] }}</span>
-                                        <!-- Adjusted sub-text size and weight for readability -->
-                                        <span class="text-xs font-semibold text-slate-600 mt-0.5">{{ formatDate(trail.received_at).split(' ')[3] + ' ' + formatDate(trail.received_at).split(' ')[4] }}</span>
+                                        <!-- Used the cleanly mapped object keys here! -->
+                                        <span class="font-bold text-slate-900">{{ formatDateTime(trail.received_at).date }}</span>
+                                        <span class="text-xs font-semibold text-slate-600 mt-0.5">{{ formatDateTime(trail.received_at).time }}</span>
                                     </div>
                                 </td>
                                 <td class="px-3 py-4 border-r border-slate-200 font-medium">{{ trail.received_action || '-' }}</td>
@@ -181,8 +188,8 @@ const getTransitDuration = (trail: any, index: number) => {
                                 <td class="px-3 py-4 border-r border-slate-200 font-medium">{{ trail.releaser?.name || '-' }}</td>
                                 <td class="px-3 py-4 border-r border-slate-200 whitespace-nowrap">
                                     <div v-if="trail.released_at" class="flex flex-col">
-                                        <span class="font-bold text-slate-900">{{ formatDate(trail.released_at).split(' ')[0] + ' ' + formatDate(trail.released_at).split(' ')[1] + ' ' + formatDate(trail.released_at).split(' ')[2] }}</span>
-                                        <span class="text-xs font-semibold text-slate-600 mt-0.5">{{ formatDate(trail.released_at).split(' ')[3] + ' ' + formatDate(trail.released_at).split(' ')[4] }}</span>
+                                        <span class="font-bold text-slate-900">{{ formatDateTime(trail.released_at).date }}</span>
+                                        <span class="text-xs font-semibold text-slate-600 mt-0.5">{{ formatDateTime(trail.released_at).time }}</span>
                                     </div>
                                     <span v-else class="font-bold text-slate-400">-</span>
                                 </td>
@@ -198,10 +205,10 @@ const getTransitDuration = (trail: any, index: number) => {
                                     {{ trail.remarks || '-' }}
                                 </td>
                                 
-                                <!-- Action Button -->
+                                <!-- Action Button
                                 <td class="px-3 py-4 text-center text-slate-600 hover:text-[#1e4e79] cursor-pointer transition">
                                     <RotateCcw class="w-5 h-5 mx-auto" stroke-width="2.5" />
-                                </td>
+                                </td> -->
                             </tr>
                             
                             <tr v-if="!trails || trails.length === 0">
