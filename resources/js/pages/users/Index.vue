@@ -133,16 +133,18 @@ const showHistoryModal = ref(false);
 const historyUser = ref<any>(null);
 const activeHistoryTab = ref<'logins' | 'audit'>('logins');
 
-// Form state
+// Form state - updated for signature upload & method spoofing
 const form = useForm({
     name: '',
     email: '',
-    role: 'user',
+    role: 'staff', // Default to staff
     sex: '',
     department_id: '' as number | string,
     state: 1,
+    signature: null as File | null,
     password: '',
     password_confirmation: '',
+    _method: 'post', // Workaround for file uploads
 });
 
 function openAddDialog() {
@@ -151,7 +153,9 @@ function openAddDialog() {
     form.reset();
     form.clearErrors();
     form.state = 1;
-    form.role = 'user';
+    form.role = 'staff';
+    form.signature = null;
+    form._method = 'post'; 
     showDialog.value = true;
 }
 
@@ -165,8 +169,10 @@ function openEditDialog(user: any) {
     form.sex = user.sex || '';
     form.department_id = user.department_id || '';
     form.state = user.state;
-    form.password = ''; // Leave blank for edit unless they want to change it
+    form.signature = null; // Don't pre-fill file inputs for security
+    form.password = ''; 
     form.password_confirmation = '';
+    form._method = 'put'; // Spoof PUT request for file upload processing
     showDialog.value = true;
 }
 
@@ -195,7 +201,8 @@ function reactivateUser(user: any) {
 
 function submitForm() {
     if (isEdit.value && editingId.value !== null) {
-        form.put(route('users.update', editingId.value), {
+        // We use .post() even for editing because of the _method spoofing required for files
+        form.post(route('users.update', editingId.value), {
             onSuccess: () => {
                 showDialog.value = false;
                 form.reset();
@@ -447,7 +454,10 @@ const formatRelativeTime = (dateString: string) => {
                                 <div>
                                     <label class="mb-1.5 block text-sm font-medium text-slate-700" for="role">System Role</label>
                                     <select v-model="form.role" id="role" class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" required>
-                                        <option value="user">User</option>
+                                        <option value="staff">Department Staff</option>
+                                        <option value="department_head">Department Head</option>
+                                        <option value="city_administrator">City Administrator</option>
+                                        <option value="city_mayor">City Mayor</option>
                                         <option value="records_manager">Records Manager</option>
                                         <option value="system_administrator">System Administrator</option>
                                     </select>
@@ -475,6 +485,22 @@ const formatRelativeTime = (dateString: string) => {
                                         <option value="Female">Female</option>
                                     </select>
                                     <p v-if="form.errors.sex" class="mt-1 text-xs text-red-500">{{ form.errors.sex }}</p>
+                                </div>
+                                
+                                <!-- NEW: Signature Upload -->
+                                <div class="col-span-1 md:col-span-2">
+                                    <label class="mb-1.5 block text-sm font-medium text-slate-700" for="signature">
+                                        Digital Signature (Optional)
+                                        <span class="text-xs text-slate-400 font-normal ml-1">For Approving Officers</span>
+                                    </label>
+                                    <input 
+                                        @change="e => form.signature = (e.target as HTMLInputElement).files?.[0] || null"
+                                        id="signature" 
+                                        type="file" 
+                                        accept="image/png, image/jpeg, image/jpg"
+                                        class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100" 
+                                    />
+                                    <p v-if="form.errors.signature" class="mt-1 text-xs text-red-500">{{ form.errors.signature }}</p>
                                 </div>
                             </div>
 

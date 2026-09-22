@@ -23,6 +23,7 @@ class User extends Authenticatable
         'email',
         'role',
         'sex',            // Added: Exists in your migration
+        'signature_path',
         'password',
         'state',         // Added: Exists in your migration
         'department_id',

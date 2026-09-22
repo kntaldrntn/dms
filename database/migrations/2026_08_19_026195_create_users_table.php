@@ -23,6 +23,7 @@ return new class extends Migration {
             ])->default('staff');
 
             $table->enum('sex', ['Male', 'Female'])->nullable();
+            $table->string('signature_path')->nullable();
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
             $table->foreignId('department_id')->nullable()->constrained('departments');

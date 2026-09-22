@@ -13,16 +13,28 @@ return new class extends Migration
             $table->string('barcode', 50)->unique();
             $table->string('access_code', 20);
             
+            // --- NEW: Workflow & Assignment Tracking ---
+            $table->foreignId('current_assignee_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->enum('requires_signature_from', [
+                'department_head', 
+                'city_administrator', 
+                'city_mayor',
+                'none'
+            ])->default('none');
+            
             // Foreign Keys for Registries
             $table->foreignId('transaction_type_id')->nullable()->constrained('transaction_types');
             $table->foreignId('document_type_id')->nullable()->constrained('document_types');
             $table->foreignId('classification_id')->nullable()->constrained('document_classifications');
             $table->foreignId('delivery_method_id')->nullable()->constrained('delivery_methods');
-            $table->foreignId('department_id')->nullable()->constrained('departments'); // Direct To
+            $table->foreignId('department_id')->nullable()->constrained('departments'); 
+            
+            // AI Data
+            $table->json('ai_routing_suggestions')->nullable();
             
             // Source Info
             $table->string('source_type', 50)->default('External');
-            $table->string('source_location')->nullable(); // Can hold 'N/A' or a department ID string
+            $table->string('source_location')->nullable(); 
             $table->string('source_name');
             
             // Optional Client Info
@@ -32,10 +44,14 @@ return new class extends Migration
             
             // Content
             $table->text('subject_matter');
-            $table->string('linked_documents')->nullable(); // Space-separated barcodes
+            $table->string('linked_documents')->nullable(); 
+            $table->string('attached_file')->nullable();
             
-            // System Status (0 = Deleted/Archived, 1 = Active/Pending)
+            // System & Lifecycle Status
             $table->integer('state')->default(1);
+            $table->string('status')->default('Pending');
+            $table->timestamp('due_date')->nullable();
+            $table->timestamp('completed_at')->nullable();
             $table->timestamps();
         });
     }

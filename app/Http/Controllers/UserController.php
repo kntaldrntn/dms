@@ -6,6 +6,7 @@ use App\Models\Department;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage; // Added for file handling
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules;
 use Inertia\Inertia;
@@ -35,7 +36,6 @@ class UserController extends Controller
 
         $users = $query->orderBy('id', 'desc')->paginate(10)->withQueryString();
 
-        // Check the cache for each user in the paginated results
         $users->getCollection()->transform(function ($user) {
             $user->is_online = Cache::has('user-is-online-' . $user->id);
             return $user;
@@ -59,20 +59,27 @@ class UserController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|lowercase|email|max:255|unique:' . User::class,
-            'role' => ['required', Rule::in(['approving_officer', 'system_administrator', 'records_manager', 'user'])],
+            'role' => ['required', Rule::in(['staff', 'department_head', 'city_administrator', 'city_mayor', 'records_manager', 'system_administrator'])],
             'sex' => ['nullable', Rule::in(['Male', 'Female'])],
-            'state' => ['required', 'in:0,1'], // Replaced status
+            'state' => ['required', 'in:0,1'],
             'department_id' => 'nullable|exists:departments,id',
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
+            'signature' => ['nullable', 'image', 'mimes:png,jpg,jpeg', 'max:2048'], // 2MB max limit
         ]);
+
+        $signaturePath = null;
+        if ($request->hasFile('signature')) {
+            $signaturePath = $request->file('signature')->store('signatures', 'public');
+        }
 
         User::create([
             'name' => $validated['name'],
             'email' => $validated['email'],
             'role' => $validated['role'],
             'sex' => $validated['sex'] ?? null,
-            'state' => $validated['state'] ?? 1, // Default to 1 (Active)
+            'state' => $validated['state'] ?? 1,
             'department_id' => $validated['department_id'],
+            'signature_path' => $signaturePath, // Save the path to DB
             'password' => Hash::make($validated['password']),
             'email_verified_at' => now(),
         ]);
@@ -85,10 +92,11 @@ class UserController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|max:255|unique:users,email,' . $user->id,
-            'role' => ['required', Rule::in(['approving_officer', 'system_administrator', 'records_manager', 'user'])],
+            'role' => ['required', Rule::in(['staff', 'department_head', 'city_administrator', 'city_mayor', 'records_manager', 'system_administrator'])],
             'sex' => ['nullable', Rule::in(['Male', 'Female'])],
             'state' => ['required', 'in:0,1'],
             'department_id' => 'nullable|exists:departments,id',
+            'signature' => ['nullable', 'image', 'mimes:png,jpg,jpeg', 'max:2048'],
         ]);
 
         if ($request->filled('password')) {
@@ -100,28 +108,31 @@ class UserController extends Controller
 
         $user->fill($validated);
 
-        // --- AUDIT TRAIL LOGIC: Full Snapshot ---
+        // Handle signature upload and replace old file if it exists
+        if ($request->hasFile('signature')) {
+            if ($user->signature_path && Storage::disk('public')->exists($user->signature_path)) {
+                Storage::disk('public')->delete($user->signature_path);
+            }
+            $user->signature_path = $request->file('signature')->store('signatures', 'public');
+        }
+
+        // --- AUDIT TRAIL LOGIC ---
         $dirty = $user->getDirty(); 
         
         if (!empty($dirty)) {
             unset($dirty['updated_at']);
 
             if (!empty($dirty)) {
-                // 1. Grab the COMPLETE old and new states
                 $oldValues = $user->getOriginal();
                 $newValues = $user->getAttributes();
 
-                // 2. Strip out sensitive/noisy fields from the logs
-                    // In UserController @update
                 $hiddenFields = ['password', 'remember_token', 'updated_at', 'created_at', 'email_verified_at'];
                 foreach ($hiddenFields as $field) {
                     unset($oldValues[$field], $newValues[$field]);
                 }
 
-                // 3. Save the user
                 $user->save();
 
-                // 4. Create the full-context audit log
                 \App\Models\AuditLog::create([
                     'actor_id' => auth()->id(),
                     'model_type' => User::class,
@@ -142,12 +153,10 @@ class UserController extends Controller
 
     public function destroy(User $user)
     {
-        // Prevent the user from deactivating themselves accidentally
         if (auth()->id() === $user->id) {
             return redirect()->back()->with('error', 'You cannot deactivate your own account.');
         }
 
-        // Update the state to 0 (Inactive) instead of $user->delete();
         $user->update(['state' => 0]);
 
         return redirect()->back()->with('success', 'User deactivated successfully.');
