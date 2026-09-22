@@ -102,7 +102,7 @@ class DatabaseSeeder extends Seeder
                 'role' => 'system_administrator',
                 'department_id' => null,
                 'state' => 1,
-                'password' => bcrypt('password'), // Default password for seeding
+                'password' => bcrypt('password'), 
             ],
             [
                 'name' => 'Records Manager',
@@ -110,13 +110,39 @@ class DatabaseSeeder extends Seeder
                 'role' => 'records_manager',
                 'department_id' => null,
                 'state' => 1,
-                'password' => bcrypt('password'), // Default password for seeding
+                'password' => bcrypt('password'), 
+            ],
+            // --- NEW EXECUTIVE TEST ACCOUNTS ---
+            [
+                'name' => 'City Administrator',
+                'email' => 'admin@gmail.com',
+                'role' => 'city_administrator',
+                'department_id' => 3, // Hardcoded to your Controller's logic
+                'state' => 1,
+                'password' => bcrypt('password'),
             ],
             [
-                'name' => 'Approving Officer',
-                'email' => 'ao@gmail.com',
-                'role' => 'approving_officer',
-                'department_id' => null,
+                'name' => 'City Mayor',
+                'email' => 'mayor@gmail.com',
+                'role' => 'city_mayor',
+                'department_id' => 31, // Hardcoded to your Controller's logic
+                'state' => 1,
+                'password' => bcrypt('password'),
+            ],
+            // --- NEW DEPARTMENT TEST ACCOUNTS ---
+            [
+                'name' => 'IT Department Head',
+                'email' => 'dh@gmail.com',
+                'role' => 'department_head',
+                'department_id' => 1, // Change this to whatever a valid ID is in your departments table
+                'state' => 1,
+                'password' => bcrypt('password'),
+            ],
+            [
+                'name' => 'IT Staff',
+                'email' => 'staff@gmail.com',
+                'role' => 'staff',
+                'department_id' => 1, // Must match the DH above so they can see the same files
                 'state' => 1,
                 'password' => bcrypt('password'),
             ],

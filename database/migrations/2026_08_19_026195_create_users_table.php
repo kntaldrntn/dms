@@ -11,12 +11,16 @@ return new class extends Migration {
             $table->id();
             $table->string('name');
             $table->string('email')->unique();
+            
+            // UPDATED: Replaced generic roles with specific workflow roles
             $table->enum('role', [
-                'approving_officer',
-                'system_administrator',
-                'records_manager',
-                'user'
-            ])->default('user');
+                'staff',                 // Regular department personnel
+                'department_head',       // Gatekeeper for the department
+                'city_administrator',    // Executive Approver 1
+                'city_mayor',            // Executive Approver 2
+                'records_manager',       // Central Records Manager
+                'system_administrator'   // IT / System Config
+            ])->default('staff');
 
             $table->enum('sex', ['Male', 'Female'])->nullable();
             $table->timestamp('email_verified_at')->nullable();
