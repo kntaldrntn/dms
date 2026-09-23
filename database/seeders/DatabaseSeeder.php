@@ -100,7 +100,7 @@ class DatabaseSeeder extends Seeder
                 'name' => 'System Admin',
                 'email' => 'sysadm@gmail.com',
                 'role' => 'system_administrator',
-                'department_id' => null,
+                'department_id' => 24,
                 'state' => 1,
                 'password' => bcrypt('password'), 
             ],
@@ -108,7 +108,7 @@ class DatabaseSeeder extends Seeder
                 'name' => 'Records Manager',
                 'email' => 'rm@gmail.com',
                 'role' => 'records_manager',
-                'department_id' => null,
+                'department_id' => 43,
                 'state' => 1,
                 'password' => bcrypt('password'), 
             ],
@@ -134,7 +134,7 @@ class DatabaseSeeder extends Seeder
                 'name' => 'IT Department Head',
                 'email' => 'dh@gmail.com',
                 'role' => 'department_head',
-                'department_id' => 1, // Change this to whatever a valid ID is in your departments table
+                'department_id' => 24, // Change this to whatever a valid ID is in your departments table
                 'state' => 1,
                 'password' => bcrypt('password'),
             ],
@@ -142,7 +142,7 @@ class DatabaseSeeder extends Seeder
                 'name' => 'IT Staff',
                 'email' => 'staff@gmail.com',
                 'role' => 'staff',
-                'department_id' => 1, // Must match the DH above so they can see the same files
+                'department_id' => 24, // Must match the DH above so they can see the same files
                 'state' => 1,
                 'password' => bcrypt('password'),
             ],

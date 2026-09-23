@@ -3,8 +3,8 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import DeleteConfirmationModal from '@/components/DeleteConfirmationModal.vue';
 import RoutingModal from '@/components/RoutingModal.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { Search, Pencil, Trash2, FastForward, AlertCircle, Clock, Loader2, Sparkles, Link as LinkIcon, FileUp, X } from 'lucide-vue-next';
+import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
+import { Search, Pencil, Trash2, FastForward, AlertCircle, Clock, Loader2, Sparkles, Link as LinkIcon, FileUp, X, ClipboardCheck } from 'lucide-vue-next';
 import { ref, watch } from 'vue';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
@@ -16,7 +16,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.j
 
 const props = defineProps<{
     documents: any;
-    departments: Array<{ id: number; name: string }>;
+    departments: Array<{ id: number; name: string; code: string }>;
     transactionTypes: Array<{ id: number; name: string }>;
     documentTypes: Array<{ id: number; document_type: string }>;
     classifications: Array<{ id: number; name: string }>;
@@ -89,14 +89,14 @@ const form = useForm({
     email: '',
     subject_matter: '',
     
-    linked_documents: '', // String field for barcodes
-    attached_file: null as File | null, // The physical file
+    linked_documents: '', 
+    attached_file: null as File | null, 
 
-    department_id: '', 
+    department_id: 3, // Strictly lock default to City Administrator
     access_code: props.generatedAccessCode,
+    ai_routing_suggestions: [] as any[],
 });
 
-// Helper for UI display
 const getDepartmentName = (id: number) => {
     const dept = props.departments.find(d => d.id === id);
     return dept ? dept.name : 'Unknown Office';
@@ -136,10 +136,8 @@ const selectBarcode = (barcode: string) => {
 // --- AI LOGIC ---
 const isAnalyzing = ref(false);
 const analysisError = ref('');
-const routingSuggestions = ref<Array<{ department_id: number, priority: string, reason: string }>>([]);
 const executiveSuggestion = ref<{ route: string, reason: string } | null>(null);
 
-// NEW: Expanded AI Metrics interface to hold all the token data
 const aiMetrics = ref<{ 
     total_tokens: number, 
     prompt_tokens: number, 
@@ -159,7 +157,6 @@ const handleFileUpload = async (event: Event) => {
 
     form.attached_file = file; 
     isAnalyzing.value = true;
-    routingSuggestions.value = []; 
     executiveSuggestion.value = null;
     analysisError.value = '';
     aiMetrics.value = null;
@@ -223,24 +220,20 @@ const handleFileUpload = async (event: Event) => {
         if (data.transaction_type_id) form.transaction_type_id = data.transaction_type_id;
         if (data.classification_id) form.classification_id = data.classification_id;
         
-        // Ensure UI catches the AI's logic
-        if (data.department_id === 3 || data.department_id === 31) {
-            form.department_id = data.department_id;
-            executiveSuggestion.value = {
-                route: data.department_id === 31 ? 'City Mayor' : 'City Administrator',
-                reason: data.approval_reason || 'Identified as requiring executive approval.'
-            };
+        // Ensure UI defaults strictly to City Admin unless Mayor is explicitly needed
+        if (data.department_id === 31) {
+            form.department_id = 31;
+            executiveSuggestion.value = { route: 'City Mayor', reason: data.approval_reason || 'Requires explicit Mayoral approval.' };
         } else {
-            form.department_id = ''; 
-            executiveSuggestion.value = null;
+            form.department_id = 3; 
+            executiveSuggestion.value = { route: 'City Administrator', reason: 'Requires standard referral slip processing.' };
         }
         
+        // Silently capture all recommendations for the Admin's Referral Slip module later
         if (data.routing_suggestions && Array.isArray(data.routing_suggestions)) {
-            routingSuggestions.value = data.routing_suggestions;
             form.ai_routing_suggestions = data.routing_suggestions; 
         }
 
-        // NEW: Map all token data to the debug state
         if (data.meta) {
             aiMetrics.value = {
                 total_tokens: data.meta.total_tokens,
@@ -265,7 +258,6 @@ function submitDocument() {
         onSuccess: () => {
             form.reset();
             form.access_code = Math.random().toString(36).substring(2, 8).toUpperCase();
-            routingSuggestions.value = [];
             executiveSuggestion.value = null;
             aiMetrics.value = null;
             analysisError.value = '';
@@ -309,7 +301,6 @@ function submitDocument() {
 
                     <form @submit.prevent="submitDocument" class="p-5 flex flex-col gap-4">
                         
-                        <!-- Row 1 -->
                         <div class="grid grid-cols-3 gap-3">
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Barcode</label>
@@ -341,7 +332,6 @@ function submitDocument() {
                             </div>
                         </div>
 
-                        <!-- Row 2 -->
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Source Type</label>
@@ -366,7 +356,6 @@ function submitDocument() {
                             </div>
                         </div>
 
-                        <!-- Row 3 -->
                         <div>
                             <label class="block text-xs font-medium text-slate-700 mb-1">Document Classification</label>
                             <select v-model="form.classification_id" 
@@ -378,7 +367,6 @@ function submitDocument() {
                             <p v-if="form.errors.classification_id" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.classification_id }}</p>
                         </div>
 
-                        <!-- Row 4 -->
                         <div class="grid grid-cols-3 gap-3">
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Delivery Method</label>
@@ -400,7 +388,6 @@ function submitDocument() {
                             </div>
                         </div>
 
-                        <!-- Row 5 -->
                         <div class="grid grid-cols-3 gap-3">
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Gender</label>
@@ -431,7 +418,6 @@ function submitDocument() {
                             </div>
                         </div>
 
-                        <!-- Row 6 -->
                         <div>
                             <label class="block text-xs font-medium text-slate-700 mb-1">Subject Matter</label>
                             <textarea v-model="form.subject_matter" rows="2" 
@@ -440,7 +426,6 @@ function submitDocument() {
                             <p v-if="form.errors.subject_matter" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
                         </div>
 
-                        <!-- Row 7: Smart Barcode Search -->
                         <div class="relative">
                             <label class="block text-xs font-medium text-slate-700 mb-1">Linked Barcode/s (Optional)</label>
                             <div class="relative">
@@ -468,11 +453,8 @@ function submitDocument() {
                             </div>
                         </div>
 
-                        <!-- Row 8: Attachment Status / Manual Upload -->
                         <div>
                             <label class="block text-xs font-medium text-slate-700 mb-1">Attached Document (Optional)</label>
-                            
-                            <!-- State 1: File is attached (via AI or Manual) -->
                             <div v-if="form.attached_file" class="flex items-center justify-between p-2 bg-emerald-50 border border-emerald-200 rounded-xl shadow-sm">
                                 <div class="flex items-center gap-2 overflow-hidden pl-1">
                                     <FileUp class="w-4 h-4 text-emerald-600 shrink-0" />
@@ -484,8 +466,6 @@ function submitDocument() {
                                     <X class="w-3.5 h-3.5" />
                                 </button>
                             </div>
-
-                            <!-- State 2: No file attached (Manual Entry Mode) -->
                             <div v-else class="relative flex items-center">
                                 <FileUp class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
                                 <input type="file" accept=".pdf,.jpg,.jpeg,.png" @change="(e: any) => form.attached_file = e.target.files[0]" 
@@ -496,43 +476,25 @@ function submitDocument() {
                             <p v-if="form.errors.attached_file" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.attached_file }}</p>
                         </div>
 
-                        <!-- AI Routing Suggestions UI -->
-                        <div v-if="executiveSuggestion || routingSuggestions.length > 0" class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mt-1 flex flex-col gap-2">
+                        <!-- AI Routing Suggestions UI (Records View) -->
+                        <div v-if="executiveSuggestion" class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mt-1 flex flex-col gap-2">
                             <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-700 flex items-center gap-1.5">
                                 <Sparkles class="w-3 h-3" /> AI Routing Analysis
                             </span>
                             
-                            <div v-if="executiveSuggestion" class="bg-white/60 rounded-lg p-2 border border-indigo-50">
+                            <div class="bg-white/60 rounded-lg p-2 border border-indigo-50">
                                 <p class="text-[11px] text-indigo-900 font-bold">Executive Routing: {{ executiveSuggestion.route }}</p>
                                 <p class="text-[10px] text-indigo-700 mt-0.5 leading-tight">{{ executiveSuggestion.reason }}</p>
                             </div>
-
-                            <div v-if="routingSuggestions.length > 0" class="flex flex-col gap-1.5">
-                                <div v-for="(sug, idx) in routingSuggestions" :key="idx" class="bg-white/60 rounded-lg p-2 border border-indigo-50 flex flex-col">
-                                    <div class="flex items-center justify-between">
-                                        <span class="text-[11px] font-bold text-indigo-900">{{ getDepartmentName(sug.department_id) }}</span>
-                                        <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm"
-                                              :class="sug.priority === 'Primary' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'">
-                                            {{ sug.priority }}
-                                        </span>
-                                    </div>
-                                    <p class="text-[10px] text-indigo-700 mt-0.5 leading-tight">{{ sug.reason }}</p>
-                                </div>
-                                <p class="text-[9px] text-indigo-500 font-medium italic mt-1">* Suggestions attached to document for dispatcher reference.</p>
-                            </div>
                         </div>
 
-                        <!-- ========================================== -->
-                        <!-- TEMPORARY AI METRICS DISPLAY (Comment out to hide) -->
-                        <!-- ========================================== -->
-                        <div v-if="aiMetrics" class="bg-slate-800 text-slate-200 border border-slate-700 rounded-xl p-3 flex flex-wrap items-center gap-4 text-[11px] font-mono shadow-inner mb-4 mt-2 mx-1">
+                        <!-- <div v-if="aiMetrics" class="bg-slate-800 text-slate-200 border border-slate-700 rounded-xl p-3 flex flex-wrap items-center gap-4 text-[11px] font-mono shadow-inner mb-4 mt-2 mx-1">
                             <div class="text-emerald-400 font-bold">🛠️ DEBUG METRICS:</div>
                             <div>Accuracy: <span :class="aiMetrics.confidence > 80 ? 'text-emerald-400' : 'text-amber-400'" class="font-bold">{{ aiMetrics.confidence }}%</span></div>
                             <div>Total: <span class="text-white">{{ aiMetrics.total_tokens }}</span></div>
                             <div>Prompt: <span class="text-white">{{ aiMetrics.prompt_tokens }}</span></div>
                             <div>Completion: <span class="text-white">{{ aiMetrics.completion_tokens }}</span></div>
-                        </div>
-                        <!-- ========================================== -->
+                        </div> -->
 
                         <hr class="border-slate-100 mt-1" />
 
@@ -543,11 +505,10 @@ function submitDocument() {
                             </div>
                             <div class="flex items-center gap-3">
                                 <select v-model="form.department_id" 
-                                    class="rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.department_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
-                                    <option value="">Direct To (Optional)</option>
-                                    <option :value="3">City Administrator</option>
-                                    <option :value="31">City Mayor</option>
+                                    class="rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors font-semibold bg-indigo-50 text-indigo-800"
+                                    :class="form.errors.department_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-indigo-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500'">
+                                    <option :value="3">Route to City Administrator</option>
+                                    <option :value="31">Route to City Mayor</option>
                                 </select>
                                 <button type="submit" :disabled="form.processing || isAnalyzing" class="bg-emerald-600 text-white text-sm px-5 py-2 rounded-xl font-medium shadow-sm hover:bg-emerald-700 transition disabled:opacity-50">
                                     Save Document
@@ -605,16 +566,29 @@ function submitDocument() {
                                         </div>
                                     </td>
                                     <td class="px-4 py-3 whitespace-nowrap">
-                                        <div class="flex justify-center gap-1.5">
-                                            <button @click="openRoutingModal(doc)" class="rounded-md bg-indigo-50 p-1.5 text-indigo-600 transition hover:bg-indigo-100 border border-indigo-100" title="Route">
+                                        <div class="flex justify-center items-center gap-2">
+                                            
+                                            <!-- ROUTING/STATUS: Hide FastForward if waiting at Admin -->
+                                            <span v-if="doc.department_id !== $page.props.auth.user.department_id" class="text-[10px] font-bold uppercase tracking-wider text-slate-500 py-1.5 px-2 bg-slate-100 rounded-md border border-slate-200" title="Waiting for Executive Referral">
+                                                With {{ doc.department?.code || 'Exec.' }}
+                                            </span>
+
+                                            <!-- ROUTING BUTTON: Show if back at Records -->
+                                            <button v-else @click="openRoutingModal(doc)" 
+                                                class="rounded-md p-1.5 transition border shadow-sm"
+                                                :class="doc.approved_routing_slip ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-200' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border-indigo-100'" 
+                                                :title="doc.approved_routing_slip ? 'Execute Referral Slip' : 'Route'">
                                                 <FastForward class="h-4 w-4" />
                                             </button>
+
+                                            <!-- EDIT & DELETE ALWAYS VISIBLE -->
                                             <Link :href="route('documents.edit', doc.id)" class="rounded-md bg-slate-50 p-1.5 text-slate-600 transition hover:bg-slate-100 border border-slate-200" title="Edit">
                                                 <Pencil class="h-4 w-4" />
                                             </Link>
-                                            <button @click="openDeleteModal(doc)" class="rounded-md bg-red-50 p-1.5 text-red-600 transition hover:bg-red-100 border border-red-100" title="Delete">
+                                            <button @click="openDeleteModal(doc)" class="rounded-md bg-rose-50 p-1.5 text-rose-600 transition hover:bg-rose-100 border border-rose-100" title="Delete">
                                                 <Trash2 class="h-4 w-4" />
                                             </button>
+
                                         </div>
                                     </td>
                                 </tr>

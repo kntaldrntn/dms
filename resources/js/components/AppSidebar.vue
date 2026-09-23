@@ -20,6 +20,7 @@ import {
     Building2,
     Clock,
     Inbox,
+    FileSignature, // <-- ADDED FOR REFERRAL SLIPS
 } from 'lucide-vue-next';
 
 const page = usePage();
@@ -35,7 +36,7 @@ const mainNavItems = computed<NavItem[]>(() => {
             title: 'Dashboard',
             href: route('dashboard'),
             icon: LayoutGrid,
-            roles: ['system_administrator', 'records_manager', 'user'],
+            roles: ['system_administrator', 'records_manager', 'user', 'staff', 'department_head', 'city_administrator', 'city_mayor'],
         },
         {
             title: 'Document',
@@ -47,7 +48,14 @@ const mainNavItems = computed<NavItem[]>(() => {
             title: 'Transactions',
             href: route('transactions.inbox'),
             icon: Inbox,
-            roles: ['system_administrator', 'records_manager', 'user'],
+            roles: ['system_administrator', 'records_manager', 'user', 'staff', 'department_head', 'city_administrator', 'city_mayor'],
+        },
+        // NEW: Dedicated Referral Slip Module for the City Admin Hub
+        {
+            title: 'Referral Slips',
+            href: '/referral-slips', // We will register this route next
+            icon: FileSignature,
+            roles: ['system_administrator', 'city_administrator'],
         },
         {
             title: 'Settings',

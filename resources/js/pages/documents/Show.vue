@@ -2,7 +2,7 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/vue3';
-import { Printer, ArrowLeft, RotateCcw } from 'lucide-vue-next';
+import { Printer, ArrowLeft, RotateCcw, FileSignature, ArrowLeftRight } from 'lucide-vue-next';
 
 const props = defineProps<{
     document: any;
@@ -16,16 +16,10 @@ const breadcrumbs: BreadcrumbItem[] = [
 
 // --- HELPER FUNCTIONS ---
 
-// Smart Date Formatter - Returns an object to prevent template string splitting errors
 const formatDateTime = (dateString: string) => {
     if (!dateString) return { date: '-', time: '' };
-    
-    // 1. Replace space with 'T' (Fixes Safari/iOS "Invalid Date" bug)
-    // 2. Strip 'Z' (Prevents browser from aggressively double-adding GMT+8)
     const safeString = dateString.replace(' ', 'T').replace('Z', '');
-    
     const date = new Date(safeString);
-    
     if (isNaN(date.getTime())) return { date: 'Invalid Date', time: '' };
     
     return {
@@ -34,18 +28,14 @@ const formatDateTime = (dateString: string) => {
     };
 };
 
-// Simple string return for the top details panel
 const formatDateStr = (dateString: string) => {
     const parsed = formatDateTime(dateString);
     if (parsed.date === '-') return '-';
     return `${parsed.date} ${parsed.time}`;
 };
 
-// Calculates duration dynamically (seconds, minutes, hours, or days)
 const calculateDuration = (startStr: string, endStr: string) => {
     if (!startStr || !endStr) return '-';
-    
-    // Apply the same safety sanitation to duration calculations!
     const safeStart = startStr.replace(' ', 'T').replace('Z', '');
     const safeEnd = endStr.replace(' ', 'T').replace('Z', '');
     
@@ -69,12 +59,10 @@ const calculateDuration = (startStr: string, endStr: string) => {
     return `${diffDays.toFixed(2)} days`;
 };
 
-// Office Duration = Time between this office receiving it and releasing it
 const getOfficeDuration = (trail: any) => {
     return calculateDuration(trail.received_at, trail.released_at);
 };
 
-// Transit Duration = Time between this office releasing it, and the NEXT office receiving it
 const getTransitDuration = (trail: any, index: number) => {
     const nextTrail = props.trails[index + 1];
     if (!trail.released_at || !nextTrail || !nextTrail.received_at) return '-';
@@ -95,7 +83,7 @@ const getTransitDuration = (trail: any, index: number) => {
                 </Link>
             </div>
 
-            <!-- Top Section: Document Details (3 Columns) -->
+            <!-- Top Section: Document Details -->
             <div class="bg-white rounded-2xl border-2 border-slate-200 shadow-md p-6">
                 <h2 class="text-xl font-extrabold text-slate-900 border-b-2 border-slate-200 pb-4 mb-5">Document Details</h2>
                 
@@ -152,7 +140,6 @@ const getTransitDuration = (trail: any, index: number) => {
                                 <th colspan="4" class="px-4 py-3 border-r border-[#153a5b]">RELEASED</th>
                                 <th colspan="2" class="px-4 py-3 border-r border-[#153a5b]">DURATION</th>
                                 <th rowspan="2" class="px-4 py-3 border-r border-[#153a5b] align-middle">REMARKS</th>
-                                <!-- <th rowspan="2" class="px-4 py-3 align-middle w-10"></th> -->
                             </tr>
                             <tr class="bg-[#245b8c] text-blue-50">
                                 <th class="px-3 py-2 border-r border-t border-[#153a5b] font-semibold">Office</th>
@@ -177,7 +164,6 @@ const getTransitDuration = (trail: any, index: number) => {
                                 <td class="px-3 py-4 border-r border-slate-200 font-medium">{{ trail.receiver?.name || 'System' }}</td>
                                 <td class="px-3 py-4 border-r border-slate-200 whitespace-nowrap">
                                     <div class="flex flex-col">
-                                        <!-- Used the cleanly mapped object keys here! -->
                                         <span class="font-bold text-slate-900">{{ formatDateTime(trail.received_at).date }}</span>
                                         <span class="text-xs font-semibold text-slate-600 mt-0.5">{{ formatDateTime(trail.received_at).time }}</span>
                                     </div>
@@ -185,7 +171,11 @@ const getTransitDuration = (trail: any, index: number) => {
                                 <td class="px-3 py-4 border-r border-slate-200 font-medium">{{ trail.received_action || '-' }}</td>
                                 
                                 <!-- Released -->
-                                <td class="px-3 py-4 border-r border-slate-200 font-medium">{{ trail.releaser?.name || '-' }}</td>
+                                <td class="px-3 py-4 border-r border-slate-200 font-medium">
+                                    <div class="flex flex-col items-center">
+                                        <span>{{ trail.releaser?.name || '-' }}</span>
+                                    </div>
+                                </td>
                                 <td class="px-3 py-4 border-r border-slate-200 whitespace-nowrap">
                                     <div v-if="trail.released_at" class="flex flex-col">
                                         <span class="font-bold text-slate-900">{{ formatDateTime(trail.released_at).date }}</span>
@@ -193,7 +183,24 @@ const getTransitDuration = (trail: any, index: number) => {
                                     </div>
                                     <span v-else class="font-bold text-slate-400">-</span>
                                 </td>
-                                <td class="px-3 py-4 border-r border-slate-200 font-medium">{{ trail.released_action || '-' }}</td>
+                                
+                                <!-- NEW: Action Cell with Badges -->
+                                <td class="px-3 py-4 border-r border-slate-200 font-medium text-left">
+                                    <div class="flex flex-col items-start gap-1.5">
+                                        <span>{{ trail.released_action || '-' }}</span>
+                                        
+                                        <!-- Digital Signature Badge -->
+                                        <div v-if="trail.is_digitally_signed" class="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded shadow-sm border border-amber-200" :title="`Signed by ${trail.signer?.name}`">
+                                            <FileSignature class="w-3 h-3" /> Signed
+                                        </div>
+                                        
+                                        <!-- Return Route Badge -->
+                                        <div v-if="trail.trail_type === 'return'" class="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold bg-rose-100 text-rose-700 px-2 py-1 rounded shadow-sm border border-rose-200">
+                                            <ArrowLeftRight class="w-3 h-3" /> Returned
+                                        </div>
+                                    </div>
+                                </td>
+                                
                                 <td class="px-3 py-4 border-r border-slate-200 font-bold text-slate-900">{{ trail.released_to_office?.name || '-' }}</td>
                                 
                                 <!-- Duration -->
@@ -204,11 +211,6 @@ const getTransitDuration = (trail: any, index: number) => {
                                 <td class="px-3 py-4 border-r border-slate-200 text-left font-medium max-w-xs" :title="trail.remarks">
                                     {{ trail.remarks || '-' }}
                                 </td>
-                                
-                                <!-- Action Button
-                                <td class="px-3 py-4 text-center text-slate-600 hover:text-[#1e4e79] cursor-pointer transition">
-                                    <RotateCcw class="w-5 h-5 mx-auto" stroke-width="2.5" />
-                                </td> -->
                             </tr>
                             
                             <tr v-if="!trails || trails.length === 0">

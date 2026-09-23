@@ -44,7 +44,7 @@ return new class extends Migration
             
             // Content
             $table->text('subject_matter');
-            $table->string('linked_documents')->nullable(); 
+            $table->json('linked_documents')->nullable(); // Converts it to a proper 1-to-many array structure
             $table->string('attached_file')->nullable();
             
             // System & Lifecycle Status

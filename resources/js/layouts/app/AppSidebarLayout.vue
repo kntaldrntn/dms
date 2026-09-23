@@ -60,19 +60,7 @@ const formatRole = (role: string) => {
 
                 <!-- Right Side: Icons & Profile -->
                 <div class="flex items-center gap-4 sm:gap-6">
-                    
-                    <div class="hidden sm:flex items-center gap-4 text-white/80">
-                        <button class="hover:text-white transition"><Search class="w-5 h-5" /></button>
-                        <button class="hover:text-white transition relative">
-                            <Bell class="w-5 h-5" />
-                            <!-- Notification dot adapted for dark theme -->
-                            <span class="absolute top-0 right-0 w-2 h-2 bg-rose-500 rounded-full border border-[#265f92]"></span>
-                        </button>
-                        <button class="hover:text-white transition"><Grid class="w-5 h-5" /></button>
-                    </div>
-
                     <div class="hidden sm:block h-6 w-px bg-white/20"></div>
-
                     <!-- Profile Dropdown -->
                     <div class="relative">
                         <!-- Trigger Icon (Adapted for Custom Dark Theme) -->

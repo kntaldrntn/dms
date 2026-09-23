@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Carbon\Carbon;
 use App\Models\Document;
 use App\Models\DocumentTrail;
+use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use App\Models\TransactionType;
 use App\Models\DocumentType;
@@ -32,11 +33,9 @@ class DocumentController extends Controller
             });
         }
 
-        // Changed pagination to 6 to fit compactly on one screen without scrolling
         $documents = $query->latest()->paginate(6)->withQueryString();
 
         return Inertia::render('documents/Index', [
-            // Table Data
             'documents' => $documents, 
             'departments' => Department::where('state', 1)->get(),
             'filters' => $request->only(['search']),
@@ -44,7 +43,6 @@ class DocumentController extends Controller
                 'success' => session('success'),
                 'error' => session('error')
             ],
-            // Form Data
             'transactionTypes' => TransactionType::where('state', 1)->get(),
             'documentTypes' => DocumentType::where('state', 1)->get(),
             'classifications' => DocumentClassification::where('state', 1)->get(),
@@ -90,8 +88,6 @@ class DocumentController extends Controller
             'department_id' => 'nullable|exists:departments,id',
             'access_code' => 'required|string|max:20',
             'ai_routing_suggestions' => 'nullable|array',
-            
-            // Separated text field for barcodes and actual file for upload
             'linked_documents' => 'nullable|string',
             'attached_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
         ]);
@@ -109,17 +105,31 @@ class DocumentController extends Controller
 
         $document = Document::create($validated);
 
-        DocumentTrail::create([
+        // 1. Always create the initial receipt trail for Records
+        $initialTrail = DocumentTrail::create([
             'document_id' => $document->id,
-            'department_id' => Auth::user()->department_id, 
+            'department_id' => Auth::user()->department_id ?? 1, 
             'received_by' => Auth::id(),
             'received_at' => $now,
-            'received_action' => 'New Document Trail',
-            'released_by' => Auth::id(),
-            'released_at' => $now, 
-            'released_to' => $validated['department_id'], 
-            'released_action' => null, 
+            'received_action' => 'Document Scanned & Registered',
         ]);
+
+        // 2. AUTO-ROUTE FIX: Only attempt to dispatch if a specific department was selected
+        if (!empty($validated['department_id'])) {
+            $initialTrail->update([
+                'released_by' => Auth::id(),
+                'released_at' => $now,
+                'released_action' => 'Direct Dispatch',
+                'released_to' => $validated['department_id'], 
+            ]);
+
+            DocumentTrail::create([
+                'document_id' => $document->id,
+                'department_id' => $validated['department_id'],
+                'received_at' => $now, // Target office SLA starts
+                'received_action' => 'Direct Dispatch from Records', // <-- FIXED BLANK BUG
+            ]);
+        }
 
         return redirect()->route('documents.index')->with('success', 'Document registered successfully.');
     }
@@ -135,7 +145,8 @@ class DocumentController extends Controller
             'trails.office',          
             'trails.receiver',        
             'trails.releaser',        
-            'trails.releasedToOffice' 
+            'trails.releasedToOffice',
+            'trails.signer'
         ]);
         
         return Inertia::render('documents/Show', [
@@ -195,13 +206,14 @@ class DocumentController extends Controller
 
         if ($document->department_id != $validated['department_id']) {
             $latestTrail = DocumentTrail::where('document_id', $document->id)
-                ->where('released_to', $document->department_id)
-                ->latest()
+                ->where('department_id', $document->department_id)
+                ->whereNull('released_at')
+                ->latest('id')
                 ->first();
 
-            if ($latestTrail) {
+            if ($latestTrail && !empty($validated['department_id'])) {
                 $latestTrail->update([
-                    'released_to' => $validated['department_id']
+                    'department_id' => $validated['department_id']
                 ]);
             }
         }
@@ -231,7 +243,6 @@ class DocumentController extends Controller
             $classifications = DocumentClassification::where('state', 1)->pluck('name', 'id')->toJson();
             $deliveryMethods = DeliveryMethod::where('state', 1)->pluck('delivery_method_name', 'id')->toJson();
 
-            // --- UPDATED AI PROMPT ---
             $systemInstruction = "You are an advanced document intake AI utilizing OCR-Assisted Vision. You have a blurry thumbnail (only good for general layout) and raw OCR text. YOU MUST RELY ON THE OCR TEXT FOR EXACT SPELLINGS.
             
             YOUR STRATEGY:
@@ -485,41 +496,56 @@ class DocumentController extends Controller
         }
     }
 
+    // =====================================================================
+    // CORE WORKFLOW & ROUTING MECHANICS 
+    // =====================================================================
+
     public function routeDocument(Request $request, Document $document)
     {
+        // Tier 1 Routing (Records distributing via the dual-panel modal)
         $validated = $request->validate([
             'routed_to' => 'required|array|min:1',
             'routed_to.*' => 'exists:departments,id',
         ]);
 
         $now = Carbon::now('Asia/Manila');
+        $user = Auth::user();
 
-        $arrivalTrail = DocumentTrail::where('document_id', $document->id)
-            ->where('released_to', Auth::user()->department_id)
-            ->latest()
+        // 1. Close the active trail for Records
+        $activeTrail = DocumentTrail::where('document_id', $document->id)
+            ->where('department_id', $user->department_id)
+            ->whereNull('released_at')
+            ->latest('id')
             ->first();
 
-        $receivedAt = $arrivalTrail ? ($arrivalTrail->released_at ?? $arrivalTrail->created_at) : $document->created_at;
-
-        foreach ($validated['routed_to'] as $departmentId) {
-            DocumentTrail::create([
-                'document_id' => $document->id,
-                'department_id' => Auth::user()->department_id, 
-                'received_by' => Auth::id(),
-                'received_at' => $receivedAt, 
-                'received_action' => 'Receive Document', 
-                'released_by' => Auth::id(),
-                'released_at' => $now,        
-                'released_to' => $departmentId, 
-                'released_action' => 'Routed via Fast Forward distribution',
+        if ($activeTrail) {
+            $activeTrail->update([
+                'released_by' => $user->id,
+                'released_at' => $now,
+                'released_action' => 'Dispatched to target office(s)',
+                'released_to' => $validated['routed_to'][0], // Logs primary physical target
+                'trail_type' => 'forward',
+                'is_digitally_signed' => false,
+                'signed_by' => null,
             ]);
         }
 
+        // 2. Fast Forward Distribution: Create auto-receive trails for EVERY selected office
+        foreach ($validated['routed_to'] as $departmentId) {
+            DocumentTrail::create([
+                'document_id' => $document->id,
+                'department_id' => $departmentId, 
+                'received_at' => $now, // Target SLA clocks start instantly
+                'received_action' => 'Dispatched from Records', // <-- FIXED BLANK BUG
+            ]);
+        }
+
+        // Move the physical location to the primary target
         $document->update([
             'department_id' => $validated['routed_to'][0],
         ]);
 
-        return redirect()->back()->with('success', 'Document successfully routed to selected offices.');
+        return redirect()->back()->with('success', 'Document successfully routed.');
     }
 
     // --- SMART SEARCH API ---
@@ -527,14 +553,13 @@ class DocumentController extends Controller
     {
         $query = $request->get('q');
         
-        // Prevent unnecessary queries for very short strings
         if (!$query || strlen($query) < 2) {
             return response()->json([]);
         }
 
         $results = Document::where('barcode', 'LIKE', "%{$query}%")
                            ->select('barcode', 'subject_matter')
-                           ->take(5) // Limit to top 5 results for speed
+                           ->take(5) 
                            ->get();
                            
         return response()->json($results);

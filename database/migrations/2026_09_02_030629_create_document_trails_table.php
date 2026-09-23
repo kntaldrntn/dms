@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('document_trails', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('document_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('document_id')->nullable()->constrained()->cascadeOnDelete();
             
             // --- RECEIVED INFO ---
             $table->foreignId('department_id')->constrained('departments'); // e.g., REC
