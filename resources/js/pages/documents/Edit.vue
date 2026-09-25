@@ -2,7 +2,7 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { Save, ArrowLeft, Loader2, Link as LinkIcon, FileUp, Download } from 'lucide-vue-next';
+import { Save, ArrowLeft, Link as LinkIcon, FileUp, Download } from 'lucide-vue-next';
 import { ref, watch } from 'vue';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
@@ -46,6 +46,7 @@ const form = useForm({
 
     department_id: props.document.department_id,
     access_code: props.document.access_code,
+    workflow_version: props.document.workflow_version,
 });
 
 watch(() => form.source_type, (newType) => {
@@ -67,7 +68,7 @@ const handleLinkedDocumentInput = async (e: any) => {
             const res = await axios.get(route('documents.searchBarcodes'), { params: { q: lastWord } });
             barcodeResults.value = res.data;
             showBarcodeDropdown.value = barcodeResults.value.length > 0;
-        } catch (err) {
+        } catch {
             showBarcodeDropdown.value = false;
         }
     } else {

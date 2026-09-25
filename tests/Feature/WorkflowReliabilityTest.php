@@ -1,0 +1,337 @@
+<?php
+
+use App\Models\Department;
+use App\Models\Document;
+use App\Models\DocumentTrail;
+use App\Models\DocumentType;
+use App\Models\TransactionType;
+use App\Models\User;
+use App\Services\DispatchService;
+use App\Services\DocumentService;
+use App\Services\ReferralService;
+use App\Services\TransactionService;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
+use Inertia\Testing\AssertableInertia as Assert;
+
+beforeEach(function () {
+    $this->travelTo(now('Asia/Manila')->setDate(2026, 9, 24)->setTime(10, 0));
+    $this->recordsOffice = Department::create(['code' => 'REC', 'name' => 'Records', 'state' => 1]);
+    $this->adminOffice = Department::create(['code' => 'ADM', 'name' => 'Administrator', 'state' => 1]);
+    $this->target = Department::create(['code' => 'DST', 'name' => 'Destination', 'state' => 1]);
+    $this->records = User::factory()->create(['role' => 'records_manager', 'department_id' => $this->recordsOffice->id]);
+    $this->administrator = User::factory()->create(['role' => 'city_administrator', 'department_id' => $this->adminOffice->id]);
+    $this->staff = User::factory()->create(['department_id' => $this->target->id]);
+    $type = DocumentType::create(['document_code' => 'TEST', 'document_type' => 'Test', 'state' => 1]);
+    $transaction = TransactionType::create(['name' => 'Simple', 'processing_days' => 3, 'state' => 1]);
+    $this->data = [
+        'barcode' => 'WF-001', 'access_code' => 'ABC123', 'source_type' => 'External', 'source_name' => 'Client',
+        'subject_matter' => 'Workflow test', 'department_id' => $this->recordsOffice->id,
+        'document_type_id' => $type->id, 'transaction_type_id' => $transaction->id,
+    ];
+    $this->document = Document::create($this->data);
+    $this->trail = DocumentTrail::create([
+        'document_id' => $this->document->id, 'department_id' => $this->recordsOffice->id,
+        'received_by' => $this->records->id, 'received_at' => now()->subHour(), 'received_action' => 'Registered',
+    ]);
+});
+
+test('staff cannot use records intake or management actions even in their own office', function () {
+    $this->staff->update(['department_id' => $this->recordsOffice->id]);
+    $this->actingAs($this->staff)->postJson(route('documents.store'), $this->data)->assertForbidden();
+    $this->get(route('documents.edit', $this->document))->assertForbidden();
+    $this->putJson(route('documents.update', $this->document), [...$this->data, 'workflow_version' => 0])->assertForbidden();
+    $this->deleteJson(route('documents.destroy', $this->document), ['workflow_version' => 0])->assertForbidden();
+    $this->postJson(route('documents.route', $this->document), ['workflow_version' => 0, 'routed_to' => [$this->target->id]])->assertForbidden();
+    $this->assertDatabaseCount('document_trails', 1);
+    expect($this->document->fresh()->workflow_version)->toBe(0);
+});
+
+test('records management requires current custody', function () {
+    $this->document->update(['department_id' => $this->target->id]);
+    $this->actingAs($this->records)->get(route('documents.edit', $this->document))->assertForbidden();
+    $this->putJson(route('documents.update', $this->document), [...$this->data, 'workflow_version' => 0])->assertForbidden();
+    $this->deleteJson(route('documents.destroy', $this->document), ['workflow_version' => 0])->assertForbidden();
+    $this->postJson(route('documents.route', $this->document), ['workflow_version' => 0, 'routed_to' => [$this->adminOffice->id]])->assertForbidden();
+});
+
+test('inactive users cannot read or mutate document workflows', function () {
+    $this->records->update(['state' => 0]);
+    $this->actingAs($this->records)->get(route('documents.index'))->assertForbidden();
+    $this->get(route('documents.show', $this->document))->assertForbidden();
+    $this->get(route('transactions.inbox'))->assertForbidden();
+    $this->getJson(route('documents.searchBarcodes', ['q' => 'WF']))->assertForbidden();
+    $this->postJson(route('documents.store'), $this->data)->assertForbidden();
+    $this->postJson(route('transactions.process', $this->document), ['workflow_version' => 0, 'action' => 'end', 'remarks' => 'Done'])->assertForbidden();
+});
+
+test('document list detail and search share office visibility', function () {
+    $this->actingAs($this->staff)->get(route('documents.show', $this->document))->assertForbidden();
+    $this->getJson(route('documents.searchBarcodes', ['q' => 'WF']))->assertExactJson([]);
+    $this->get(route('documents.index'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 0)->where('canCreate', false));
+
+    $this->trail->update(['department_id' => $this->target->id]);
+    $this->get(route('documents.show', $this->document))->assertOk();
+    $this->getJson(route('documents.searchBarcodes', ['q' => 'WF']))->assertJsonPath('0.barcode', 'WF-001');
+    $this->document->update(['state' => 0]);
+    $this->get(route('documents.show', $this->document))->assertForbidden();
+    $this->getJson(route('documents.searchBarcodes', ['q' => 'WF']))->assertExactJson([]);
+});
+
+test('dispatch rejects duplicate inactive self and empty target lists without writes', function () {
+    $this->target->update(['state' => 0]);
+    foreach ([[], [$this->recordsOffice->id], [$this->target->id], [$this->adminOffice->id, $this->adminOffice->id], [9999]] as $targets) {
+        $this->actingAs($this->records)->postJson(route('documents.route', $this->document), [
+            'workflow_version' => 0, 'routed_to' => $targets,
+        ])->assertUnprocessable();
+    }
+    $this->assertDatabaseCount('document_trails', 1);
+    expect($this->trail->fresh()->released_at)->toBeNull();
+    expect($this->document->fresh()->workflow_version)->toBe(0);
+});
+
+test('inactive or completed documents cannot be edited dispatched processed or deleted', function (array $state) {
+    $this->document->update($state);
+    $this->actingAs($this->records)->get(route('documents.edit', $this->document))->assertStatus(409);
+    $this->putJson(route('documents.update', $this->document), [...$this->data, 'workflow_version' => 0])->assertStatus(409);
+    $this->postJson(route('documents.route', $this->document), ['workflow_version' => 0, 'routed_to' => [$this->target->id]])->assertStatus(409);
+    $this->postJson(route('transactions.process', $this->document), ['workflow_version' => 0, 'action' => 'end', 'remarks' => 'Done'])->assertStatus(409);
+    $this->deleteJson(route('documents.destroy', $this->document), ['workflow_version' => 0])->assertStatus(409);
+    $this->assertDatabaseCount('document_trails', 1);
+})->with([[['state' => 0]], [['status' => 'Completed']]]);
+
+test('referrals resolve office codes rather than fixed ids and accept omitted remarks', function () {
+    $this->document->update(['department_id' => $this->adminOffice->id]);
+    $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), [
+        'workflow_version' => 0, 'targets' => [$this->target->id],
+        'required_actions' => ['please_handle', 'other'], 'other_action' => 'Coordinate with legal',
+        'concerned_personnel' => 'Records Officer',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $document = $this->document->fresh();
+    expect($document->department_id)->toBe($this->recordsOffice->id);
+    expect($document->approved_routing_slip)->toBe([$this->target->id]);
+    expect($document->workflow_version)->toBe(1);
+    $approvalTrail = DocumentTrail::where('document_id', $document->id)->where('released_action', 'Approved Routing Slip Generated')->firstOrFail();
+    expect($approvalTrail->required_actions)->toBe(['please_handle', 'other']);
+    expect($approvalTrail->other_action)->toBe('Coordinate with legal');
+    expect($approvalTrail->concerned_personnel)->toBe('Records Officer');
+    $this->actingAs($this->administrator)->get(route('referral-slips.print', $document))
+        ->assertOk()->assertSee('REFERRAL / ACTION SLIP')->assertSee('Coordinate with legal');
+    $this->actingAs($this->records)->get(route('referral-slips.print', $document))
+        ->assertOk()->assertSee('REFERRAL / ACTION SLIP');
+    $count = DocumentTrail::count();
+    $this->postJson(route('referral-slips.generate', $this->document), ['workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle']])->assertForbidden();
+    $this->assertDatabaseCount('document_trails', $count);
+});
+
+test('referrals enforce role custody active state and signature availability', function () {
+    $payload = ['workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle'], 'attach_signature' => true];
+    $this->actingAs($this->records)->postJson(route('referral-slips.generate', $this->document), $payload)->assertForbidden();
+    $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), $payload)->assertForbidden();
+    $this->document->update(['department_id' => $this->adminOffice->id]);
+    $this->postJson(route('referral-slips.generate', $this->document), $payload)->assertUnprocessable()->assertJsonValidationErrors('attach_signature');
+    $this->document->update(['state' => 0]);
+    $this->postJson(route('referral-slips.generate', $this->document), $payload)->assertStatus(409);
+    $this->assertDatabaseCount('document_trails', 1);
+});
+
+test('referral configuration failure leaves no partial trails or custody changes', function () {
+    $this->document->update(['department_id' => $this->adminOffice->id]);
+    $this->recordsOffice->update(['state' => 0]);
+    $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), [
+        'workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle'],
+    ])->assertUnprocessable()->assertJsonValidationErrors('department_id');
+    $this->assertDatabaseCount('document_trails', 1);
+    expect($this->document->fresh()->department_id)->toBe($this->adminOffice->id);
+});
+
+test('dispatch and referral failures roll back trail modifications and new arrivals', function (string $operation) {
+    $user = $this->records;
+    if ($operation === 'referral') {
+        $this->document->update(['department_id' => $this->adminOffice->id]);
+        $this->trail->update(['department_id' => $this->adminOffice->id]);
+        $user = $this->administrator;
+    }
+    $originalOffice = $this->document->department_id;
+    $event = 'eloquent.updating: '.Document::class;
+    app('events')->listen($event, fn () => throw new RuntimeException('Simulated write failure'));
+    try {
+        $action = fn () => $operation === 'dispatch'
+            ? app(DispatchService::class)->dispatch($this->document, $user, ['workflow_version' => 0, 'routed_to' => [$this->target->id]])
+            : app(ReferralService::class)->generate($this->document, $user, ['workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle']]);
+        expect($action)->toThrow(RuntimeException::class, 'Simulated write failure');
+    } finally {
+        app('events')->forget($event);
+    }
+    $this->assertDatabaseCount('document_trails', 1);
+    expect($this->trail->fresh()->released_at)->toBeNull();
+    expect($this->document->fresh()->department_id)->toBe($originalOffice);
+    expect($this->document->fresh()->workflow_version)->toBe(0);
+})->with(['dispatch', 'referral']);
+
+test('stale edits cannot overwrite a newer edit or deactivate the document', function () {
+    $this->actingAs($this->records)->putJson(route('documents.update', $this->document), [
+        ...$this->data, 'workflow_version' => 0, 'subject_matter' => 'First edit',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $this->putJson(route('documents.update', $this->document), [
+        ...$this->data, 'workflow_version' => 0, 'subject_matter' => 'Stale edit',
+    ])->assertUnprocessable()->assertJsonValidationErrors('workflow_version');
+    $this->deleteJson(route('documents.destroy', $this->document), ['workflow_version' => 0])
+        ->assertUnprocessable()->assertJsonValidationErrors('workflow_version');
+    expect($this->document->fresh()->subject_matter)->toBe('First edit');
+    expect($this->document->fresh()->state)->toBe(1);
+    expect($this->document->fresh()->workflow_version)->toBe(1);
+});
+
+test('stale dispatch is rejected even after custody returns to the original office', function () {
+    app(DispatchService::class)->dispatch($this->document, $this->records, ['workflow_version' => 0, 'routed_to' => [$this->target->id]]);
+    app(TransactionService::class)->process($this->document, $this->staff, [
+        'workflow_version' => 1, 'action' => 'route', 'remarks' => 'Return', 'routed_to' => $this->recordsOffice->id,
+    ]);
+    $count = DocumentTrail::count();
+    $this->actingAs($this->records)->postJson(route('documents.route', $this->document), [
+        'workflow_version' => 0, 'routed_to' => [$this->target->id],
+    ])->assertUnprocessable()->assertJsonValidationErrors('workflow_version');
+    $this->assertDatabaseCount('document_trails', $count);
+    expect($this->document->fresh()->workflow_version)->toBe(2);
+});
+
+test('destination and user state are rechecked inside the service', function () {
+    $this->target->update(['state' => 0]);
+    expect(fn () => app(DispatchService::class)->dispatch($this->document, $this->records, [
+        'workflow_version' => 0, 'routed_to' => [$this->target->id],
+    ]))->toThrow(ValidationException::class);
+    User::whereKey($this->records->id)->update(['state' => 0]);
+    expect(fn () => app(DispatchService::class)->dispatch($this->document, $this->records, [
+        'workflow_version' => 0, 'routed_to' => [$this->target->id],
+    ]))->toThrow(AuthorizationException::class);
+    $this->assertDatabaseCount('document_trails', 1);
+});
+
+test('document creation cleans uploaded files and rows if its initial trail fails', function () {
+    Storage::fake('public');
+    $event = 'eloquent.creating: '.DocumentTrail::class;
+    app('events')->listen($event, fn () => throw new RuntimeException('Trail failed'));
+    try {
+        expect(fn () => app(DocumentService::class)->save(null, $this->records, [
+            ...$this->data, 'barcode' => 'NEW', 'attached_file' => UploadedFile::fake()->create('scan.pdf', 10, 'application/pdf'),
+        ]))->toThrow(RuntimeException::class, 'Trail failed');
+    } finally {
+        app('events')->forget($event);
+    }
+    $this->assertDatabaseCount('documents', 1);
+    $this->assertDatabaseCount('document_trails', 1);
+    expect(Storage::disk('public')->allFiles())->toBe([]);
+});
+
+test('reassignment appends custody history without rewriting the original office', function () {
+    $this->actingAs($this->records)->putJson(route('documents.update', $this->document), [
+        ...$this->data, 'workflow_version' => 0, 'department_id' => $this->target->id, 'linked_documents' => 'A001 B002',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    expect($this->trail->fresh()->department_id)->toBe($this->recordsOffice->id);
+    expect($this->trail->fresh()->received_by)->toBe($this->records->id);
+    expect($this->trail->fresh()->released_to)->toBe($this->target->id);
+    expect($this->document->fresh()->linked_documents)->toBe(['A001', 'B002']);
+    expect($this->document->fresh()->workflow_version)->toBe(1);
+    $this->assertDatabaseCount('document_trails', 2);
+});
+
+test('creation without a destination retains records custody', function () {
+    $payload = [...$this->data, 'barcode' => 'NEW', 'department_id' => null];
+    $this->actingAs($this->records)->postJson(route('documents.store'), $payload)->assertRedirect()->assertSessionHasNoErrors();
+    $created = Document::where('barcode', 'NEW')->firstOrFail();
+    expect($created->department_id)->toBe($this->recordsOffice->id);
+    expect($created->trails()->count())->toBe(1);
+    expect($created->workflow_version)->toBe(0);
+});
+
+test('every existing-document mutation requires the version from the form', function () {
+    $this->actingAs($this->records)->putJson(route('documents.update', $this->document), $this->data)
+        ->assertUnprocessable()->assertJsonValidationErrors('workflow_version');
+    $this->deleteJson(route('documents.destroy', $this->document))->assertUnprocessable()->assertJsonValidationErrors('workflow_version');
+    $this->postJson(route('documents.route', $this->document), ['routed_to' => [$this->target->id]])
+        ->assertUnprocessable()->assertJsonValidationErrors('workflow_version');
+    $this->postJson(route('transactions.process', $this->document), ['action' => 'end', 'remarks' => 'Done'])
+        ->assertUnprocessable()->assertJsonValidationErrors('workflow_version');
+    $this->document->update(['department_id' => $this->adminOffice->id]);
+    $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), ['targets' => [$this->target->id], 'required_actions' => ['please_handle']])
+        ->assertUnprocessable()->assertJsonValidationErrors('workflow_version');
+    $this->assertDatabaseCount('document_trails', 1);
+});
+
+test('deactivation closes custody and increments the version exactly once', function () {
+    $this->actingAs($this->records)->deleteJson(route('documents.destroy', $this->document), ['workflow_version' => 0])
+        ->assertRedirect()->assertSessionHasNoErrors();
+    expect($this->document->fresh()->state)->toBe(0);
+    expect($this->document->fresh()->workflow_version)->toBe(1);
+    expect($this->trail->fresh()->released_action)->toBe('Document deactivated');
+    $this->deleteJson(route('documents.destroy', $this->document), ['workflow_version' => 0])->assertStatus(409);
+    expect($this->document->fresh()->workflow_version)->toBe(1);
+});
+
+test('reassignment failure preserves metadata history and the previous attachment', function () {
+    Storage::fake('public');
+    Storage::disk('public')->put('documents/original.pdf', 'existing attachment');
+    $this->document->update(['attached_file' => 'documents/original.pdf']);
+    $event = 'eloquent.updating: '.Document::class;
+    app('events')->listen($event, fn () => throw new RuntimeException('Update failed'));
+    try {
+        expect(fn () => app(DocumentService::class)->save($this->document, $this->records, [
+            ...$this->data, 'workflow_version' => 0, 'department_id' => $this->target->id,
+            'attached_file' => UploadedFile::fake()->create('replacement.pdf', 10, 'application/pdf'),
+        ]))->toThrow(RuntimeException::class, 'Update failed');
+    } finally {
+        app('events')->forget($event);
+    }
+    expect(Storage::disk('public')->allFiles())->toBe(['documents/original.pdf']);
+    expect($this->document->fresh()->attached_file)->toBe('documents/original.pdf');
+    expect($this->document->fresh()->department_id)->toBe($this->recordsOffice->id);
+    expect($this->trail->fresh()->released_at)->toBeNull();
+    $this->assertDatabaseCount('document_trails', 1);
+});
+
+test('signed referral attribution survives dispatch and the approved slip is consumed', function () {
+    $this->document->update(['department_id' => $this->adminOffice->id]);
+    $this->trail->update(['department_id' => $this->adminOffice->id, 'received_by' => $this->administrator->id]);
+    $this->administrator->update(['signature_path' => 'signatures/admin.png']);
+    $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), [
+        'workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle'], 'attach_signature' => true,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $this->actingAs($this->records)->postJson(route('documents.route', $this->document), [
+        'workflow_version' => 1, 'routed_to' => [$this->target->id],
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    expect($this->trail->fresh()->signed_by)->toBe($this->administrator->id);
+    expect($this->trail->fresh()->is_digitally_signed)->toBeTrue();
+    expect($this->document->fresh()->approved_routing_slip)->toBeNull();
+    expect($this->document->fresh()->workflow_version)->toBe(2);
+});
+
+test('intake accepts an internal office id and queues City Administrator review without moving Records custody', function () {
+    $this->actingAs($this->records)->postJson(route('documents.store'), [
+        ...$this->data, 'barcode' => 'INTERNAL', 'source_type' => 'Internal',
+        'source_location' => $this->target->id, 'department_id' => $this->adminOffice->id,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $created = Document::where('barcode', 'INTERNAL')->firstOrFail();
+    expect($created->source_location)->toBe((string) $this->target->id);
+    expect($created->department_id)->toBe($this->recordsOffice->id);
+    expect($created->requires_signature_from)->toBe('city_administrator');
+    expect($created->trails()->count())->toBe(1);
+    $this->actingAs($this->administrator)->get(route('referral-slips.index'))
+        ->assertOk()->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
+    expect($created->due_date->toDateString())->toBe('2026-09-29');
+});
+
+test('Records cannot dispatch a document while City Administrator review is pending', function () {
+    $this->document->update(['requires_signature_from' => 'city_administrator']);
+
+    $this->actingAs($this->records)->postJson(route('documents.route', $this->document), [
+        'workflow_version' => 0,
+        'routed_to' => [$this->target->id],
+    ])->assertForbidden();
+
+    expect($this->document->fresh()->department_id)->toBe($this->recordsOffice->id);
+    expect($this->document->fresh()->workflow_version)->toBe(0);
+    $this->assertDatabaseCount('document_trails', 1);
+});

@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Carbon\Carbon;
+use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 
 class Document extends Model
 {
@@ -16,7 +18,7 @@ class Document extends Model
         'current_assignee_id', 'requires_signature_from', 'approved_routing_slip',
         'source_type', 'source_location', 'source_name', 'gender',
         'contact_no', 'email', 'subject_matter', 'linked_documents', 'attached_file',
-        'state', 'status', 'due_date', 'completed_at', 'ai_routing_suggestions',
+        'state', 'status', 'due_date', 'completed_at', 'ai_routing_suggestions', 'workflow_version',
     ];
 
     protected $appends = ['is_delayed', 'is_delinquent'];
@@ -40,8 +42,22 @@ class Document extends Model
             'completed_at' => 'datetime',
             'ai_routing_suggestions' => 'array',
             'linked_documents' => 'array',
-            'approved_routing_slip' => 'array'
+            'approved_routing_slip' => 'array',
+            'workflow_version' => 'integer',
         ];
+    }
+
+    public function scopeVisibleTo(Builder $query, User $user): Builder
+    {
+        return $query->where('state', 1)->where(function (Builder $query) use ($user) {
+            $query->where('department_id', $user->department_id)
+                ->orWhereHas('trails', fn (Builder $trails) => $trails->where('department_id', $user->department_id));
+
+            if ($user->role === 'city_administrator') {
+                $query->orWhere('requires_signature_from', 'city_administrator')
+                    ->orWhereNotNull('approved_routing_slip');
+            }
+        });
     }
 
     // =====================================================================

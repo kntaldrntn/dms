@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/', function () {
-    return Inertia::render('Welcome');
+    return redirect()->route('login');
 })->name('home');
 
 Route::get('dashboard', function () {
@@ -37,13 +37,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::delete('documents/{document}', [DocumentController::class, 'destroy'])->name('documents.destroy');
         
         // --- NEW: Workflow Endpoints ---
-        Route::post('/documents/{document}/receive', [DocumentController::class, 'receiveDocument'])->name('documents.receive');
         Route::post('/documents/{document}/route', [DocumentController::class, 'routeDocument'])->name('documents.route');
-        Route::post('/documents/{document}/complete', [DocumentController::class, 'completeDocument'])->name('documents.complete');
 
         // --- NEW: Referral Slip Generation ---
         Route::get('/referral-slips', [App\Http\Controllers\ReferralSlipController::class, 'index'])->name('referral-slips.index');
         Route::post('/referral-slips/{document}/generate', [App\Http\Controllers\ReferralSlipController::class, 'generate'])->name('referral-slips.generate');
+        Route::get('/referral-slips/{document}/print', [App\Http\Controllers\ReferralSlipController::class, 'print'])->name('referral-slips.print');
         
         Route::get('/transactions/inbox', [TransactionController::class, 'index'])->name('transactions.inbox');
         Route::post('/transactions/{document}/process', [TransactionController::class, 'process'])->name('transactions.process');
@@ -60,13 +59,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
 // ADMIN ONLY REGISTRIES
 Route::middleware(['role:system_administrator'])->group(function () {
-    Route::resource('departments', DepartmentController::class);
-    Route::resource('users', UserController::class);
-    Route::resource('document-classifications', DocumentClassificationController::class);
-    Route::resource('document-types', DocumentTypeController::class);
-    Route::resource('delivery-methods', DeliveryMethodController::class);
-    Route::resource('performance-standards', PerformanceStandardController::class);
-    Route::resource('transaction-types', TransactionTypeController::class);
+    Route::resource('departments', DepartmentController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::resource('users', UserController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::resource('document-classifications', DocumentClassificationController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::resource('document-types', DocumentTypeController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::resource('delivery-methods', DeliveryMethodController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::resource('performance-standards', PerformanceStandardController::class)->only(['index', 'store']);
+    Route::resource('transaction-types', TransactionTypeController::class)->only(['index', 'store', 'update', 'destroy']);
 });
 
 require __DIR__.'/settings.php';

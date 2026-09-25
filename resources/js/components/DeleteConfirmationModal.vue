@@ -10,6 +10,7 @@ const props = defineProps<{
     title?: string;
     itemName: string;
     deleteUrl: string;
+    deleteData?: Record<string, unknown>;
 }>();
 
 const emit = defineEmits<{
@@ -30,6 +31,7 @@ const closeModal = () => {
 const confirmDelete = () => {
     isDeleting.value = true;
     router.delete(props.deleteUrl, {
+        data: props.deleteData,
         preserveScroll: true,
         onSuccess: () => {
             isDeleting.value = false;

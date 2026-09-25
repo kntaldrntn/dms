@@ -2,7 +2,7 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/vue3';
-import { Printer, ArrowLeft, RotateCcw, FileSignature, ArrowLeftRight } from 'lucide-vue-next';
+import { ArrowLeft, FileSignature, ArrowLeftRight } from 'lucide-vue-next';
 
 const props = defineProps<{
     document: any;
@@ -68,6 +68,8 @@ const getTransitDuration = (trail: any, index: number) => {
     if (!trail.released_at || !nextTrail || !nextTrail.received_at) return '-';
     return calculateDuration(trail.released_at, nextTrail.received_at);
 };
+
+const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
 </script>
 
 <template>
@@ -209,7 +211,14 @@ const getTransitDuration = (trail: any, index: number) => {
                                 
                                 <!-- Remarks -->
                                 <td class="px-3 py-4 border-r border-slate-200 text-left font-medium max-w-xs" :title="trail.remarks">
-                                    {{ trail.remarks || '-' }}
+                                    <div>{{ trail.remarks || '-' }}</div>
+                                    <div v-if="trail.required_actions?.length" class="mt-1 text-[10px] text-indigo-700">
+                                        <span class="font-bold">Required:</span> {{ trail.required_actions.map(formatRequiredAction).join(', ') }}
+                                        <span v-if="trail.other_action"> - {{ trail.other_action }}</span>
+                                    </div>
+                                    <div v-if="trail.concerned_personnel" class="mt-1 text-[10px] text-slate-600">
+                                        <span class="font-bold">Personnel:</span> {{ trail.concerned_personnel }}
+                                    </div>
                                 </td>
                             </tr>
                             

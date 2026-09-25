@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { Search, ScanBarcode, CheckCircle2, FastForward, X, AlertCircle, Clock, FileSignature, ArrowLeftRight } from 'lucide-vue-next';
+import { Search, ScanBarcode, CheckCircle2, FastForward, X, AlertCircle, Clock, FileSignature } from 'lucide-vue-next';
 import { ref, watch, computed } from 'vue';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
@@ -47,7 +47,6 @@ const breadcrumbs = [
 const page = usePage();
 const authUser = computed(() => page.props.auth?.user as any);
 const isStaff = computed(() => authUser.value?.role === 'staff');
-const isRecords = computed(() => authUser.value?.department_id === 1); // Adjust ID to match your Records dept
 
 // Processing Modal State
 const showProcessModal = ref(false);
@@ -59,17 +58,19 @@ const form = useForm({
     routed_to: '',
     remarks: '',
     attach_signature: false,
+    workflow_version: 0,
 });
 
 function openProcessModal(doc: any) {
     selectedDocument.value = doc;
     form.reset();
+    form.workflow_version = doc.workflow_version;
     form.clearErrors();
     
     // Parse AI Suggestions for the Dropdown
     let suggestions = doc.ai_routing_suggestions || [];
     if (typeof suggestions === 'string') {
-        try { suggestions = JSON.parse(suggestions); } catch (e) { suggestions = []; }
+        try { suggestions = JSON.parse(suggestions); } catch { suggestions = []; }
     }
 
     const suggestionsMap: Record<number, { reason: string, priority: string }> = {};

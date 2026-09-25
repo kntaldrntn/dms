@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
-import { Head, useForm, usePage } from '@inertiajs/vue3';
-import { ref, computed, watch } from 'vue';
+import { Head, useForm } from '@inertiajs/vue3';
+import { ref, watch } from 'vue';
 import { FileSignature, Sparkles, X, CheckCircle2 } from 'lucide-vue-next';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
@@ -11,9 +11,6 @@ const props = defineProps<{
     departments: Array<{ id: number; name: string; code: string }>;
     flash?: { success?: string; error?: string };
 }>();
-
-const page = usePage();
-const authUser = computed(() => page.props.auth?.user as any);
 
 const showModal = ref(false);
 const selectedDoc = ref<any>(null);
@@ -26,20 +23,44 @@ watch(() => props.flash, (flash) => {
     if (flash?.error) notyf.error(flash.error);
 }, { immediate: true, deep: true });
 
+const breadcrumbs = [
+    { title: 'Referral Slips', href: '/referral-slips' },
+];
+
+const actionOptions = [
+    { value: 'for_approval', label: 'For Approval' },
+    { value: 'for_signature', label: 'For Signature' },
+    { value: 'for_information_reference', label: 'For Information / Reference' },
+    { value: 'for_appropriate_action', label: 'For Appropriate Action' },
+    { value: 'for_review_evaluation', label: 'For Review / Evaluation' },
+    { value: 'lets_discuss_see_me', label: "Let's Discuss / See Me" },
+    { value: 'please_attend', label: 'Please Attend' },
+    { value: 'please_handle', label: 'Please Handle' },
+    { value: 'for_dissemination', label: 'For Dissemination' },
+    { value: 'return_documents_to_me', label: 'Return Document/s to Me' },
+    { value: 'for_comment_recommendation', label: 'For Comment / Recommendation' },
+    { value: 'other', label: 'Others (specify)' },
+];
+
 const form = useForm({
     targets: [] as number[],
+    required_actions: [] as string[],
+    other_action: '',
+    concerned_personnel: '',
     remarks: '',
     attach_signature: false,
+    workflow_version: 0,
 });
 
 function openModal(doc: any) {
     selectedDoc.value = doc;
     form.reset();
+    form.workflow_version = doc.workflow_version;
     form.clearErrors();
 
     let suggestions = doc.ai_routing_suggestions || [];
     if (typeof suggestions === 'string') {
-        try { suggestions = JSON.parse(suggestions); } catch (e) { suggestions = []; }
+        try { suggestions = JSON.parse(suggestions); } catch { suggestions = []; }
     }
 
     const suggestionsMap: Record<number, { reason: string, priority: string }> = {};
@@ -63,7 +84,7 @@ function submitSlip() {
         onSuccess: () => {
             showModal.value = false;
         },
-        onError: (errors) => {
+        onError: () => {
             notyf.error('Please check the form for errors.');
         }
     });
@@ -72,7 +93,7 @@ function submitSlip() {
 
 <template>
     <Head title="Referral Slips" />
-    <AppLayout>
+    <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-100 min-h-screen">
             <h1 class="text-2xl font-bold text-slate-800">Admin Referral Slips</h1>
             <p class="text-sm text-slate-500 -mt-4">Generate and authorize routing slips for incoming documents.</p>
@@ -106,21 +127,26 @@ function submitSlip() {
             <!-- Generate Slip Modal -->
             <Transition name="fade">
                 <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
-                    <div class="w-full max-w-2xl bg-white rounded-2xl shadow-xl flex flex-col">
-                        <div class="px-6 py-4 border-b flex justify-between items-center">
+                    <div class="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl flex flex-col">
+                        <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
                             <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
                                 <FileSignature class="w-5 h-5 text-indigo-600"/> Generate Slip: {{ selectedDoc?.barcode }}
                             </h2>
                             <button @click="showModal = false" class="text-slate-400 hover:text-slate-600"><X class="w-5 h-5"/></button>
                         </div>
 
-                        <div class="p-6 overflow-y-auto max-h-[60vh]">
-                            <h3 class="text-sm font-bold text-slate-800 mb-3">Target Departments</h3>
+                        <div class="p-6 overflow-y-auto max-h-[65vh] bg-white">
+                            <div class="mb-5 rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                                <p class="text-xs font-bold uppercase tracking-wide text-indigo-800">Background Summary</p>
+                                <p class="mt-1 text-sm font-semibold text-slate-800">{{ selectedDoc?.subject_matter }}</p>
+                                <p class="mt-1 text-xs text-slate-600">From: {{ selectedDoc?.source_name }}</p>
+                            </div>
+                            <h3 class="text-sm font-bold text-slate-800 mb-3">Target Departments <span class="text-rose-500">*</span></h3>
                             
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-1">
                                 <label v-for="dept in departments" :key="dept.id" 
                                     class="flex items-start gap-3 p-3 rounded-xl border transition cursor-pointer" 
-                                    :class="form.errors.targets ? 'border-red-300 bg-red-50' : (form.targets.includes(dept.id) ? 'bg-indigo-50 border-indigo-300' : 'bg-slate-50 border-slate-200 hover:bg-white')">
+                                :class="form.errors.targets ? 'border-red-300 bg-red-50' : (form.targets.includes(dept.id) ? 'bg-indigo-50 border-indigo-400 shadow-sm' : 'bg-white border-slate-300 hover:border-indigo-300 hover:bg-indigo-50/40 shadow-sm')">
                                     <input type="checkbox" v-model="form.targets" :value="dept.id" class="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500" />
                                     <div class="flex flex-col">
                                         <span class="text-sm font-bold text-slate-800">{{ dept.code || dept.name }}</span>
@@ -131,16 +157,44 @@ function submitSlip() {
                             <p v-if="form.errors.targets" class="text-[10px] text-red-500 mb-4 font-bold">{{ form.errors.targets }}</p>
                             <div v-else class="mb-6"></div>
 
+                            <h3 class="text-sm font-bold text-slate-800 mb-3">Required Action <span class="text-rose-500">*</span></h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-1">
+                                <label v-for="action in actionOptions" :key="action.value" class="flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition"
+                                    :class="form.errors.required_actions ? 'border-red-300 bg-red-50' : (form.required_actions.includes(action.value) ? 'bg-indigo-50 border-indigo-400 shadow-sm' : 'bg-white border-slate-300 hover:border-indigo-300 hover:bg-indigo-50/40 shadow-sm')">
+                                    <input v-model="form.required_actions" type="checkbox" :value="action.value" class="rounded text-indigo-600 focus:ring-indigo-500" />
+                                    <span class="text-xs font-semibold text-slate-700">{{ action.label }}</span>
+                                </label>
+                            </div>
+                            <p v-if="form.errors.required_actions" class="text-[10px] text-red-500 mb-3 font-bold">{{ form.errors.required_actions }}</p>
+                            <div v-else class="mb-3"></div>
+
+                            <div v-if="form.required_actions.includes('other')" class="mb-4">
+                                <label class="mb-1 block text-sm font-bold text-slate-700">Other Required Action <span class="text-rose-500">*</span></label>
+                                <input v-model="form.other_action" type="text" maxlength="255" class="w-full rounded-xl border bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" :class="form.errors.other_action ? 'border-red-500' : 'border-slate-300'" placeholder="Specify the required action..." />
+                                <p v-if="form.errors.other_action" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.other_action }}</p>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="mb-1 block text-sm font-bold text-slate-700">Concerned Personnel</label>
+                                <input v-model="form.concerned_personnel" type="text" maxlength="255" class="w-full rounded-xl border bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" :class="form.errors.concerned_personnel ? 'border-red-500' : 'border-slate-300'" placeholder="Optional person or position responsible..." />
+                                <p v-if="form.errors.concerned_personnel" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.concerned_personnel }}</p>
+                            </div>
+
                             <label class="mb-1 block text-sm font-bold text-slate-700">Admin Remarks / Directives</label>
                             <textarea v-model="form.remarks" rows="2" 
-                                class="w-full rounded-xl transition-colors mb-1"
-                                :class="form.errors.remarks ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300'"
+                                class="w-full rounded-xl border bg-white px-3 py-2 text-sm shadow-sm outline-none transition-colors mb-1"
+                                :class="form.errors.remarks ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500'"
                                 placeholder="Optional instructions for the target departments..."></textarea>
                             <p v-if="form.errors.remarks" class="text-[10px] text-red-500 mb-4 font-bold">{{ form.errors.remarks }}</p>
                             <div v-else class="mb-4"></div>
 
+                            <div v-if="form.required_actions.length" class="mb-4 rounded-xl border border-indigo-100 bg-indigo-50 p-3">
+                                <p class="text-[10px] font-bold uppercase tracking-wide text-indigo-700">Slip Preview - Required Action</p>
+                                <p class="mt-1 text-xs font-semibold text-slate-700">{{ actionOptions.filter(action => form.required_actions.includes(action.value)).map(action => action.label).join('; ') }}<span v-if="form.other_action">: {{ form.other_action }}</span></p>
+                            </div>
+
                             <label class="flex items-center gap-3 p-3 rounded-xl border transition cursor-pointer" 
-                                :class="form.errors.attach_signature ? 'border-red-300 bg-red-50' : (form.attach_signature ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200 hover:bg-white')">
+                                :class="form.errors.attach_signature ? 'border-red-300 bg-red-50' : (form.attach_signature ? 'bg-amber-50 border-amber-300 shadow-sm' : 'bg-white border-slate-300 hover:border-amber-300 shadow-sm')">
                                 <input type="checkbox" v-model="form.attach_signature" class="rounded text-amber-600 focus:ring-amber-500 w-4 h-4" />
                                 <div class="flex flex-col">
                                     <span class="text-sm font-bold text-slate-800 flex items-center gap-1.5">

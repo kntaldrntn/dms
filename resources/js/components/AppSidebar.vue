@@ -5,9 +5,6 @@ import NavMain from '@/components/NavMain.vue';
 import {
     Sidebar,
     SidebarContent,
-    SidebarMenu,
-    SidebarMenuButton,
-    SidebarMenuItem
 } from '@/components/ui/sidebar';
 import { type NavItem } from '@/types';
 import {

@@ -3,8 +3,8 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import DeleteConfirmationModal from '@/components/DeleteConfirmationModal.vue';
 import RoutingModal from '@/components/RoutingModal.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Search, Pencil, Trash2, FastForward, AlertCircle, Clock, Loader2, Sparkles, Link as LinkIcon, FileUp, X, ClipboardCheck } from 'lucide-vue-next';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { Search, Pencil, Trash2, FastForward, AlertCircle, Clock, Loader2, Sparkles, Link as LinkIcon, FileUp, X, FileText } from 'lucide-vue-next';
 import { ref, watch } from 'vue';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
@@ -61,9 +61,11 @@ watch(() => props.flash, (flash) => {
 const showDeleteModal = ref(false);
 const itemToDeleteUrl = ref('');
 const itemToDeleteName = ref('');
+const itemToDeleteVersion = ref(0);
 function openDeleteModal(doc: any) {
     itemToDeleteUrl.value = route('documents.destroy', doc.id);
     itemToDeleteName.value = `Document ${doc.barcode}`;
+    itemToDeleteVersion.value = doc.workflow_version;
     showDeleteModal.value = true;
 }
 
@@ -97,11 +99,6 @@ const form = useForm({
     ai_routing_suggestions: [] as any[],
 });
 
-const getDepartmentName = (id: number) => {
-    const dept = props.departments.find(d => d.id === id);
-    return dept ? dept.name : 'Unknown Office';
-};
-
 // --- SMART BARCODE SEARCH ---
 const showBarcodeDropdown = ref(false);
 const barcodeResults = ref<Array<{ barcode: string, subject_matter: string }>>([]);
@@ -116,7 +113,7 @@ const handleLinkedDocumentInput = async (e: any) => {
             const res = await axios.get(route('documents.searchBarcodes'), { params: { q: lastWord } });
             barcodeResults.value = res.data;
             showBarcodeDropdown.value = barcodeResults.value.length > 0;
-        } catch (err) {
+        } catch {
             showBarcodeDropdown.value = false;
         }
     } else {
@@ -262,7 +259,7 @@ function submitDocument() {
             aiMetrics.value = null;
             analysisError.value = '';
         },
-        onError: (errors) => {
+        onError: () => {
             notyf.error('Please check the highlighted fields.');
         }
     });
@@ -567,13 +564,18 @@ function submitDocument() {
                                     </td>
                                     <td class="px-4 py-3 whitespace-nowrap">
                                         <div class="flex justify-center items-center gap-2">
-                                            
-                                            <!-- ROUTING/STATUS: Hide FastForward if waiting at Admin -->
-                                            <span v-if="doc.department_id !== $page.props.auth.user.department_id" class="text-[10px] font-bold uppercase tracking-wider text-slate-500 py-1.5 px-2 bg-slate-100 rounded-md border border-slate-200" title="Waiting for Executive Referral">
-                                                With {{ doc.department?.code || 'Exec.' }}
+
+                                            <!-- REFERRAL SLIP: authorized approvers and Records can reopen an approved slip -->
+                                            <a v-if="doc.approved_routing_slip && ['records_manager', 'city_administrator', 'system_administrator'].includes($page.props.auth.user.role)" :href="`${route('referral-slips.print', doc.id)}?autoprint=1`" target="_blank" rel="noopener" class="rounded-md border border-violet-200 bg-violet-50 p-1.5 text-violet-700 shadow-sm transition hover:bg-violet-100" title="Preview / Save Referral Action Slip as PDF">
+                                                <FileText class="h-4 w-4" />
+                                            </a>
+
+                                            <!-- ROUTING/STATUS: Hide FastForward while City Administrator approval is pending -->
+                                            <span v-if="doc.requires_signature_from === 'city_administrator' || doc.department_id !== $page.props.auth.user.department_id" class="text-[10px] font-bold uppercase tracking-wider text-slate-500 py-1.5 px-2 bg-slate-100 rounded-md border border-slate-200" title="Waiting for City Administrator approval">
+                                                {{ doc.requires_signature_from === 'city_administrator' ? 'Pending City Administrator Review' : `With ${doc.department?.code || 'Exec.'}` }}
                                             </span>
 
-                                            <!-- ROUTING BUTTON: Show if back at Records -->
+                                            <!-- ROUTING BUTTON: Show only after required approval -->
                                             <button v-else @click="openRoutingModal(doc)" 
                                                 class="rounded-md p-1.5 transition border shadow-sm"
                                                 :class="doc.approved_routing_slip ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-200' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border-indigo-100'" 
@@ -617,7 +619,7 @@ function submitDocument() {
 
             </div>
 
-            <DeleteConfirmationModal v-model:show="showDeleteModal" :deleteUrl="itemToDeleteUrl" :item-name="itemToDeleteName" title="Deactivate Document" />
+            <DeleteConfirmationModal v-model:show="showDeleteModal" :deleteUrl="itemToDeleteUrl" :delete-data="{ workflow_version: itemToDeleteVersion }" :item-name="itemToDeleteName" title="Deactivate Document" />
             <RoutingModal :show="showRoutingModal" :document="documentToRoute" :departments="departments" @close="showRoutingModal = false" />
 
         </div>

@@ -7,13 +7,13 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import type { BreadcrumbItemType } from '@/types';
 import { ref, computed } from 'vue';
 import { usePage, Link } from '@inertiajs/vue3';
-import { Search, Bell, Grid, User, LogOut, ChevronRight } from 'lucide-vue-next';
+import { User, LogOut, ChevronRight } from 'lucide-vue-next';
 
 interface Props {
     breadcrumbs?: BreadcrumbItemType[];
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
     breadcrumbs: () => [],
 });
 

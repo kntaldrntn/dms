@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
-use Carbon\Carbon;
 use App\Models\Document;
-use App\Models\DocumentTrail;
-use App\Models\User;
-use Illuminate\Support\Facades\Auth;
+use App\Http\Requests\AnalyzeDocumentRequest;
+use App\Http\Requests\DispatchDocumentRequest;
+use App\Http\Requests\DocumentMutationRequest;
+use App\Http\Requests\SaveDocumentRequest;
+use App\Services\DispatchService;
+use App\Services\DocumentService;
 use App\Models\TransactionType;
 use App\Models\DocumentType;
 use App\Models\DocumentClassification;
@@ -21,8 +23,8 @@ class DocumentController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Document::with(['documentType', 'department', 'transactionType'])
-                         ->where('state', 1);
+        $this->authorize('viewAny', Document::class);
+        $query = Document::visibleTo($request->user())->with(['documentType', 'department', 'transactionType']);
 
         if ($request->filled('search')) {
             $searchTerm = $request->search;
@@ -48,6 +50,7 @@ class DocumentController extends Controller
             'classifications' => DocumentClassification::where('state', 1)->get(),
             'deliveryMethods' => DeliveryMethod::where('state', 1)->get(),
             'generatedAccessCode' => strtoupper(Str::random(6)),
+            'canCreate' => $request->user()->can('create', Document::class),
         ]);
     }
 
@@ -70,72 +73,16 @@ class DocumentController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+    public function store(SaveDocumentRequest $request, DocumentService $documents)
     {
-        $validated = $request->validate([
-            'barcode' => 'required|string|max:50|unique:documents,barcode',
-            'transaction_type_id' => 'required|exists:transaction_types,id',
-            'document_type_id' => 'required|exists:document_types,id',
-            'source_type' => 'required|string',
-            'source_location' => 'nullable|string',
-            'source_name' => 'required|string|max:255',
-            'delivery_method_id' => 'nullable|exists:delivery_methods,id',
-            'gender' => 'nullable|string',
-            'contact_no' => 'nullable|string',
-            'email' => 'nullable|email',
-            'subject_matter' => 'required|string',
-            'classification_id' => 'nullable|exists:document_classifications,id',
-            'department_id' => 'nullable|exists:departments,id',
-            'access_code' => 'required|string|max:20',
-            'ai_routing_suggestions' => 'nullable|array',
-            'linked_documents' => 'nullable|string',
-            'attached_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
-        ]);
-
-        if ($request->hasFile('attached_file')) {
-            $path = $request->file('attached_file')->store('documents', 'public');
-            $validated['attached_file'] = $path; 
-        }
-
-        $transactionType = TransactionType::findOrFail($validated['transaction_type_id']);
-        
-        $now = Carbon::now('Asia/Manila'); 
-        $validated['due_date'] = $now->copy()->addWeekdays($transactionType->processing_days);
-        $validated['status'] = 'Pending';
-
-        $document = Document::create($validated);
-
-        // 1. Always create the initial receipt trail for Records
-        $initialTrail = DocumentTrail::create([
-            'document_id' => $document->id,
-            'department_id' => Auth::user()->department_id ?? 1, 
-            'received_by' => Auth::id(),
-            'received_at' => $now,
-            'received_action' => 'Document Scanned & Registered',
-        ]);
-
-        // 2. AUTO-ROUTE FIX: Only attempt to dispatch if a specific department was selected
-        if (!empty($validated['department_id'])) {
-            $initialTrail->update([
-                'released_by' => Auth::id(),
-                'released_at' => $now,
-                'released_action' => 'Direct Dispatch',
-                'released_to' => $validated['department_id'], 
-            ]);
-
-            DocumentTrail::create([
-                'document_id' => $document->id,
-                'department_id' => $validated['department_id'],
-                'received_at' => $now, // Target office SLA starts
-                'received_action' => 'Direct Dispatch from Records', // <-- FIXED BLANK BUG
-            ]);
-        }
+        $documents->save(null, $request->user(), $request->validated());
 
         return redirect()->route('documents.index')->with('success', 'Document registered successfully.');
     }
 
     public function show(Document $document)
     {
+        $this->authorize('view', $document);
         $document->load([
             'transactionType', 
             'documentType', 
@@ -157,6 +104,8 @@ class DocumentController extends Controller
 
     public function edit(Document $document)
     {
+        $this->authorize('update', $document);
+        $this->ensureActive($document);
         return Inertia::render('documents/Edit', [
             'document' => $document,
             'transactionTypes' => TransactionType::where('state', 1)->get(),
@@ -167,75 +116,21 @@ class DocumentController extends Controller
         ]);
     }
 
-    public function update(Request $request, Document $document)
+    public function update(SaveDocumentRequest $request, Document $document, DocumentService $documents)
     {
-        $rules = [
-            'barcode' => 'required|string|max:50|unique:documents,barcode,' . $document->id,
-            'transaction_type_id' => 'required|exists:transaction_types,id',
-            'document_type_id' => 'required|exists:document_types,id',
-            'source_type' => 'required|string',
-            'source_location' => 'nullable|string',
-            'source_name' => 'required|string|max:255',
-            'delivery_method_id' => 'nullable|exists:delivery_methods,id',
-            'gender' => 'nullable|string',
-            'contact_no' => 'nullable|string',
-            'email' => 'nullable|email',
-            'subject_matter' => 'required|string',
-            'classification_id' => 'nullable|exists:document_classifications,id',
-            'department_id' => 'nullable|exists:departments,id',
-            'access_code' => 'required|string|max:20',
-            'ai_routing_suggestions' => 'nullable|array',
-            'linked_documents' => 'nullable|string',
-        ];
-
-        if ($request->hasFile('attached_file')) {
-            $rules['attached_file'] = 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240';
-        }
-
-        $validated = $request->validate($rules);
-
-        if ($request->hasFile('attached_file')) {
-            $path = $request->file('attached_file')->store('documents', 'public');
-            $validated['attached_file'] = $path;
-        }
-
-        if ($document->transaction_type_id != $validated['transaction_type_id']) {
-            $transactionType = TransactionType::findOrFail($validated['transaction_type_id']);
-            $validated['due_date'] = Carbon::parse($document->created_at, 'Asia/Manila')->addWeekdays($transactionType->processing_days);
-        }
-
-        if ($document->department_id != $validated['department_id']) {
-            $latestTrail = DocumentTrail::where('document_id', $document->id)
-                ->where('department_id', $document->department_id)
-                ->whereNull('released_at')
-                ->latest('id')
-                ->first();
-
-            if ($latestTrail && !empty($validated['department_id'])) {
-                $latestTrail->update([
-                    'department_id' => $validated['department_id']
-                ]);
-            }
-        }
-
-        $document->update($validated);
+        $documents->save($document, $request->user(), $request->validated());
 
         return redirect()->route('documents.index')->with('success', 'Document updated successfully.');
     }
 
-    public function destroy(Document $document)
+    public function destroy(DocumentMutationRequest $request, Document $document, DocumentService $documents)
     {
-        $document->update(['state' => 0]);
+        $documents->deactivate($document, $request->user(), $request->validated('workflow_version'));
         return redirect()->back()->with('success', 'Document deactivated successfully.');
     }
 
-    public function analyze(Request $request)
+    public function analyze(AnalyzeDocumentRequest $request)
     {
-        $request->validate([
-            'ai_thumbnail' => 'required|mimes:jpg,jpeg|max:5120',
-            'extracted_text' => 'required|string',
-        ]);
-
         try {
             $departments = Department::where('state', 1)->pluck('name', 'id')->toJson();
             $documentTypes = DocumentType::where('state', 1)->pluck('document_type', 'id')->toJson();
@@ -446,6 +341,9 @@ class DocumentController extends Controller
                 $response->choices[0]->message->content,
                 true
             );
+            if (!is_array($result) || $result === []) {
+                throw new \UnexpectedValueException('Invalid analysis response.');
+            }
             
             if (
                 !empty($result['barcode'])
@@ -487,12 +385,8 @@ class DocumentController extends Controller
 
             return response()->json($result);
 
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' =>
-                    'Failed to analyze document: ' .
-                    $e->getMessage()
-            ], 500);
+        } catch (\Throwable) {
+            return response()->json(['error' => 'Document analysis is unavailable. Please try again later.'], 502);
         }
     }
 
@@ -500,50 +394,9 @@ class DocumentController extends Controller
     // CORE WORKFLOW & ROUTING MECHANICS 
     // =====================================================================
 
-    public function routeDocument(Request $request, Document $document)
+    public function routeDocument(DispatchDocumentRequest $request, Document $document, DispatchService $dispatch)
     {
-        // Tier 1 Routing (Records distributing via the dual-panel modal)
-        $validated = $request->validate([
-            'routed_to' => 'required|array|min:1',
-            'routed_to.*' => 'exists:departments,id',
-        ]);
-
-        $now = Carbon::now('Asia/Manila');
-        $user = Auth::user();
-
-        // 1. Close the active trail for Records
-        $activeTrail = DocumentTrail::where('document_id', $document->id)
-            ->where('department_id', $user->department_id)
-            ->whereNull('released_at')
-            ->latest('id')
-            ->first();
-
-        if ($activeTrail) {
-            $activeTrail->update([
-                'released_by' => $user->id,
-                'released_at' => $now,
-                'released_action' => 'Dispatched to target office(s)',
-                'released_to' => $validated['routed_to'][0], // Logs primary physical target
-                'trail_type' => 'forward',
-                'is_digitally_signed' => false,
-                'signed_by' => null,
-            ]);
-        }
-
-        // 2. Fast Forward Distribution: Create auto-receive trails for EVERY selected office
-        foreach ($validated['routed_to'] as $departmentId) {
-            DocumentTrail::create([
-                'document_id' => $document->id,
-                'department_id' => $departmentId, 
-                'received_at' => $now, // Target SLA clocks start instantly
-                'received_action' => 'Dispatched from Records', // <-- FIXED BLANK BUG
-            ]);
-        }
-
-        // Move the physical location to the primary target
-        $document->update([
-            'department_id' => $validated['routed_to'][0],
-        ]);
+        $dispatch->dispatch($document, $request->user(), $request->validated());
 
         return redirect()->back()->with('success', 'Document successfully routed.');
     }
@@ -551,17 +404,23 @@ class DocumentController extends Controller
     // --- SMART SEARCH API ---
     public function searchBarcodes(Request $request)
     {
+        $this->authorize('viewAny', Document::class);
         $query = $request->get('q');
         
         if (!$query || strlen($query) < 2) {
             return response()->json([]);
         }
 
-        $results = Document::where('barcode', 'LIKE', "%{$query}%")
+        $results = Document::visibleTo($request->user())->where('barcode', 'LIKE', "%{$query}%")
                            ->select('barcode', 'subject_matter')
                            ->take(5) 
                            ->get();
                            
         return response()->json($results);
+    }
+
+    private function ensureActive(Document $document): void
+    {
+        abort_if($document->state !== 1 || $document->status === 'Completed', 409, 'This document is no longer active.');
     }
 }
