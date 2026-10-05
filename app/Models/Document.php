@@ -49,15 +49,7 @@ class Document extends Model
 
     public function scopeVisibleTo(Builder $query, User $user): Builder
     {
-        return $query->where('state', 1)->where(function (Builder $query) use ($user) {
-            $query->where('department_id', $user->department_id)
-                ->orWhereHas('trails', fn (Builder $trails) => $trails->where('department_id', $user->department_id));
-
-            if ($user->role === 'city_administrator') {
-                $query->orWhere('requires_signature_from', 'city_administrator')
-                    ->orWhereNotNull('approved_routing_slip');
-            }
-        });
+        return $query->where('state', 1);
     }
 
     // =====================================================================

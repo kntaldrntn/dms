@@ -566,7 +566,7 @@ function submitDocument() {
                                         <div class="flex justify-center items-center gap-2">
 
                                             <!-- REFERRAL SLIP: authorized approvers and Records can reopen an approved slip -->
-                                            <a v-if="doc.approved_routing_slip && ['records_manager', 'city_administrator', 'system_administrator'].includes($page.props.auth.user.role)" :href="`${route('referral-slips.print', doc.id)}?autoprint=1`" target="_blank" rel="noopener" class="rounded-md border border-violet-200 bg-violet-50 p-1.5 text-violet-700 shadow-sm transition hover:bg-violet-100" title="Preview / Save Referral Action Slip as PDF">
+                                            <a v-if="doc.approved_routing_slip && ['records_manager', 'city_administrator', 'system_administrator'].includes($page.props.auth.user.role)" :href="route('referral-slips.preview', doc.id)" target="_blank" rel="noopener" class="rounded-md border border-violet-200 bg-violet-50 p-1.5 text-violet-700 shadow-sm transition hover:bg-violet-100" title="Open Referral Action Slip PDF preview">
                                                 <FileText class="h-4 w-4" />
                                             </a>
 

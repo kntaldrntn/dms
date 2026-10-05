@@ -42,7 +42,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         // --- NEW: Referral Slip Generation ---
         Route::get('/referral-slips', [App\Http\Controllers\ReferralSlipController::class, 'index'])->name('referral-slips.index');
         Route::post('/referral-slips/{document}/generate', [App\Http\Controllers\ReferralSlipController::class, 'generate'])->name('referral-slips.generate');
-        Route::get('/referral-slips/{document}/print', [App\Http\Controllers\ReferralSlipController::class, 'print'])->name('referral-slips.print');
+    Route::get('/referral-slips/{document}/print', [App\Http\Controllers\ReferralSlipController::class, 'print'])->name('referral-slips.print');
+    Route::get('/referral-slips/{document}/preview', [App\Http\Controllers\ReferralSlipController::class, 'preview'])->name('referral-slips.preview');
         
         Route::get('/transactions/inbox', [TransactionController::class, 'index'])->name('transactions.inbox');
         Route::post('/transactions/{document}/process', [TransactionController::class, 'process'])->name('transactions.process');

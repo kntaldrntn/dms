@@ -23,6 +23,7 @@ beforeEach(function () {
     $this->target = Department::create(['code' => 'DST', 'name' => 'Destination', 'state' => 1]);
     $this->records = User::factory()->create(['role' => 'records_manager', 'department_id' => $this->recordsOffice->id]);
     $this->administrator = User::factory()->create(['role' => 'city_administrator', 'department_id' => $this->adminOffice->id]);
+    $this->systemAdministrator = User::factory()->create(['role' => 'system_administrator', 'department_id' => $this->adminOffice->id]);
     $this->staff = User::factory()->create(['department_id' => $this->target->id]);
     $type = DocumentType::create(['document_code' => 'TEST', 'document_type' => 'Test', 'state' => 1]);
     $transaction = TransactionType::create(['name' => 'Simple', 'processing_days' => 3, 'state' => 1]);
@@ -67,17 +68,27 @@ test('inactive users cannot read or mutate document workflows', function () {
     $this->postJson(route('transactions.process', $this->document), ['workflow_version' => 0, 'action' => 'end', 'remarks' => 'Done'])->assertForbidden();
 });
 
-test('document list detail and search share office visibility', function () {
-    $this->actingAs($this->staff)->get(route('documents.show', $this->document))->assertForbidden();
-    $this->getJson(route('documents.searchBarcodes', ['q' => 'WF']))->assertExactJson([]);
-    $this->get(route('documents.index'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 0)->where('canCreate', false));
-
-    $this->trail->update(['department_id' => $this->target->id]);
-    $this->get(route('documents.show', $this->document))->assertOk();
+test('active users can view the document registry while transactions remain department-scoped', function () {
+    $this->actingAs($this->staff)->get(route('documents.show', $this->document))->assertOk();
     $this->getJson(route('documents.searchBarcodes', ['q' => 'WF']))->assertJsonPath('0.barcode', 'WF-001');
+    $this->get(route('documents.index'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 1)->where('canCreate', false));
+    $this->get(route('transactions.inbox'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 0));
+
+    $this->document->update(['department_id' => $this->target->id]);
+    $this->get(route('transactions.inbox'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
+
     $this->document->update(['state' => 0]);
     $this->get(route('documents.show', $this->document))->assertForbidden();
     $this->getJson(route('documents.searchBarcodes', ['q' => 'WF']))->assertExactJson([]);
+});
+
+test('system administrators can view every active document', function () {
+    $this->actingAs($this->systemAdministrator)->get(route('documents.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
+    $this->get(route('documents.show', $this->document))->assertOk();
+    $this->getJson(route('documents.searchBarcodes', ['q' => 'WF']))
+        ->assertJsonPath('0.barcode', 'WF-001');
 });
 
 test('dispatch rejects duplicate inactive self and empty target lists without writes', function () {
@@ -306,6 +317,29 @@ test('signed referral attribution survives dispatch and the approved slip is con
     expect($this->trail->fresh()->is_digitally_signed)->toBeTrue();
     expect($this->document->fresh()->approved_routing_slip)->toBeNull();
     expect($this->document->fresh()->workflow_version)->toBe(2);
+});
+
+test('a referral slip displays the approving City Administrator signature when it is on file', function () {
+    Storage::fake('public');
+    Storage::disk('public')->makeDirectory('signatures');
+    $signature = UploadedFile::fake()->image('admin.png', 100, 30);
+    Storage::disk('public')->put('signatures/admin.png', file_get_contents($signature->getPathname()));
+
+    $this->document->update(['department_id' => $this->adminOffice->id]);
+    $this->trail->update(['department_id' => $this->adminOffice->id, 'received_by' => $this->administrator->id]);
+    $this->administrator->update(['signature_path' => 'signatures/admin.png']);
+
+    $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), [
+        'workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle'],
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $this->get(route('referral-slips.print', $this->document))
+        ->assertOk()
+        ->assertSee('/storage/signatures/admin.png');
+
+    $this->get(route('referral-slips.preview', $this->document))
+        ->assertOk()
+        ->assertHeader('content-type', 'application/pdf');
 });
 
 test('intake accepts an internal office id and queues City Administrator review without moving Records custody', function () {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head, router } from '@inertiajs/vue3';
+import { Head, Link, router } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -19,6 +19,11 @@ const props = defineProps<{
     delinquent: any;
     pipeline: Array<any>;
     processingTimes: Array<any>;
+    selectedCategory?: string | null;
+    selectedPipeline?: string | null;
+    drillDownDocuments?: any | null;
+    reportTitle?: string | null;
+    reportDescription?: string | null;
 }>();
 
 const currentMonth = ref(props.selectedMonth);
@@ -26,6 +31,25 @@ const currentMonth = ref(props.selectedMonth);
 // Refetches data from the controller when they click generate
 function generateReport() {
     router.get(route('dashboard'), { month: currentMonth.value }, { preserveState: true });
+}
+
+function categoryReportUrl(row: any) {
+    return `/dashboard?month=${encodeURIComponent(props.selectedMonth)}&transaction_category=${encodeURIComponent(row.label)}&pipeline_status=${encodeURIComponent(row.pipeline)}`;
+}
+
+function dashboardUrl() {
+    return `/dashboard?month=${encodeURIComponent(props.selectedMonth)}`;
+}
+
+function delinquentReportUrl() {
+    return `/dashboard?month=${encodeURIComponent(props.selectedMonth)}&delinquent=1`;
+}
+
+function formatDate(value: string | null) {
+    if (!value) return '—';
+    return new Intl.DateTimeFormat('en-PH', {
+        month: 'short', day: '2-digit', year: 'numeric',
+    }).format(new Date(value));
 }
 
 // Static class strings (not interpolated) so Tailwind's JIT scanner can detect them
@@ -83,7 +107,7 @@ const toneClass: Record<string, string> = {
                 </div>
 
                 <!-- Delinquent / Alerts (Specific to Auth User's Department) -->
-                <div class="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)]">
+                <component :is="delinquent.value > 0 ? Link : 'div'" :href="delinquentReportUrl()" class="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)] transition" :class="delinquent.value > 0 ? 'hover:border-red-200 hover:bg-red-50/30' : 'cursor-default opacity-75'" :title="delinquent.value > 0 ? 'View delinquent documents in my department' : 'No delinquent documents in my department'">
                     <div class="flex items-start justify-between">
                         <span class="text-sm font-semibold text-slate-500">Delinquent (My Dept)</span>
                         <span class="rounded-md bg-red-50 px-2 py-1 text-xs font-bold text-red-600">Action Req</span>
@@ -98,7 +122,7 @@ const toneClass: Record<string, string> = {
                             <span class="block text-xs font-medium text-slate-500">Due Tmrw: <strong class="text-slate-800">{{ delinquent.dueTomorrow }}</strong></span>
                         </div>
                     </div>
-                </div>
+                </component>
             </div>
 
             <!-- Middle Status Pipeline (On-Time, On-Going, Delayed) -->
@@ -133,18 +157,70 @@ const toneClass: Record<string, string> = {
                         </span>
                     </div>
                     <div class="space-y-4">
-                        <div
+                        <component
+                            :is="row.value > 0 ? Link : 'div'"
                             v-for="(row, idx) in stage.rows"
                             :key="row.label"
-                            class="flex items-end justify-between"
-                            :class="idx !== stage.rows.length - 1 ? 'border-b border-slate-100 pb-2' : ''"
+                            :href="categoryReportUrl(row)"
+                            class="flex items-end justify-between rounded-md transition"
+                            :class="[idx !== stage.rows.length - 1 ? 'border-b border-slate-100 pb-2' : '', row.value > 0 ? 'hover:bg-slate-50 hover:px-2' : 'cursor-default opacity-60']"
+                            :title="row.value > 0 ? `View ${stage.title} ${row.label} documents for ${selectedMonth}` : `No ${stage.title} ${row.label} documents`"
                         >
                             <span class="text-sm text-slate-500">{{ row.label }}</span>
                             <span class="text-xl font-bold text-slate-800">{{ row.value }}</span>
-                        </div>
+                        </component>
                     </div>
                 </div>
             </div>
+
+            <!-- DTS-style report drill-down, kept on the dashboard -->
+            <section v-if="reportTitle && drillDownDocuments" class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div class="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-800">{{ reportTitle }}</h2>
+                        <p class="text-xs text-slate-500">{{ reportDescription }} · {{ drillDownDocuments.total }} result{{ drillDownDocuments.total === 1 ? '' : 's' }}</p>
+                    </div>
+                    <Link :href="dashboardUrl()" class="text-sm font-semibold text-indigo-600 transition hover:text-indigo-800">Close report</Link>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-left text-sm text-slate-700">
+                        <thead class="border-b border-slate-200 bg-slate-100 text-xs font-bold uppercase tracking-wider text-slate-600">
+                            <tr>
+                                <th class="px-4 py-3">Date</th>
+                                <th class="px-4 py-3">Barcode</th>
+                                <th class="px-4 py-3">Document Type</th>
+                                <th class="px-4 py-3">Source</th>
+                                <th class="px-4 py-3">Subject Matter</th>
+                                <th class="px-4 py-3">Dept.</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-200">
+                            <tr v-for="document in drillDownDocuments.data" :key="document.id" class="transition hover:bg-slate-50">
+                                <td class="whitespace-nowrap px-4 py-3">{{ formatDate(document.created_at) }}</td>
+                                <td class="whitespace-nowrap px-4 py-3 font-mono font-semibold">
+                                    <Link :href="route('documents.show', document.id)" class="text-indigo-600 hover:underline">{{ document.barcode }}</Link>
+                                </td>
+                                <td class="px-4 py-3">{{ document.document_type?.document_type || '—' }}</td>
+                                <td class="px-4 py-3">{{ document.source_name || '—' }}</td>
+                                <td class="max-w-md px-4 py-3">{{ document.subject_matter || '—' }}</td>
+                                <td class="px-4 py-3">{{ document.department?.code || '—' }}</td>
+                            </tr>
+                            <tr v-if="drillDownDocuments.data.length === 0">
+                                <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-500">No documents match this SLA report.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div v-if="drillDownDocuments.last_page > 1" class="flex items-center justify-between border-t border-slate-200 px-5 py-3 text-sm">
+                    <Link v-if="drillDownDocuments.prev_page_url" :href="drillDownDocuments.prev_page_url" class="font-semibold text-indigo-600 hover:underline">← Previous</Link>
+                    <span v-else></span>
+                    <span class="text-slate-500">Page {{ drillDownDocuments.current_page }} of {{ drillDownDocuments.last_page }}</span>
+                    <Link v-if="drillDownDocuments.next_page_url" :href="drillDownDocuments.next_page_url" class="font-semibold text-indigo-600 hover:underline">Next →</Link>
+                    <span v-else></span>
+                </div>
+            </section>
 
             <!-- Bottom Section (Average Processing Times) -->
             <div class="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)]">

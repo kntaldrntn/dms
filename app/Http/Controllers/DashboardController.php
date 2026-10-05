@@ -7,6 +7,7 @@ use App\Models\TransactionType;
 use App\Models\DocumentType;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 
@@ -81,6 +82,68 @@ class DashboardController extends Controller
             return 'Simple';
         };
 
+        $selectedCategory = $request->string('transaction_category')->toString();
+        if (!in_array($selectedCategory, ['Simple', 'Complex', 'Highly Technical'], true)) {
+            $selectedCategory = null;
+        }
+        $selectedPipeline = $request->string('pipeline_status')->toString();
+        if (!in_array($selectedPipeline, ['on_time', 'on_going', 'delayed'], true)) {
+            $selectedPipeline = null;
+        }
+
+        $drillDownDocuments = null;
+        $reportTitle = null;
+        $reportDescription = null;
+        if ($selectedCategory) {
+            $transactionTypeIds = $transactionTypes
+                ->filter(fn ($name) => $mapTransType($name) === $selectedCategory)
+                ->keys()
+                ->all();
+
+            $drillDownQuery = (clone $monthQuery)
+                ->with(['transactionType', 'documentType', 'department'])
+                ->whereIn('transaction_type_id', $transactionTypeIds);
+
+            // These conditions deliberately mirror the pipeline counter below:
+            // on-time is completed on/before its due date, on-going is still
+            // open and within SLA, and delayed has exceeded its due date.
+            $dashboardNow = Carbon::now('Asia/Manila');
+            if ($selectedPipeline === 'on_time') {
+                $drillDownQuery->where('status', 'Completed')
+                    ->where(fn ($documents) => $documents->whereNull('due_date')->orWhereColumn('completed_at', '<=', 'due_date'));
+            } elseif ($selectedPipeline === 'on_going') {
+                $drillDownQuery->where('status', '!=', 'Completed')
+                    ->where(fn ($documents) => $documents->whereNull('due_date')->orWhere('due_date', '>=', $dashboardNow));
+            } elseif ($selectedPipeline === 'delayed') {
+                $drillDownQuery->where(function ($documents) use ($dashboardNow) {
+                    $documents->where(fn ($completed) => $completed->where('status', 'Completed')->whereNotNull('due_date')->whereColumn('completed_at', '>', 'due_date'))
+                        ->orWhere(fn ($open) => $open->where('status', '!=', 'Completed')->whereNotNull('due_date')->where('due_date', '<', $dashboardNow));
+                });
+            }
+
+            $drillDownDocuments = $drillDownQuery->latest()->paginate(15, ['*'], 'documents_page')->withQueryString();
+            $pipelineLabels = ['on_time' => 'On-Time', 'on_going' => 'On-Going', 'delayed' => 'Delayed'];
+            $reportTitle = ($pipelineLabels[$selectedPipeline] ?? 'All').' '.$selectedCategory.' Documents';
+            $reportDescription = $selectedMonthName.' '.$year;
+        } elseif ($request->boolean('delinquent')) {
+            // Delinquency is office-specific and comes from PerformanceStandard,
+            // so use the Document accessor that powers the dashboard counter.
+            $delinquentDocuments = $myDeptDocs->filter(fn (Document $document) => $document->is_delinquent)
+                ->sortByDesc('created_at')
+                ->values();
+            $page = LengthAwarePaginator::resolveCurrentPage('documents_page');
+            $perPage = 15;
+            $drillDownDocuments = new LengthAwarePaginator(
+                $delinquentDocuments->forPage($page, $perPage)->values(),
+                $delinquentDocuments->count(),
+                $perPage,
+                $page,
+                ['path' => $request->url(), 'pageName' => 'documents_page', 'query' => $request->query()]
+            );
+            $reportTitle = 'Delinquent Documents (My Department)';
+            $reportDescription = 'Performance-standard SLA breaches in your current office';
+        }
+
         $now = Carbon::now('Asia/Manila');
         
         foreach($allMonthDocs as $doc) {
@@ -106,25 +169,25 @@ class DashboardController extends Controller
             [
                 'title' => 'On-Time', 'subtitle' => 'Documents', 'status' => 'Healthy', 'statusColor' => 'emerald',
                 'rows' => [
-                    ['label' => 'Simple', 'value' => $pipelineData['On-Time']['Simple']],
-                    ['label' => 'Complex', 'value' => $pipelineData['On-Time']['Complex']],
-                    ['label' => 'Highly Technical', 'value' => $pipelineData['On-Time']['Highly Technical']],
+                    ['label' => 'Simple', 'value' => $pipelineData['On-Time']['Simple'], 'pipeline' => 'on_time'],
+                    ['label' => 'Complex', 'value' => $pipelineData['On-Time']['Complex'], 'pipeline' => 'on_time'],
+                    ['label' => 'Highly Technical', 'value' => $pipelineData['On-Time']['Highly Technical'], 'pipeline' => 'on_time'],
                 ]
             ],
             [
                 'title' => 'On-Going', 'subtitle' => 'Documents', 'status' => 'In Progress', 'statusColor' => 'blue',
                 'rows' => [
-                    ['label' => 'Simple', 'value' => $pipelineData['On-Going']['Simple']],
-                    ['label' => 'Complex', 'value' => $pipelineData['On-Going']['Complex']],
-                    ['label' => 'Highly Technical', 'value' => $pipelineData['On-Going']['Highly Technical']],
+                    ['label' => 'Simple', 'value' => $pipelineData['On-Going']['Simple'], 'pipeline' => 'on_going'],
+                    ['label' => 'Complex', 'value' => $pipelineData['On-Going']['Complex'], 'pipeline' => 'on_going'],
+                    ['label' => 'Highly Technical', 'value' => $pipelineData['On-Going']['Highly Technical'], 'pipeline' => 'on_going'],
                 ]
             ],
             [
                 'title' => 'Delayed', 'subtitle' => 'Documents', 'status' => 'Attention', 'statusColor' => 'orange',
                 'rows' => [
-                    ['label' => 'Simple', 'value' => $pipelineData['Delayed']['Simple']],
-                    ['label' => 'Complex', 'value' => $pipelineData['Delayed']['Complex']],
-                    ['label' => 'Highly Technical', 'value' => $pipelineData['Delayed']['Highly Technical']],
+                    ['label' => 'Simple', 'value' => $pipelineData['Delayed']['Simple'], 'pipeline' => 'delayed'],
+                    ['label' => 'Complex', 'value' => $pipelineData['Delayed']['Complex'], 'pipeline' => 'delayed'],
+                    ['label' => 'Highly Technical', 'value' => $pipelineData['Delayed']['Highly Technical'], 'pipeline' => 'delayed'],
                 ]
             ]
         ];
@@ -189,7 +252,12 @@ class DashboardController extends Controller
             ],
             'pipeline' => $pipeline,
             'processingTimes' => $processingTimes,
-            'months' => $months
+            'months' => $months,
+            'selectedCategory' => $selectedCategory,
+            'selectedPipeline' => $selectedPipeline,
+            'drillDownDocuments' => $drillDownDocuments,
+            'reportTitle' => $reportTitle,
+            'reportDescription' => $reportDescription,
         ]);
     }
 }

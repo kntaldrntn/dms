@@ -39,7 +39,7 @@ const mainNavItems = computed<NavItem[]>(() => {
             title: 'Document',
             href: route('documents.index'),
             icon: FilePlus,
-            roles: ['system_administrator', 'records_manager', 'user'],
+            roles: ['system_administrator', 'records_manager', 'user', 'staff', 'department_head', 'city_administrator', 'city_mayor'],
         },
         {
             title: 'Transactions',

@@ -60,7 +60,7 @@ class DatabaseSeeder extends Seeder
             ['code' => 'GAD', 'name' => 'Gender and Development Office', 'state' => 1],
             ['code' => 'GSO', 'name' => 'Office of the General Services Officer', 'state' => 1],
             ['code' => 'HRM', 'name' => 'Office of the Human Resources Officer', 'state' => 1],
-            ['code' => 'ICT', 'name' => 'Information Communications Technology', 'state' => 1],
+            ['code' => 'CICTO', 'name' => 'Information Communications Technology', 'state' => 1],
             ['code' => 'IDS', 'name' => 'Information Dissemination Section', 'state' => 1],
             ['code' => 'LEBDO', 'name' => 'Local Economic and Business Development Office', 'state' => 1],
             ['code' => 'LIB', 'name' => 'City Library', 'state' => 1],
@@ -84,7 +84,7 @@ class DatabaseSeeder extends Seeder
             ['code' => 'SNC', 'name' => 'Senior Citizen', 'state' => 1],
             ['code' => 'SWD', 'name' => "Office of the City Social Welfare and Development", "state" => 1],
             ['code' => "VET", "name" => "Office of the City Veterinarian", "state" => 1],
-            ['code' => "YDO", "name" => "Youth Development Office", "state" => 1],
+            ['code' => "YESDO", "name" => "Youth Development Office", "state" => 1],
         ];
 
         foreach ($departments as $data) {
