@@ -44,6 +44,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/ocm-approvals', [App\Http\Controllers\ReferralSlipController::class, 'ocmIndex'])->name('ocm-approvals.index');
         Route::post('/ocm-approvals/{document}/approve', [App\Http\Controllers\ReferralSlipController::class, 'approveOcm'])->name('ocm-approvals.approve');
         Route::post('/referral-slips/{document}/generate', [App\Http\Controllers\ReferralSlipController::class, 'generate'])->name('referral-slips.generate');
+        Route::post('/referral-slips/{document}/sign', [App\Http\Controllers\ReferralSlipController::class, 'sign'])->name('referral-slips.sign');
         Route::post('/referral-slips/{document}/stamp-placement', [App\Http\Controllers\ReferralSlipController::class, 'findStampPlacement'])->name('referral-slips.stamp-placement');
     Route::get('/referral-slips/{document}/print', [App\Http\Controllers\ReferralSlipController::class, 'print'])->name('referral-slips.print');
     Route::get('/referral-slips/{document}/preview', [App\Http\Controllers\ReferralSlipController::class, 'preview'])->name('referral-slips.preview');

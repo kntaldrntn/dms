@@ -1,36 +1,24 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, useForm } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
-import { FileSignature, Sparkles, X, CheckCircle2 } from 'lucide-vue-next';
+import { computed, ref, watch } from 'vue';
+import { CheckCircle2, FileSignature, FileText, PenLine, Send, Sparkles, X } from 'lucide-vue-next';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
-import axios from 'axios';
-import * as pdfjsLib from 'pdfjs-dist';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 const props = defineProps<{
     documents: any;
     departments: Array<{ id: number; name: string; code: string }>;
-    approvalMode?: 'referral' | 'ocm';
     flash?: { success?: string; error?: string };
 }>();
 
-const showModal = ref(false);
-const selectedDoc = ref<any>(null);
-const aiSuggestionsMap = ref<Record<number, { reason: string, priority: string }>>({});
-
-// --- NOTIFICATIONS ---
 const notyf = new Notyf({ duration: 4000, position: { x: 'right', y: 'top' } });
 watch(() => props.flash, (flash) => {
     if (flash?.success) notyf.success(flash.success);
     if (flash?.error) notyf.error(flash.error);
 }, { immediate: true, deep: true });
 
-const breadcrumbs = [
-    { title: props.approvalMode === 'ocm' ? 'OCM Approvals' : 'Referral Slips', href: props.approvalMode === 'ocm' ? '/ocm-approvals' : '/referral-slips' },
-];
+const breadcrumbs = [{ title: 'Referral Slips', href: '/referral-slips' }];
 
 const actionOptions = [
     { value: 'for_approval', label: 'For Approval' },
@@ -47,209 +35,305 @@ const actionOptions = [
     { value: 'other', label: 'Others (specify)' },
 ];
 
-const form = useForm({
+const selectedDoc = ref<any>(null);
+const aiSuggestionsMap = ref<Record<number, { reason: string; priority: string }>>({});
+
+// Stage 1 (City Administrator) generates the slip; stage 2 (ADM Department Head) signs it.
+const isSigningStage = computed(() => selectedDoc.value?.requires_signature_from === 'department_head');
+
+const generateForm = useForm({
     targets: [] as number[],
     required_actions: [] as string[],
     other_action: '',
     concerned_personnel: '',
     remarks: '',
-    attach_signature: false,
     workflow_version: 0,
-    stamp_placement: null as { page: number; x: number; y: number; width: number; height: number } | null,
+});
+
+const signForm = useForm({
+    signature_mode: '' as '' | 'electronic' | 'physical',
+    workflow_version: 0,
+});
+
+const slipTargets = computed(() => {
+    const ids: number[] = (selectedDoc.value?.approved_routing_slip || []).map(Number);
+    return props.departments.filter((department) => ids.includes(department.id));
 });
 
 function openModal(doc: any) {
     selectedDoc.value = doc;
-    form.reset();
-    form.workflow_version = doc.workflow_version;
-    form.clearErrors();
+
+    if (doc.requires_signature_from === 'department_head') {
+        signForm.reset();
+        signForm.clearErrors();
+        signForm.workflow_version = doc.workflow_version;
+        return;
+    }
+
+    generateForm.reset();
+    generateForm.clearErrors();
+    generateForm.workflow_version = doc.workflow_version;
 
     let suggestions = doc.ai_routing_suggestions || [];
     if (typeof suggestions === 'string') {
         try { suggestions = JSON.parse(suggestions); } catch { suggestions = []; }
     }
-
-    const suggestionsMap: Record<number, { reason: string, priority: string }> = {};
-    const suggestedIds: number[] = [];
-    
-    suggestions.forEach((s: any) => {
-        const id = Number(s.department_id);
-        suggestionsMap[id] = { reason: s.reason, priority: s.priority };
-        suggestedIds.push(id);
+    const suggestionsMap: Record<number, { reason: string; priority: string }> = {};
+    suggestions.forEach((suggestion: any) => {
+        suggestionsMap[Number(suggestion.department_id)] = { reason: suggestion.reason, priority: suggestion.priority };
     });
-
     aiSuggestionsMap.value = suggestionsMap;
-    form.targets = suggestedIds; // Auto-tick AI suggestions
-
-    showModal.value = true;
+    generateForm.targets = Object.keys(suggestionsMap).map(Number); // Pre-tick AI suggestions
 }
 
-async function findOcmStampPlacement() {
-    if (!selectedDoc.value?.attached_file?.toLowerCase().endsWith('.pdf')) {
-        throw new Error('OCM approval/signature requires the document to have an uploaded PDF.');
-    }
-    const response = await fetch(`/storage/${selectedDoc.value.attached_file}`);
-    if (!response.ok) throw new Error('The uploaded PDF could not be read for AI placement analysis.');
-    const pdf = await pdfjsLib.getDocument({ data: await response.arrayBuffer() }).promise;
-    const payload = new FormData();
-    const pageCount = Math.min(pdf.numPages, 5);
-    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
-        const page = await pdf.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 1.5 });
-        const canvas = document.createElement('canvas');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        await page.render({ canvasContext: canvas.getContext('2d')!, viewport }).promise;
-        const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('Unable to prepare a PDF page preview.')), 'image/jpeg', 0.82));
-        payload.append('thumbnails[]', new File([blob], `page-${pageNumber}.jpg`, { type: 'image/jpeg' }));
-        payload.append('pages[]', JSON.stringify({ page: pageNumber }));
-    }
-    // Laravel accepts an array of fields, so send the page metadata as indexed objects.
-    payload.delete('pages[]');
-    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) payload.append(`pages[${pageNumber - 1}][page]`, String(pageNumber));
-    const result = await axios.post(route('referral-slips.stamp-placement', selectedDoc.value.id), payload, { headers: { 'Content-Type': 'multipart/form-data' } });
-    return result.data.placement;
+function closeModal() {
+    selectedDoc.value = null;
 }
 
-async function submitSlip() {
-    const needsOcmStamp = selectedDoc.value?.requires_signature_from === 'city_mayor' && form.attach_signature;
-    try {
-        form.stamp_placement = needsOcmStamp ? await findOcmStampPlacement() : null;
-    } catch (error: any) {
-        notyf.error(error?.response?.data?.error || error?.message || 'AI could not find a safe signature area.');
-        return;
-    }
-    form.post(route('referral-slips.generate', selectedDoc.value.id), {
+function submitGenerate() {
+    generateForm.post(route('referral-slips.generate', selectedDoc.value.id), {
         preserveScroll: true,
-        onSuccess: () => {
-            showModal.value = false;
-        },
-        onError: () => {
-            notyf.error('Please check the form for errors.');
-        }
+        onSuccess: closeModal,
+        onError: () => notyf.error('Please check the form for errors.'),
+    });
+}
+
+function submitSignature() {
+    signForm.post(route('referral-slips.sign', selectedDoc.value.id), {
+        preserveScroll: true,
+        onSuccess: closeModal,
+        onError: () => notyf.error('Please check the form for errors.'),
     });
 }
 </script>
 
 <template>
-    <Head :title="approvalMode === 'ocm' ? 'OCM Approvals' : 'Referral Slips'" />
+    <Head title="Referral Slips" />
     <AppLayout :breadcrumbs="breadcrumbs">
-        <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-100 min-h-screen">
-            <h1 class="text-2xl font-bold text-slate-800">{{ approvalMode === 'ocm' ? 'OCM Approval Queue' : 'Admin Referral Slips' }}</h1>
-            <p class="text-sm text-slate-500 -mt-4">{{ approvalMode === 'ocm' ? 'Approve OCM documents and digitally stamp their uploaded PDF when authorized.' : 'Generate and authorize routing slips for incoming documents.' }}</p>
+        <div class="mx-auto flex min-h-screen w-full flex-col gap-6 bg-slate-100 p-6">
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight text-slate-800">Referral Slips</h1>
+                <p class="mt-1 text-sm text-slate-500">
+                    The City Administrator generates the slip, then the Department Head chooses E-Signature or Physical Signature before it returns to Records.
+                </p>
+            </div>
 
-            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <table class="w-full text-left text-sm text-slate-700">
-                    <thead class="bg-slate-100 text-xs text-slate-600 uppercase">
+                    <thead class="border-b border-slate-200 bg-slate-100 text-xs uppercase tracking-wider text-slate-600">
                         <tr>
-                            <th class="px-4 py-3 font-bold">Barcode</th>
-                            <th class="px-4 py-3 font-bold">Subject Matter</th>
-                            <th class="px-4 py-3 text-center font-bold">Action</th>
+                            <th scope="col" class="px-4 py-2.5 font-bold">Barcode</th>
+                            <th scope="col" class="px-4 py-2.5 font-bold">Subject Matter</th>
+                            <th scope="col" class="px-4 py-2.5 font-bold">Stage</th>
+                            <th scope="col" class="px-4 py-2.5 text-center font-bold">Action</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-200">
-                        <tr v-for="doc in documents.data" :key="doc.id" class="hover:bg-slate-50">
-                            <td class="px-4 py-3 font-mono font-bold text-emerald-600">{{ doc.barcode }}</td>
-                            <td class="px-4 py-3">{{ doc.subject_matter }}</td>
-                            <td class="px-4 py-3 text-center">
-                                <button @click="openModal(doc)" class="bg-indigo-50 text-indigo-700 px-4 py-1.5 rounded-lg font-bold hover:bg-indigo-100 border border-indigo-100">
-                                    {{ approvalMode === 'ocm' ? 'Review & Approve' : 'Review & Generate Slip' }}
+                        <tr v-for="doc in documents.data" :key="doc.id" class="transition-colors hover:bg-slate-50">
+                            <td class="whitespace-nowrap px-4 py-3 font-mono font-semibold text-emerald-600">{{ doc.barcode }}</td>
+                            <td class="px-4 py-3">
+                                <p class="line-clamp-2 font-medium text-slate-800" :title="doc.subject_matter">{{ doc.subject_matter }}</p>
+                                <p class="mt-0.5 text-[11px] text-slate-500">From: {{ doc.source_name }}</p>
+                            </td>
+                            <td class="whitespace-nowrap px-4 py-3">
+                                <span
+                                    v-if="doc.requires_signature_from === 'department_head'"
+                                    class="inline-flex items-center rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700"
+                                >
+                                    Awaiting Signature
+                                </span>
+                                <span v-else class="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">
+                                    Awaiting Slip
+                                </span>
+                            </td>
+                            <td class="whitespace-nowrap px-4 py-3 text-center">
+                                <button
+                                    type="button"
+                                    @click="openModal(doc)"
+                                    class="rounded-lg border px-4 py-1.5 font-bold transition"
+                                    :class="doc.requires_signature_from === 'department_head'
+                                        ? 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                        : 'border-indigo-100 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'"
+                                >
+                                    {{ doc.requires_signature_from === 'department_head' ? 'Review & Sign' : 'Generate Slip' }}
                                 </button>
                             </td>
                         </tr>
                         <tr v-if="documents.data.length === 0">
-                            <td colspan="3" class="py-12 text-center text-slate-500">No pending documents for Referral.</td>
+                            <td colspan="4" class="py-12 text-center text-slate-500">No documents are waiting for you.</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
 
-            <!-- Generate Slip Modal -->
             <Transition name="fade">
-                <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
-                    <div class="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl flex flex-col">
-                        <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
-                                <FileSignature class="w-5 h-5 text-indigo-600"/> {{ approvalMode === 'ocm' ? 'OCM Approval' : 'Generate Slip' }}: {{ selectedDoc?.barcode }}
+                <div v-if="selectedDoc" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-sm">
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="referral-modal-title"
+                        class="flex w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+                    >
+                        <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+                            <h2 id="referral-modal-title" class="flex items-center gap-2 text-lg font-bold text-slate-800">
+                                <PenLine v-if="isSigningStage" class="h-5 w-5 text-amber-600" aria-hidden="true" />
+                                <FileSignature v-else class="h-5 w-5 text-indigo-600" aria-hidden="true" />
+                                {{ isSigningStage ? 'Sign Referral Slip' : 'Generate Referral Slip' }}: {{ selectedDoc.barcode }}
                             </h2>
-                            <button @click="showModal = false" class="text-slate-400 hover:text-slate-600"><X class="w-5 h-5"/></button>
+                            <button type="button" @click="closeModal" class="text-slate-400 hover:text-slate-600" aria-label="Close">
+                                <X class="h-5 w-5" aria-hidden="true" />
+                            </button>
                         </div>
 
-                        <div class="p-6 overflow-y-auto max-h-[65vh] bg-white">
+                        <div class="max-h-[65vh] overflow-y-auto bg-white p-6">
                             <div class="mb-5 rounded-xl border border-indigo-100 bg-indigo-50 p-4">
                                 <p class="text-xs font-bold uppercase tracking-wide text-indigo-800">Background Summary</p>
-                                <p class="mt-1 text-sm font-semibold text-slate-800">{{ selectedDoc?.subject_matter }}</p>
-                                <p class="mt-1 text-xs text-slate-600">From: {{ selectedDoc?.source_name }}</p>
+                                <p class="mt-1 text-sm font-semibold text-slate-800">{{ selectedDoc.subject_matter }}</p>
+                                <p class="mt-1 text-xs text-slate-600">From: {{ selectedDoc.source_name }}</p>
                             </div>
-                            <h3 class="text-sm font-bold text-slate-800 mb-3">Target Departments <span class="text-rose-500">*</span></h3>
-                            
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-1">
-                                <label v-for="dept in departments" :key="dept.id" 
-                                    class="flex items-start gap-3 p-3 rounded-xl border transition cursor-pointer" 
-                                :class="form.errors.targets ? 'border-red-300 bg-red-50' : (form.targets.includes(dept.id) ? 'bg-indigo-50 border-indigo-400 shadow-sm' : 'bg-white border-slate-300 hover:border-indigo-300 hover:bg-indigo-50/40 shadow-sm')">
-                                    <input type="checkbox" v-model="form.targets" :value="dept.id" class="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500" />
-                                    <div class="flex flex-col">
-                                        <span class="text-sm font-bold text-slate-800">{{ dept.code || dept.name }}</span>
-                                        <span v-if="aiSuggestionsMap[dept.id]" class="text-[10px] text-emerald-600 font-bold"><Sparkles class="w-3 h-3 inline"/> {{ aiSuggestionsMap[dept.id].priority }} Match</span>
+
+                            <!-- STAGE 2: Department Head chooses the signature type -->
+                            <template v-if="isSigningStage">
+                                <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <p class="text-sm font-bold text-slate-800">Slip will dispatch to</p>
+                                        <div class="mt-1 flex flex-wrap gap-1">
+                                            <span
+                                                v-for="target in slipTargets"
+                                                :key="target.id"
+                                                class="inline-flex items-center rounded border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-bold text-indigo-700"
+                                                :title="target.name"
+                                            >
+                                                {{ target.code || target.name }}
+                                            </span>
+                                        </div>
                                     </div>
-                                </label>
-                            </div>
-                            <p v-if="form.errors.targets" class="text-[10px] text-red-500 mb-4 font-bold">{{ form.errors.targets }}</p>
-                            <div v-else class="mb-6"></div>
-
-                            <h3 class="text-sm font-bold text-slate-800 mb-3">Required Action <span class="text-rose-500">*</span></h3>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-1">
-                                <label v-for="action in actionOptions" :key="action.value" class="flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition"
-                                    :class="form.errors.required_actions ? 'border-red-300 bg-red-50' : (form.required_actions.includes(action.value) ? 'bg-indigo-50 border-indigo-400 shadow-sm' : 'bg-white border-slate-300 hover:border-indigo-300 hover:bg-indigo-50/40 shadow-sm')">
-                                    <input v-model="form.required_actions" type="checkbox" :value="action.value" class="rounded text-indigo-600 focus:ring-indigo-500" />
-                                    <span class="text-xs font-semibold text-slate-700">{{ action.label }}</span>
-                                </label>
-                            </div>
-                            <p v-if="form.errors.required_actions" class="text-[10px] text-red-500 mb-3 font-bold">{{ form.errors.required_actions }}</p>
-                            <div v-else class="mb-3"></div>
-
-                            <div v-if="form.required_actions.includes('other')" class="mb-4">
-                                <label class="mb-1 block text-sm font-bold text-slate-700">Other Required Action <span class="text-rose-500">*</span></label>
-                                <input v-model="form.other_action" type="text" maxlength="255" class="w-full rounded-xl border bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" :class="form.errors.other_action ? 'border-red-500' : 'border-slate-300'" placeholder="Specify the required action..." />
-                                <p v-if="form.errors.other_action" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.other_action }}</p>
-                            </div>
-
-                            <div class="mb-4">
-                                <label class="mb-1 block text-sm font-bold text-slate-700">Concerned Personnel</label>
-                                <input v-model="form.concerned_personnel" type="text" maxlength="255" class="w-full rounded-xl border bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" :class="form.errors.concerned_personnel ? 'border-red-500' : 'border-slate-300'" placeholder="Optional person or position responsible..." />
-                                <p v-if="form.errors.concerned_personnel" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.concerned_personnel }}</p>
-                            </div>
-
-                            <label class="mb-1 block text-sm font-bold text-slate-700">Admin Remarks / Directives</label>
-                            <textarea v-model="form.remarks" rows="2" 
-                                class="w-full rounded-xl border bg-white px-3 py-2 text-sm shadow-sm outline-none transition-colors mb-1"
-                                :class="form.errors.remarks ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500'"
-                                placeholder="Optional instructions for the target departments..."></textarea>
-                            <p v-if="form.errors.remarks" class="text-[10px] text-red-500 mb-4 font-bold">{{ form.errors.remarks }}</p>
-                            <div v-else class="mb-4"></div>
-
-                            <div v-if="form.required_actions.length" class="mb-4 rounded-xl border border-indigo-100 bg-indigo-50 p-3">
-                                <p class="text-[10px] font-bold uppercase tracking-wide text-indigo-700">Slip Preview - Required Action</p>
-                                <p class="mt-1 text-xs font-semibold text-slate-700">{{ actionOptions.filter(action => form.required_actions.includes(action.value)).map(action => action.label).join('; ') }}<span v-if="form.other_action">: {{ form.other_action }}</span></p>
-                            </div>
-
-                            <label class="flex items-center gap-3 p-3 rounded-xl border transition cursor-pointer" 
-                                :class="form.errors.attach_signature ? 'border-red-300 bg-red-50' : (form.attach_signature ? 'bg-amber-50 border-amber-300 shadow-sm' : 'bg-white border-slate-300 hover:border-amber-300 shadow-sm')">
-                                <input type="checkbox" v-model="form.attach_signature" class="rounded text-amber-600 focus:ring-amber-500 w-4 h-4" />
-                                <div class="flex flex-col">
-                                    <span class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                                        <FileSignature class="w-4 h-4 text-amber-600"/> {{ approvalMode === 'ocm' ? 'Digitally Sign and Stamp PDF' : 'Attach Authorized Signature' }}
-                                    </span>
-                                    <span class="text-xs text-slate-500 mt-0.5">{{ approvalMode === 'ocm' ? 'Uses AI to find blank space, then visibly stamps and cryptographically signs the uploaded PDF.' : 'Applies your digital signature to officially approve this routing slip.' }}</span>
+                                    <a
+                                        :href="route('referral-slips.preview', selectedDoc.id)"
+                                        target="_blank"
+                                        rel="noopener"
+                                        class="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm transition hover:bg-violet-100"
+                                    >
+                                        <FileText class="h-4 w-4" aria-hidden="true" /> Preview Slip PDF
+                                    </a>
                                 </div>
-                            </label>
-                            <p v-if="form.errors.attach_signature" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.attach_signature }}</p>
+
+                                <fieldset>
+                                    <legend class="mb-3 text-sm font-bold text-slate-800">Signature <span class="text-rose-500">*</span></legend>
+                                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                        <label
+                                            class="flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition"
+                                            :class="signForm.signature_mode === 'electronic' ? 'border-amber-400 bg-amber-50 shadow-sm' : 'border-slate-300 bg-white hover:border-amber-300'"
+                                        >
+                                            <input v-model="signForm.signature_mode" type="radio" value="electronic" name="signature_mode" class="mt-0.5 text-amber-600 focus:ring-amber-500" />
+                                            <span>
+                                                <span class="block text-sm font-bold text-slate-800">E-Signature</span>
+                                                <span class="mt-0.5 block text-xs text-slate-500">Your uploaded digital signature is placed on the slip.</span>
+                                            </span>
+                                        </label>
+                                        <label
+                                            class="flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition"
+                                            :class="signForm.signature_mode === 'physical' ? 'border-amber-400 bg-amber-50 shadow-sm' : 'border-slate-300 bg-white hover:border-amber-300'"
+                                        >
+                                            <input v-model="signForm.signature_mode" type="radio" value="physical" name="signature_mode" class="mt-0.5 text-amber-600 focus:ring-amber-500" />
+                                            <span>
+                                                <span class="block text-sm font-bold text-slate-800">Physical Signature</span>
+                                                <span class="mt-0.5 block text-xs text-slate-500">The slip prints with a blank line to be signed by hand.</span>
+                                            </span>
+                                        </label>
+                                    </div>
+                                    <p v-if="signForm.errors.signature_mode" class="mt-1 text-[10px] font-bold text-red-500" role="alert">{{ signForm.errors.signature_mode }}</p>
+                                </fieldset>
+                            </template>
+
+                            <!-- STAGE 1: City Administrator generates the slip only -->
+                            <template v-else>
+                                <h3 class="mb-3 text-sm font-bold text-slate-800">Target Departments <span class="text-rose-500">*</span></h3>
+                                <div class="mb-1 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                    <label
+                                        v-for="dept in departments"
+                                        :key="dept.id"
+                                        class="flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition"
+                                        :class="generateForm.errors.targets ? 'border-red-300 bg-red-50' : (generateForm.targets.includes(dept.id) ? 'border-indigo-400 bg-indigo-50 shadow-sm' : 'border-slate-300 bg-white shadow-sm hover:border-indigo-300 hover:bg-indigo-50/40')"
+                                    >
+                                        <input type="checkbox" v-model="generateForm.targets" :value="dept.id" class="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500" />
+                                        <div class="flex flex-col">
+                                            <span class="text-sm font-bold text-slate-800">{{ dept.code || dept.name }}</span>
+                                            <span v-if="aiSuggestionsMap[dept.id]" class="text-[10px] font-bold text-emerald-600">
+                                                <Sparkles class="inline h-3 w-3" aria-hidden="true" /> {{ aiSuggestionsMap[dept.id].priority }} Match
+                                            </span>
+                                        </div>
+                                    </label>
+                                </div>
+                                <p v-if="generateForm.errors.targets" class="mb-4 text-[10px] font-bold text-red-500">{{ generateForm.errors.targets }}</p>
+                                <div v-else class="mb-6"></div>
+
+                                <h3 class="mb-3 text-sm font-bold text-slate-800">Required Action <span class="text-rose-500">*</span></h3>
+                                <div class="mb-1 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                    <label
+                                        v-for="action in actionOptions"
+                                        :key="action.value"
+                                        class="flex cursor-pointer items-center gap-2.5 rounded-lg border p-2.5 transition"
+                                        :class="generateForm.errors.required_actions ? 'border-red-300 bg-red-50' : (generateForm.required_actions.includes(action.value) ? 'border-indigo-400 bg-indigo-50 shadow-sm' : 'border-slate-300 bg-white shadow-sm hover:border-indigo-300 hover:bg-indigo-50/40')"
+                                    >
+                                        <input v-model="generateForm.required_actions" type="checkbox" :value="action.value" class="rounded text-indigo-600 focus:ring-indigo-500" />
+                                        <span class="text-xs font-semibold text-slate-700">{{ action.label }}</span>
+                                    </label>
+                                </div>
+                                <p v-if="generateForm.errors.required_actions" class="mb-3 text-[10px] font-bold text-red-500">{{ generateForm.errors.required_actions }}</p>
+                                <div v-else class="mb-3"></div>
+
+                                <div v-if="generateForm.required_actions.includes('other')" class="mb-4">
+                                    <label for="other_action" class="mb-1 block text-sm font-bold text-slate-700">Other Required Action <span class="text-rose-500">*</span></label>
+                                    <input id="other_action" v-model="generateForm.other_action" type="text" maxlength="255" class="w-full rounded-xl border bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" :class="generateForm.errors.other_action ? 'border-red-500' : 'border-slate-300'" placeholder="Specify the required action..." />
+                                    <p v-if="generateForm.errors.other_action" class="mt-1 text-[10px] font-bold text-red-500">{{ generateForm.errors.other_action }}</p>
+                                </div>
+
+                                <div class="mb-4">
+                                    <label for="concerned_personnel" class="mb-1 block text-sm font-bold text-slate-700">Concerned Personnel</label>
+                                    <input id="concerned_personnel" v-model="generateForm.concerned_personnel" type="text" maxlength="255" class="w-full rounded-xl border bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" :class="generateForm.errors.concerned_personnel ? 'border-red-500' : 'border-slate-300'" placeholder="Optional person or position responsible..." />
+                                    <p v-if="generateForm.errors.concerned_personnel" class="mt-1 text-[10px] font-bold text-red-500">{{ generateForm.errors.concerned_personnel }}</p>
+                                </div>
+
+                                <label for="remarks" class="mb-1 block text-sm font-bold text-slate-700">Admin Remarks / Directives</label>
+                                <textarea
+                                    id="remarks"
+                                    v-model="generateForm.remarks"
+                                    rows="2"
+                                    class="mb-1 w-full rounded-xl border bg-white px-3 py-2 text-sm shadow-sm outline-none transition-colors"
+                                    :class="generateForm.errors.remarks ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500'"
+                                    placeholder="Optional instructions for the target departments..."
+                                ></textarea>
+                                <p v-if="generateForm.errors.remarks" class="mb-4 text-[10px] font-bold text-red-500">{{ generateForm.errors.remarks }}</p>
+
+                                <div v-if="generateForm.required_actions.length" class="mt-3 rounded-xl border border-indigo-100 bg-indigo-50 p-3">
+                                    <p class="text-[10px] font-bold uppercase tracking-wide text-indigo-700">Slip Preview - Required Action</p>
+                                    <p class="mt-1 text-xs font-semibold text-slate-700">
+                                        {{ actionOptions.filter(action => generateForm.required_actions.includes(action.value)).map(action => action.label).join('; ') }}<span v-if="generateForm.other_action">: {{ generateForm.other_action }}</span>
+                                    </p>
+                                </div>
+                            </template>
                         </div>
 
-                        <div class="px-6 py-4 border-t bg-slate-50 flex justify-end gap-3 rounded-b-2xl">
-                            <button @click="showModal = false" class="px-5 py-2 bg-white border border-slate-200 rounded-xl font-medium text-slate-700 hover:bg-slate-100 transition">Cancel</button>
-                            <button @click="submitSlip" :disabled="form.processing" class="px-5 py-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 flex items-center gap-2 transition disabled:opacity-50">
-                                <CheckCircle2 class="w-4 h-4" /> Approve & Return to Records
+                        <div class="flex justify-end gap-3 rounded-b-2xl border-t bg-slate-50 px-6 py-4">
+                            <button type="button" @click="closeModal" class="rounded-xl border border-slate-200 bg-white px-5 py-2 font-medium text-slate-700 transition hover:bg-slate-100">Cancel</button>
+                            <button
+                                v-if="isSigningStage"
+                                type="button"
+                                @click="submitSignature"
+                                :disabled="signForm.processing || !signForm.signature_mode"
+                                class="flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2 font-bold text-white transition hover:bg-amber-700 disabled:opacity-50"
+                            >
+                                <CheckCircle2 class="h-4 w-4" aria-hidden="true" /> Sign &amp; Return to Records
+                            </button>
+                            <button
+                                v-else
+                                type="button"
+                                @click="submitGenerate"
+                                :disabled="generateForm.processing"
+                                class="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2 font-bold text-white transition hover:bg-indigo-700 disabled:opacity-50"
+                            >
+                                <Send class="h-4 w-4" aria-hidden="true" /> Generate &amp; Forward to Dept. Head
                             </button>
                         </div>
                     </div>

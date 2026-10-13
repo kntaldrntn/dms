@@ -98,7 +98,9 @@ class DocumentController extends Controller
         
         return Inertia::render('documents/Show', [
             'document' => $document,
-            'trails' => $document->trails 
+            'trails' => $document->trails,
+            // Offices a pending referral slip will dispatch to, for the "Next" route step.
+            'slipTargets' => Department::whereIn('id', $document->approved_routing_slip ?? [])->get(['id', 'code', 'name']),
         ]);
     }
 

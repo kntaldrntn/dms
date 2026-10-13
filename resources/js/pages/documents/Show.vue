@@ -2,13 +2,56 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/vue3';
-import { AlertCircle, ArrowLeft, ArrowLeftRight, Clock, FileSignature, FileText, FileUp, History, Link2, Paperclip, ShieldCheck, UserRound } from 'lucide-vue-next';
+import { AlertCircle, ArrowLeft, ArrowLeftRight, CheckCircle2, ChevronRight, Clock, FileSignature, FileText, FileUp, History, Link2, MapPin, Paperclip, ShieldCheck, UserRound } from 'lucide-vue-next';
 import { computed } from 'vue';
 
 const props = defineProps<{
     document: any;
-    trails: any[]; 
+    trails: any[];
+    slipTargets: Array<{ id: number; code: string; name: string }>;
 }>();
+
+type Office = { code: string; name: string };
+type RouteStop = { key: string; offices: Office[]; action: string; receivedAt: string };
+
+const officeOf = (department: any): Office => ({ code: department?.code || department?.name || '', name: department?.name || '' });
+
+// One stop per hand-off; trails received at the same moment (a multi-office dispatch) share a stop.
+const routeStops = computed<RouteStop[]>(() => {
+    const stops: RouteStop[] = [];
+    for (const trail of props.trails) {
+        const previous = stops[stops.length - 1];
+        if (previous && trail.received_at && previous.receivedAt === trail.received_at && previous.action === trail.received_action) {
+            previous.offices.push(officeOf(trail.office));
+            continue;
+        }
+        stops.push({ key: String(trail.id), offices: [officeOf(trail.office)], action: trail.received_action || '', receivedAt: trail.received_at || '' });
+    }
+    return stops;
+});
+
+// Newest trail entry first; keep each entry's chronological index for transit-time math.
+const latestFirstTrails = computed(() => props.trails.map((trail, index) => ({ trail, index })).reverse());
+
+const isCompleted = computed(() => props.document.status === 'Completed');
+
+// Where the document goes next, derived from its pending workflow step.
+const nextStop = computed<{ offices: Office[]; action: string } | null>(() => {
+    if (isCompleted.value) return null;
+    const records: Office = { code: 'REC', name: 'Records' };
+    switch (props.document.requires_signature_from) {
+        case 'city_administrator':
+            return { offices: [{ code: 'ADM', name: 'Office of the City Administrator' }], action: 'Department Head signature' };
+        case 'department_head':
+            return { offices: [records], action: 'Return to Records for dispatch' };
+        case 'city_mayor':
+            return { offices: [records], action: 'Return to Records after OCM approval' };
+    }
+    if (props.slipTargets.length) {
+        return { offices: props.slipTargets.map(officeOf), action: 'Dispatch per referral slip' };
+    }
+    return null;
+});
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Documents', href: '/documents' },
@@ -42,6 +85,19 @@ const formatDateStr = (dateString: string) => {
     const parsed = formatDateTime(dateString);
     if (!parsed.date) return '';
     return `${parsed.date} ${parsed.time}`;
+};
+
+// Workflow timestamps (received_at, released_at, due_date) are saved as Manila wall-clock time, so the
+// helpers above drop the trailing "Z". Framework timestamps (created_at/updated_at) are real UTC because
+// config/app.php uses 'UTC'; convert those to Asia/Manila explicitly.
+const formatUtcDateStr = (dateString: string) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Date';
+    const options = { timeZone: 'Asia/Manila' } as const;
+    const day = date.toLocaleDateString('en-US', { ...options, month: 'short', day: '2-digit', year: 'numeric' });
+    const time = date.toLocaleTimeString('en-US', { ...options, hour: '2-digit', minute: '2-digit' });
+    return `${day} ${time}`;
 };
 
 const calculateDuration = (startStr: string, endStr: string) => {
@@ -129,6 +185,56 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                 </Link>
             </div>
 
+            <!-- Document Route: office-to-office path, current location, and next destination. -->
+            <section aria-labelledby="document-route-heading" class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div class="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                    <MapPin class="h-4 w-4 text-emerald-600" aria-hidden="true" />
+                    <h2 id="document-route-heading" class="text-base font-bold tracking-tight text-slate-800">Document Route</h2>
+                </div>
+                <ol class="flex flex-wrap items-stretch gap-y-3 p-4" aria-label="Offices this document has passed through">
+                    <li v-for="(stop, index) in routeStops" :key="stop.key" class="flex items-center">
+                        <ChevronRight v-if="index > 0" class="mx-1 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                        <div
+                            class="flex min-w-[7rem] flex-col rounded-xl border px-3 py-2"
+                            :class="index === routeStops.length - 1 && !isCompleted
+                                ? 'border-emerald-400 bg-emerald-50 shadow-sm ring-1 ring-emerald-200'
+                                : 'border-slate-200 bg-white'"
+                            :aria-current="index === routeStops.length - 1 && !isCompleted ? 'step' : undefined"
+                        >
+                            <div class="flex flex-wrap items-center gap-1">
+                                <span v-for="office in stop.offices" :key="office.code" class="text-sm font-bold text-slate-800" :title="office.name">{{ office.code }}</span>
+                                <span
+                                    v-if="index === routeStops.length - 1 && !isCompleted"
+                                    class="ml-1 rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white"
+                                >
+                                    Current
+                                </span>
+                            </div>
+                            <span v-if="stop.action" class="text-[11px] text-slate-600">{{ stop.action }}</span>
+                            <span v-if="stop.receivedAt" class="text-[10px] text-slate-400">{{ formatDateStr(stop.receivedAt) }}</span>
+                        </div>
+                    </li>
+
+                    <li v-if="nextStop" class="flex items-center">
+                        <ChevronRight class="mx-1 h-4 w-4 shrink-0 text-slate-300" aria-hidden="true" />
+                        <div class="flex min-w-[7rem] flex-col rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2">
+                            <div class="flex flex-wrap items-center gap-1">
+                                <span v-for="office in nextStop.offices" :key="office.code" class="text-sm font-bold text-slate-500" :title="office.name">{{ office.code }}</span>
+                                <span class="ml-1 rounded border border-slate-300 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-500">Next</span>
+                            </div>
+                            <span class="text-[11px] text-slate-500">{{ nextStop.action }}</span>
+                        </div>
+                    </li>
+
+                    <li v-if="isCompleted" class="flex items-center">
+                        <ChevronRight class="mx-1 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                        <div class="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700">
+                            <CheckCircle2 class="h-4 w-4" aria-hidden="true" /> Completed
+                        </div>
+                    </li>
+                </ol>
+            </section>
+
             <!-- Detail panels: same three-panel arrangement as the legacy DTS view. -->
             <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <!-- Panel 1: Document Details -->
@@ -145,7 +251,7 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                             <dd class="font-mono text-slate-800">{{ document.access_code }}</dd>
                         </template>
                         <dt class="font-semibold text-slate-700">Date Start:</dt>
-                        <dd class="text-slate-800">{{ formatDateStr(document.created_at) }}</dd>
+                        <dd class="text-slate-800">{{ formatUtcDateStr(document.created_at) }}</dd>
                         <template v-if="document.due_date">
                             <dt class="font-semibold text-slate-700">Date End:</dt>
                             <dd class="text-slate-800">{{ formatDateStr(document.due_date) }}</dd>
@@ -290,7 +396,7 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                         </thead>
 
                         <tbody class="divide-y divide-slate-200 text-center">
-                            <tr v-for="(trail, index) in trails" :key="trail.id" class="transition-colors hover:bg-slate-50">
+                            <tr v-for="{ trail, index } in latestFirstTrails" :key="trail.id" class="transition-colors hover:bg-slate-50">
                                 <!-- Received -->
                                 <td class="break-words px-2 py-2.5">
                                     <span
@@ -300,7 +406,7 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                                         {{ trail.office?.code || trail.office?.name }}
                                     </span>
                                 </td>
-                                <td class="break-words px-2 py-2.5 font-medium text-slate-800">{{ trail.receiver?.name || 'System' }}</td>
+                                <td class="break-words px-2 py-2.5 font-medium text-slate-800">{{ trail.receiver?.name }}</td>
                                 <td class="px-2 py-2.5">
                                     <div class="font-semibold text-slate-800">{{ formatDateTime(trail.received_at).date }}</div>
                                     <div class="text-[11px] text-slate-500">{{ formatDateTime(trail.received_at).time }}</div>
@@ -323,13 +429,20 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                                 </td>
                                 <td class="break-words px-2 py-2.5 text-left text-slate-600">
                                     <div v-if="trail.released_action">{{ trail.released_action }}</div>
-                                    <div v-if="trail.is_digitally_signed || trail.trail_type === 'return'" class="mt-1 flex flex-wrap gap-1">
+                                    <div v-if="trail.is_digitally_signed || trail.signature_mode === 'physical' || trail.trail_type === 'return'" class="mt-1 flex flex-wrap gap-1">
                                         <span
                                             v-if="trail.is_digitally_signed"
                                             class="inline-flex items-center rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700"
                                             :title="`Signed by ${trail.signer?.name}`"
                                         >
-                                            <FileSignature class="mr-1 h-3 w-3" aria-hidden="true" /> Signed
+                                            <FileSignature class="mr-1 h-3 w-3" aria-hidden="true" /> E-Signed
+                                        </span>
+                                        <span
+                                            v-else-if="trail.signature_mode === 'physical'"
+                                            class="inline-flex items-center rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-[10px] font-bold text-slate-700"
+                                            :title="`To be signed by hand by ${trail.signer?.name}`"
+                                        >
+                                            <FileSignature class="mr-1 h-3 w-3" aria-hidden="true" /> Physical Signature
                                         </span>
                                         <span
                                             v-if="trail.trail_type === 'return'"

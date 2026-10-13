@@ -4,7 +4,7 @@
 > handoff, and before `/compact`. Mark facts as **verified** only with evidence.
 > Feature-level health is tracked separately by the user in `status.md`.
 
-Last updated: 2026-10-13 (Show.vue compact redesign; public/certificates removed by user)
+Last updated: 2026-10-13 (state refreshed after two-step ADM referral, Document Route, timezone fix)
 
 ---
 
@@ -46,15 +46,15 @@ FormRequest (authorize + rules) → service → `DocumentWorkflow` → models/tr
 | --- | --- |
 | `routes/web.php` | Document, referral, OCM, transaction, dashboard, and admin-registry routes. Processing routes are inside `working_hours` (Mon–Fri 08:00–17:00 Asia/Manila; system admins bypass). Admin registries require `role:system_administrator`. |
 | `app/Services/DocumentWorkflow.php` | Core concurrency/custody engine. `mutate()` locks document + user, authorizes via policy, rejects inactive/completed docs (409), checks `workflow_version`, increments it, retries deadlocks up to 3×. Also `targets()`, `office(code)`, `release()`, `receive()`, `signer()`. |
-| `app/Services/DocumentService.php` | Create/update/deactivate. On create, `ADM` target → stays in Records with `requires_signature_from=city_administrator`; `OCM` target → custody moves to OCM with `requires_signature_from=city_mayor`; other targets → direct dispatch. Cleans up uploaded file on failure. |
+| `app/Services/DocumentService.php` | Create/update/deactivate. On create, `ADM` target → custody moves REC → ADM with `requires_signature_from=city_administrator`; `OCM` target → custody moves to OCM with `requires_signature_from=city_mayor`; other targets → direct dispatch. Cleans up uploaded file on failure. |
 | `app/Services/DispatchService.php`, `TransactionService.php` | Records dispatch and department inbox processing, both via `mutate()`. |
-| `app/Services/ReferralService.php` | City Administrator referral approval (`generate`) and OCM approval (`approveOcm`, uses `PdfApprovalStampService`). |
+| `app/Services/ReferralService.php` | Two-step ADM referral: `generate()` (City Administrator, slip only → `requires_signature_from=department_head`) and `sign()` (ADM Department Head, `signature_mode` electronic/physical → back to REC). OCM approval `approveOcm()` uses `PdfApprovalStampService`. |
 | `app/Services/PdfApprovalStampService.php` | Stamps the uploaded PDF with a visible signature block and signs it with the certificate from `config/digital-certificate.php`; writes to `storage/app/private/signed-documents` (local disk). Original upload untouched. |
 | `app/Services/DocumentAnalysisService.php` | OCR text + thumbnail → OpenAI JSON extraction for intake (prompt reference: `basis.md`). |
-| `app/Policies/DocumentPolicy.php` | All document abilities: `viewAny`, `view`, `create`, `update`, `delete`, `dispatch`, `process`, `viewReferrals`, `viewOcmApprovals`, `refer`, `viewReferralSlip`. Ownership = user's department equals document's current department. |
-| `app/Http/Requests/*` | `SaveDocumentRequest`, `DispatchDocumentRequest`, `ProcessDocumentRequest`, `GenerateReferralRequest`, `ApproveOcmDocumentRequest`, `AnalyzeDocumentRequest`, `DocumentMutationRequest` (base: requires `workflow_version`). |
+| `app/Policies/DocumentPolicy.php` | All document abilities: `viewAny`, `view`, `create`, `update`, `delete`, `dispatch`, `process`, `viewReferrals`, `viewOcmApprovals`, `refer`, `signReferral`, `viewReferralSlip`. Ownership = user's department equals document's current department. |
+| `app/Http/Requests/*` | `SaveDocumentRequest`, `DispatchDocumentRequest`, `ProcessDocumentRequest`, `GenerateReferralRequest`, `SignReferralRequest`, `ApproveOcmDocumentRequest`, `AnalyzeDocumentRequest`, `DocumentMutationRequest` (base: requires `workflow_version`). |
 | `app/Http/Controllers/DashboardController.php` | Invokable; SLA/delinquency/to-do metrics and drill-down. |
-| `app/Http/Middleware` | `HandleRoles` (`role:` alias), `CheckWorkingHours`, `TrackUserActivity`, `HandleInertiaRequests` (shares `auth.user`). |
+| `app/Http/Middleware` | `HandleRoles` (`role:` alias), `CheckWorkingHours`, `TrackUserActivity`, `HandleInertiaRequests` (shares `auth.user`, `auth.canViewReferrals`). |
 | `app/Models` | `Document` (computed `is_delayed`, `is_delinquent`), `DocumentTrail`, `Department`, `User`, registries (`DocumentType`, `TransactionType`, `DocumentClassification`, `DeliveryMethod`, `PerformanceStandard`), `AuditLog`, `LoginHistory`. Active/inactive uses integer `state` (1/0). |
 | `resources/views/referral-slips/print.blade.php` | Printable/PDF referral slip. |
 
@@ -108,32 +108,27 @@ on style.
 
 ## 5. Current status
 
-Branch `main`. Last commit `7869ef7` (2026-10-05) "adjusted document trails + embedded digital signature".
+Branch `main`. Last commit `e6b7549` (2026-10-13, pushed to origin) "Add OCM digital approval,
+dashboard metrics update, DTS-style document view, and project docs" — contains all work up to
+and including the DTS-style Show.vue and the docs/skill.
 
-### Uncommitted working tree (observed 2026-10-13)
-Modified (22): `DashboardController`, `ReferralSlipController`, `GenerateReferralRequest`,
-`Document`, `DocumentTrail`, `DocumentPolicy`, `DocumentService`, `ReferralService`,
-`composer.json/.lock` (FPDI/TCPDF), `package-lock.json`, `AppSidebar.vue`, `Dashboard.vue`,
-`documents/Index.vue`, `documents/Show.vue`, `referral-slips/Index.vue`, `ziggy.js`,
-`routes/web.php`, `status.md`, `tests/Feature/DashboardTest.php`,
-`tests/Feature/WorkflowReliabilityTest.php`, `vite.config.ts`.
-Untracked: `ApproveOcmDocumentRequest.php`, `PdfApprovalStampService.php`,
-`config/digital-certificate.php`, migration `2026_10_06_000000_add_signed_file_path_to_document_trails_table.php`,
-`resources/js/pages/ocm-approvals/`, `public/certificates/` (⚠ secrets), and an empty
-`app/Http/Requests/claude.md`.
-
-Per `status.md` (2026-10-09, user-reported), this uncommitted work is the **OCM approval
-feature** (preview → AI/fallback stamp placement → visible stamp + certificate signature →
-return to Records; authorized inline preview of the signed PDF) and **dashboard metrics across
-all active departments** with a delinquency elapsed-time fix. The test suite covering it passes
-(verified above); manual browser verification of OCM signing is still pending per `status.md`.
+### Uncommitted working tree (verified 2026-10-13)
+The two-step ADM referral flow, Document Route strip, latest-first trail table, and Date Start
+timezone fix (see §9 entries dated 2026-10-13 above the "Documentation setup" entry):
+modified `DocumentController`, `ReferralSlipController`, `HandleInertiaRequests`,
+`GenerateReferralRequest`, `DocumentTrail`, `DocumentPolicy`, `DocumentService`, `ReferralService`,
+`AppSidebar.vue`, `documents/Index.vue`, `documents/Show.vue`, `referral-slips/Index.vue`, `ziggy.js`,
+`routes/web.php`, `WorkflowReliabilityTest.php`, `documentation.md`; new `SignReferralRequest.php` and
+migration `2026_10_13_000000_add_signature_mode_to_document_trails_table.php` (applied locally, batch 2).
 
 ### Implementation status
-- Completed (tests pass): intake/registration, dispatch, processing, ADM referral workflow,
-  OCM custody transfer, stale-form protection, rollback on failure, dashboard metrics.
-- In progress / unverified manually: OCM PDF stamping and certificate validity in a PDF reader;
-  stale-form UX in two tabs.
-- Blocked for deployment: certificate files in `public/certificates/` (see §6).
+- Completed (automated tests pass, 65/65): intake/registration, dispatch, processing, two-step ADM
+  referral (generate → Department Head E-/Physical signature → Records), OCM custody + approval,
+  stale-form protection, rollback on failure, dashboard metrics.
+- Unverified in a browser: the two-step referral UI, Document Route strip, OCM PDF signing in a PDF
+  reader, stale-form UX in two tabs.
+- Blocked for real use of the referral flow: no active `department_head` user exists in ADM locally;
+  one must be created (with an uploaded signature for E-Signature).
 
 ## 6. Known issues, risks & technical debt
 
@@ -154,24 +149,31 @@ all active departments** with a delinquency elapsed-time fix. The test suite cov
 6. `DocumentController::create()` renders a non-existent `documents/Create` page and has no route (dead code).
 7. `app/Models/User.php` imports `Laravel\Fortify\TwoFactorAuthenticatable` but Fortify is not installed (unused import).
 8. `routes/web.php` declares `dashboard` twice (closure and `DashboardController`); the later one wins.
-9. `ReferralSlipController::index` builds a query then overwrites it for non-admins; `findStampPlacement`
-   calls OpenAI directly from the controller instead of a service; model name `gpt-4o-mini` hard-coded in two places.
+9. `findStampPlacement` calls OpenAI directly from the controller instead of a service; model name
+   `gpt-4o-mini` hard-coded in two places. (The duplicated `ReferralSlipController::index` query was fixed 2026-10-13.)
 10. Migrations add → remove → re-add `signed_file_path` on `document_trails` (2026_10_01 ×2, 2026_10_06).
 11. Print template hard-codes the City Administrator's name (per `status.md`, intentional).
 12. `vue-tsc` broken via tsconfig `types`; Pint/Prettier debt across most files; no `typecheck` npm script.
 13. `README.md` still begins with the Laravel starter-kit text; `composer.json` name is `laravel/vue-starter-kit`.
 14. Vite warns about a >500 kB chunk (OCR/PDF libs) per `status.md`.
-15. `.env.example` defaults to SQLite while local dev uses MySQL; `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD` missing.
+15. **Mixed timestamp conventions:** app timezone is UTC, so `created_at`/`updated_at` are real UTC while
+   workflow timestamps are Manila wall-clock labelled as UTC. Frontends must treat them differently (see Show.vue
+   `formatUtcDateStr`). Changing `APP` timezone would require migrating existing rows and re-checking SLA math
+   (`Document::getIsDelinquentAttribute`, DashboardController) — needs a decision before touching.
+16. `.env.example` defaults to SQLite while local dev uses MySQL; `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD` missing.
 
 ## 7. Next steps (suggested, none started)
 
-1. Add `/public/certificates` to `.gitignore` and resolve the `.gitignore` conflict markers (needs approval).
-2. Commit or otherwise checkpoint the OCM/dashboard working tree once manually verified (user decision).
-3. Manually verify OCM signing in a PDF reader (`status.md` checklist).
+1. Create an ADM `department_head` user (+ signature) and manually walk the referral flow:
+   Records intake → City Administrator generate → Dept Head sign (try both modes) → Records dispatch;
+   check the Document Route strip and printed slip at each step.
+2. Commit/push the uncommitted referral + Show.vue work once verified (needs user authorization).
+3. Add `/public/certificates` to `.gitignore` and resolve the `.gitignore` conflict markers (needs approval).
 4. Fix the ESLint error in `ocm-approvals/Index.vue` and the tsconfig `types` entry so `vue-tsc` runs.
 5. Add `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD=` to `.env.example`.
-6. Decide on authorization for attachment downloads and for `visibleTo` scoping.
-7. Remove dead code (#6–#8) in a small cleanup change with tests.
+6. Decide on authorization for attachment downloads and for `visibleTo` scoping (security #3, #4).
+7. Decide on the timestamp convention (#15) before any further date/SLA work.
+8. Remove dead code (#6–#8) in a small cleanup change with tests.
 
 ## 8. Decisions & assumptions
 
@@ -182,6 +184,46 @@ all active departments** with a delinquency elapsed-time fix. The test suite cov
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-13 — Show.vue: latest-first trail table; Date Start timezone fix (Claude Code)
+- Routing Trail table lists newest entry first (transit duration still computed chronologically).
+  The Document Route strip was briefly reversed and then **reverted at the user's request**: it stays oldest -> newest.
+- Bug fixed: Date Start showed UTC (8 hours behind). Cause: `config/app.php` timezone is `UTC`, so `created_at`
+  is stored/serialized as true UTC, while workflow timestamps (`received_at`, `released_at`, `due_date`,
+  `completed_at`) are written with `now('Asia/Manila')` and stored as Manila wall-clock. Show.vue strips the
+  "Z" for wall-clock fields; `created_at` now uses `formatUtcDateStr` (converts to Asia/Manila).
+  Verified: stored `2026-10-13T03:27:48Z` renders "Oct 13, 2026 11:27 AM" (matches its trail received 11:27).
+- Checks: `npx eslint` ✅; `npm run build` ✅.
+
+### 2026-10-13 — Two-step City Administrator referral + Document Route view (Claude Code)
+- **Why:** user wants the City Administrator to only generate the slip, then the ADM Department Head
+  (Atty.) chooses E-Signature or Physical Signature before the document returns to Records; and the
+  document page must show office-to-office movement plainly (no "System" placeholder).
+- **Decisions (from user):** generator = `city_administrator` account; signer = `department_head` user
+  whose department code is `ADM`; Physical Signature = slip prints with a blank line for a wet signature.
+- **Flow now:** intake to ADM moves custody REC -> ADM ("Awaiting referral slip") ->
+  City Administrator generates slip (ADM -> ADM, `requires_signature_from = department_head`) ->
+  ADM Department Head signs (`signature_mode` electronic|physical; ADM -> REC) -> Records dispatches.
+  Reuses the existing `department_head` enum value on `documents.requires_signature_from`.
+- **Backend:** new `SignReferralRequest`, `ReferralService::sign()`, `ReferralSlipController::sign`,
+  route `referral-slips.sign`; policy `signReferral` + ADM-head access to `viewReferrals`; `refer` limited
+  to the `city_administrator` role and blocked once a slip awaits signature; `dispatch` blocked while
+  `department_head` is pending. `generate()` no longer signs or stamps (dead OCM stamp branch removed;
+  OCM uses its own queue). Slip print/preview take the signature from the signing trail (electronic only);
+  legacy one-step slips still render. Migration `2026_10_13_000000_add_signature_mode_to_document_trails_table`
+  (applied locally). `HandleInertiaRequests` shares `auth.canViewReferrals` for the sidebar.
+  `DocumentController::show` passes `slipTargets`.
+- **Frontend:** `referral-slips/Index.vue` rewritten (stage column; Generate modal vs Review & Sign modal with
+  slip preview + E-/Physical choice; OCM/pdf.js code removed). `documents/Show.vue`: Document Route strip
+  (stops, Current, Next, Completed), "System" fallback removed, Physical Signature badge.
+  `documents/Index.vue`: pending labels incl. "Pending Dept. Head Signature"; slip button hidden until signed.
+  `AppSidebar.vue`: Referral Slips visibility from `canViewReferrals`.
+- **Tests:** `WorkflowReliabilityTest` updated to the new flow + new test for Dept Head signing rules.
+  `./vendor/bin/pest` -> 65 passed (456 assertions). ESLint (changed files) ✅, `npm run build` ✅,
+  Pint on `ReferralService.php` ✅. Not verified in a browser.
+- **Required before use:** create an active `department_head` user in the ADM department and upload their
+  signature (needed for E-Signature). Documents registered earlier with ADM review still in Records custody
+  are handled: generating their slip moves them REC -> ADM.
 
 ### 2026-10-13 — Show.vue: no placeholder dashes (Claude Code)
 - Modified `resources/js/pages/documents/Show.vue`. User request: empty data should not render `-`/`N/A`.

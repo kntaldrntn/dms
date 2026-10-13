@@ -24,6 +24,7 @@ beforeEach(function () {
     $this->target = Department::create(['code' => 'DST', 'name' => 'Destination', 'state' => 1]);
     $this->records = User::factory()->create(['role' => 'records_manager', 'department_id' => $this->recordsOffice->id]);
     $this->administrator = User::factory()->create(['role' => 'city_administrator', 'department_id' => $this->adminOffice->id]);
+    $this->admHead = User::factory()->create(['role' => 'department_head', 'department_id' => $this->adminOffice->id]);
     $this->mayor = User::factory()->create(['role' => 'city_mayor', 'department_id' => $this->mayorOffice->id]);
     $this->systemAdministrator = User::factory()->create(['role' => 'system_administrator', 'department_id' => $this->adminOffice->id]);
     $this->staff = User::factory()->create(['department_id' => $this->target->id]);
@@ -123,28 +124,38 @@ test('referrals resolve office codes rather than fixed ids and accept omitted re
         'concerned_personnel' => 'Records Officer',
     ])->assertRedirect()->assertSessionHasNoErrors();
     $document = $this->document->fresh();
-    expect($document->department_id)->toBe($this->recordsOffice->id);
+    expect($document->department_id)->toBe($this->adminOffice->id);
+    expect($document->requires_signature_from)->toBe('department_head');
     expect($document->approved_routing_slip)->toBe([$this->target->id]);
     expect($document->workflow_version)->toBe(1);
-    $approvalTrail = DocumentTrail::where('document_id', $document->id)->where('released_action', 'Approved Routing Slip Generated')->firstOrFail();
+    $approvalTrail = DocumentTrail::where('document_id', $document->id)->where('released_action', 'Referral Slip Generated')->firstOrFail();
     expect($approvalTrail->required_actions)->toBe(['please_handle', 'other']);
     expect($approvalTrail->other_action)->toBe('Coordinate with legal');
     expect($approvalTrail->concerned_personnel)->toBe('Records Officer');
     $this->actingAs($this->administrator)->get(route('referral-slips.print', $document))
         ->assertOk()->assertSee('REFERRAL / ACTION SLIP')->assertSee('Coordinate with legal');
+    $this->actingAs($this->records)->get(route('referral-slips.print', $document))->assertForbidden();
+    $count = DocumentTrail::count();
+    // A generated slip cannot be regenerated while it waits for the Department Head.
+    $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), ['workflow_version' => 1, 'targets' => [$this->target->id], 'required_actions' => ['please_handle']])->assertForbidden();
+    $this->assertDatabaseCount('document_trails', $count);
+
+    $this->actingAs($this->admHead)->postJson(route('referral-slips.sign', $this->document), ['workflow_version' => 1, 'signature_mode' => 'physical'])
+        ->assertRedirect()->assertSessionHasNoErrors();
+    $document = $this->document->fresh();
+    expect($document->department_id)->toBe($this->recordsOffice->id);
+    expect($document->requires_signature_from)->toBe('none');
     $this->actingAs($this->records)->get(route('referral-slips.print', $document))
         ->assertOk()->assertSee('REFERRAL / ACTION SLIP');
-    $count = DocumentTrail::count();
-    $this->postJson(route('referral-slips.generate', $this->document), ['workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle']])->assertForbidden();
-    $this->assertDatabaseCount('document_trails', $count);
 });
 
 test('referrals enforce role custody active state and signature availability', function () {
-    $payload = ['workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle'], 'attach_signature' => true];
+    $payload = ['workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle']];
     $this->actingAs($this->records)->postJson(route('referral-slips.generate', $this->document), $payload)->assertForbidden();
     $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), $payload)->assertForbidden();
     $this->document->update(['department_id' => $this->adminOffice->id]);
-    $this->postJson(route('referral-slips.generate', $this->document), $payload)->assertUnprocessable()->assertJsonValidationErrors('attach_signature');
+    $this->actingAs($this->admHead)->postJson(route('referral-slips.generate', $this->document), $payload)->assertForbidden();
+    $this->actingAs($this->administrator);
     $this->document->update(['state' => 0]);
     $this->postJson(route('referral-slips.generate', $this->document), $payload)->assertStatus(409);
     $this->assertDatabaseCount('document_trails', 1);
@@ -152,7 +163,7 @@ test('referrals enforce role custody active state and signature availability', f
 
 test('referral configuration failure leaves no partial trails or custody changes', function () {
     $this->document->update(['department_id' => $this->adminOffice->id]);
-    $this->recordsOffice->update(['state' => 0]);
+    Department::create(['code' => 'ADM', 'name' => 'Duplicate Administrator', 'state' => 1]);
     $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), [
         'workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle'],
     ])->assertUnprocessable()->assertJsonValidationErrors('department_id');
@@ -308,20 +319,55 @@ test('reassignment failure preserves metadata history and the previous attachmen
 test('signed referral attribution survives dispatch and the approved slip is consumed', function () {
     $this->document->update(['department_id' => $this->adminOffice->id]);
     $this->trail->update(['department_id' => $this->adminOffice->id, 'received_by' => $this->administrator->id]);
-    $this->administrator->update(['signature_path' => 'signatures/admin.png']);
+    $this->admHead->update(['signature_path' => 'signatures/head.png']);
     $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), [
-        'workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle'], 'attach_signature' => true,
+        'workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle'],
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $this->actingAs($this->admHead)->postJson(route('referral-slips.sign', $this->document), [
+        'workflow_version' => 1, 'signature_mode' => 'electronic',
     ])->assertRedirect()->assertSessionHasNoErrors();
     $this->actingAs($this->records)->postJson(route('documents.route', $this->document), [
-        'workflow_version' => 1, 'routed_to' => [$this->target->id],
+        'workflow_version' => 2, 'routed_to' => [$this->target->id],
     ])->assertRedirect()->assertSessionHasNoErrors();
-    expect($this->trail->fresh()->signed_by)->toBe($this->administrator->id);
-    expect($this->trail->fresh()->is_digitally_signed)->toBeTrue();
+    $signing = DocumentTrail::where('document_id', $this->document->id)->whereNotNull('signature_mode')->firstOrFail();
+    expect($signing->signed_by)->toBe($this->admHead->id);
+    expect($signing->is_digitally_signed)->toBeTrue();
+    expect($signing->signature_mode)->toBe('electronic');
+    expect($signing->released_to)->toBe($this->recordsOffice->id);
     expect($this->document->fresh()->approved_routing_slip)->toBeNull();
-    expect($this->document->fresh()->workflow_version)->toBe(2);
+    expect($this->document->fresh()->workflow_version)->toBe(3);
 });
 
-test('a referral slip displays the approving City Administrator signature when it is on file', function () {
+test('only the ADM Department Head signs a generated slip and E-Signature requires an uploaded signature', function () {
+    $this->document->update(['department_id' => $this->adminOffice->id]);
+    app(ReferralService::class)->generate($this->document, $this->administrator, [
+        'workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle'],
+    ]);
+    $otherHead = User::factory()->create(['role' => 'department_head', 'department_id' => $this->target->id]);
+    $payload = ['workflow_version' => 1, 'signature_mode' => 'electronic'];
+    foreach ([$this->administrator, $this->records, $otherHead] as $user) {
+        $this->actingAs($user)->postJson(route('referral-slips.sign', $this->document), $payload)->assertForbidden();
+    }
+    $count = DocumentTrail::count();
+    $this->actingAs($this->admHead)->postJson(route('referral-slips.sign', $this->document), $payload)
+        ->assertUnprocessable()->assertJsonValidationErrors('signature_mode');
+    $this->postJson(route('referral-slips.sign', $this->document), ['workflow_version' => 1, 'signature_mode' => 'stamp'])
+        ->assertUnprocessable()->assertJsonValidationErrors('signature_mode');
+    $this->assertDatabaseCount('document_trails', $count);
+    expect($this->document->fresh()->requires_signature_from)->toBe('department_head');
+
+    $this->actingAs($this->records)->postJson(route('documents.route', $this->document), [
+        'workflow_version' => 1, 'routed_to' => [$this->target->id],
+    ])->assertForbidden();
+
+    $this->actingAs($this->admHead)->get(route('referral-slips.index'))
+        ->assertOk()->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
+    $this->actingAs($this->administrator)->get(route('referral-slips.index'))
+        ->assertOk()->assertInertia(fn (Assert $page) => $page->has('documents.data', 0));
+    $this->actingAs($otherHead)->get(route('referral-slips.index'))->assertForbidden();
+});
+
+test('a referral slip shows the ADM Department Head e-signature only after signing', function () {
     Storage::fake('public');
     Storage::disk('public')->makeDirectory('signatures');
     $signature = UploadedFile::fake()->image('admin.png', 100, 30);
@@ -329,13 +375,19 @@ test('a referral slip displays the approving City Administrator signature when i
 
     $this->document->update(['department_id' => $this->adminOffice->id]);
     $this->trail->update(['department_id' => $this->adminOffice->id, 'received_by' => $this->administrator->id]);
-    $this->administrator->update(['signature_path' => 'signatures/admin.png']);
+    $this->admHead->update(['signature_path' => 'signatures/admin.png']);
 
     $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), [
         'workflow_version' => 0, 'targets' => [$this->target->id], 'required_actions' => ['please_handle'],
     ])->assertRedirect()->assertSessionHasNoErrors();
+    // Unsigned until the Department Head decides.
+    $this->get(route('referral-slips.print', $this->document))->assertOk()->assertDontSee('/storage/signatures/admin.png');
 
-    $this->get(route('referral-slips.print', $this->document))
+    $this->actingAs($this->admHead)->postJson(route('referral-slips.sign', $this->document), [
+        'workflow_version' => 1, 'signature_mode' => 'electronic',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $this->actingAs($this->administrator)->get(route('referral-slips.print', $this->document))
         ->assertOk()
         ->assertSee('/storage/signatures/admin.png');
 
@@ -344,16 +396,18 @@ test('a referral slip displays the approving City Administrator signature when i
         ->assertHeader('content-type', 'application/pdf');
 });
 
-test('intake accepts an internal office id and queues City Administrator review without moving Records custody', function () {
+test('intake accepts an internal office id and hands the document to the City Administrator', function () {
     $this->actingAs($this->records)->postJson(route('documents.store'), [
         ...$this->data, 'barcode' => 'INTERNAL', 'source_type' => 'Internal',
         'source_location' => $this->target->id, 'department_id' => $this->adminOffice->id,
     ])->assertRedirect()->assertSessionHasNoErrors();
     $created = Document::where('barcode', 'INTERNAL')->firstOrFail();
     expect($created->source_location)->toBe((string) $this->target->id);
-    expect($created->department_id)->toBe($this->recordsOffice->id);
+    expect($created->department_id)->toBe($this->adminOffice->id);
     expect($created->requires_signature_from)->toBe('city_administrator');
-    expect($created->trails()->count())->toBe(1);
+    expect($created->trails()->count())->toBe(2);
+    expect($created->trails()->oldest('id')->first()->released_to)->toBe($this->adminOffice->id);
+    expect($created->trails()->latest('id')->first()->received_action)->toBe('Awaiting referral slip');
     $this->actingAs($this->administrator)->get(route('referral-slips.index'))
         ->assertOk()->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
     expect($created->due_date->toDateString())->toBe('2026-09-29');

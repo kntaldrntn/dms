@@ -22,13 +22,6 @@ class GenerateReferralRequest extends DocumentMutationRequest
             ])],
             'other_action' => ['nullable', Rule::requiredIf(fn () => in_array('other', $this->input('required_actions', []), true)), 'string', 'max:255'],
             'concerned_personnel' => ['nullable', 'string', 'max:255'],
-            'attach_signature' => ['sometimes', 'boolean'],
-            'stamp_placement' => ['nullable', 'array:page,x,y,width,height'],
-            'stamp_placement.page' => ['nullable', 'integer', 'min:1', 'max:100'],
-            'stamp_placement.x' => ['nullable', 'numeric', 'min:0', 'max:950'],
-            'stamp_placement.y' => ['nullable', 'numeric', 'min:0', 'max:950'],
-            'stamp_placement.width' => ['nullable', 'numeric', 'min:80', 'max:500'],
-            'stamp_placement.height' => ['nullable', 'numeric', 'min:30', 'max:300'],
         ];
     }
 }

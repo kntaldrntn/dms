@@ -26,7 +26,7 @@ class DocumentTrail extends Model
         'trail_type',
         'is_digitally_signed',
         'signed_by',
-        'signed_file_path',
+        'signature_mode',
         'signed_file_path',
     ];
 

@@ -34,6 +34,13 @@ const departmentId = (code: string) => Number(props.departments.find(department 
 const cityAdministratorId = departmentId('ADM');
 const cityMayorId = departmentId('OCM');
 
+// Documents waiting on an executive step cannot be routed by Records yet.
+const pendingApprovalLabels: Record<string, string> = {
+    city_administrator: 'Pending City Administrator Slip',
+    department_head: 'Pending Dept. Head Signature',
+    city_mayor: 'Pending City Mayor Review',
+};
+
 const searchTerm = ref(props.filters?.search || '');
 let searchTimeout: ReturnType<typeof setTimeout>;
 
@@ -570,13 +577,13 @@ function submitDocument() {
                                         <div class="flex justify-center items-center gap-2">
 
                                             <!-- REFERRAL SLIP: authorized approvers and Records can reopen an approved slip -->
-                                            <a v-if="doc.approved_routing_slip && ['records_manager', 'city_administrator', 'city_mayor', 'system_administrator'].includes($page.props.auth.user.role)" :href="route('referral-slips.preview', doc.id)" target="_blank" rel="noopener" class="rounded-md border border-violet-200 bg-violet-50 p-1.5 text-violet-700 shadow-sm transition hover:bg-violet-100" title="Open Referral Action Slip PDF preview">
+                                            <a v-if="doc.approved_routing_slip && doc.requires_signature_from !== 'department_head' && ['records_manager', 'city_administrator', 'city_mayor', 'system_administrator'].includes($page.props.auth.user.role)" :href="route('referral-slips.preview', doc.id)" target="_blank" rel="noopener" class="rounded-md border border-violet-200 bg-violet-50 p-1.5 text-violet-700 shadow-sm transition hover:bg-violet-100" title="Open Referral Action Slip PDF preview">
                                                 <FileText class="h-4 w-4" />
                                             </a>
 
                                             <!-- ROUTING/STATUS: Hide FastForward while City Administrator approval is pending -->
-                                            <span v-if="['city_administrator', 'city_mayor'].includes(doc.requires_signature_from) || doc.department_id !== $page.props.auth.user.department_id" class="text-[10px] font-bold uppercase tracking-wider text-slate-500 py-1.5 px-2 bg-slate-100 rounded-md border border-slate-200" :title="doc.requires_signature_from === 'city_mayor' ? 'Waiting for City Mayor approval' : 'Waiting for City Administrator approval'">
-                                                {{ doc.requires_signature_from === 'city_mayor' ? 'Pending City Mayor Review' : (doc.requires_signature_from === 'city_administrator' ? 'Pending City Administrator Review' : `With ${doc.department?.code || 'Exec.'}`) }}
+                                            <span v-if="pendingApprovalLabels[doc.requires_signature_from] || doc.department_id !== $page.props.auth.user.department_id" class="text-[10px] font-bold uppercase tracking-wider text-slate-500 py-1.5 px-2 bg-slate-100 rounded-md border border-slate-200">
+                                                {{ pendingApprovalLabels[doc.requires_signature_from] || `With ${doc.department?.code || 'Exec.'}` }}
                                             </span>
 
                                             <!-- ROUTING BUTTON: Show only after required approval -->

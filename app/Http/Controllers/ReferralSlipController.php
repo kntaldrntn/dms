@@ -6,6 +6,7 @@ use App\Models\Document;
 use App\Models\Department;
 use App\Http\Requests\GenerateReferralRequest;
 use App\Http\Requests\ApproveOcmDocumentRequest;
+use App\Http\Requests\SignReferralRequest;
 use App\Services\ReferralService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
@@ -20,21 +21,16 @@ class ReferralSlipController extends Controller
     {
         $this->authorize('viewReferrals', Document::class);
 
-        $documents = Document::with(['documentType', 'transactionType'])
-            ->where(function ($query) {
-                $query->where('requires_signature_from', 'city_administrator')
-                    ->orWhereHas('department', fn ($department) => $department->where('code', 'ADM')->where('state', 1));
-            })
-            ->where('status', 'Pending')
-            ->where('state', 1)
-            ->latest()
-            ->paginate(10);
+        // City Administrator generates slips; the ADM Department Head signs them; admins see both stages.
+        $stages = match ($request->user()->role) {
+            'city_administrator' => ['city_administrator'],
+            'department_head' => ['department_head'],
+            default => ['city_administrator', 'department_head'],
+        };
 
-        if ($request->user()->role !== 'system_administrator') {
-            $documents = Document::with(['documentType', 'transactionType'])
-                ->where('requires_signature_from', 'city_administrator')
-                ->where('status', 'Pending')->where('state', 1)->latest()->paginate(10);
-        }
+        $documents = Document::with(['documentType', 'transactionType'])
+            ->whereIn('requires_signature_from', $stages)
+            ->where('status', 'Pending')->where('state', 1)->latest()->paginate(10);
 
         return Inertia::render('referral-slips/Index', [
             'documents' => $documents,
@@ -72,7 +68,14 @@ class ReferralSlipController extends Controller
     {
         $referrals->generate($document, $request->user(), $request->validated());
 
-        return redirect()->back()->with('success', 'Routing Slip approved. You can view or print it from the document actions.');
+        return redirect()->back()->with('success', 'Referral Slip generated and forwarded to the Department Head for signature.');
+    }
+
+    public function sign(SignReferralRequest $request, Document $document, ReferralService $referrals)
+    {
+        $referrals->sign($document, $request->user(), $request->validated());
+
+        return redirect()->back()->with('success', 'Referral Slip signed and returned to Records for dispatch.');
     }
 
     public function findStampPlacement(Request $request, Document $document)
@@ -162,15 +165,22 @@ class ReferralSlipController extends Controller
 
         $trail = $document->trails()
             ->with(['releaser', 'signer'])
-            ->where('released_action', 'Approved Routing Slip Generated')
+            ->whereIn('released_action', ReferralService::SLIP_GENERATED_ACTIONS)
             ->latest('id')
             ->firstOrFail();
 
         $departments = Department::where('state', 1)->orderBy('code')->get();
-        $signatureUser = $trail->signer ?? $trail->releaser;
+
+        // The Department Head's signing step decides the signature; Physical Signature leaves the line blank.
+        // Legacy one-step slips carried the City Administrator's signature on the generation trail itself.
+        $signingTrail = $document->trails()->with('signer')
+            ->whereNotNull('signature_mode')->where('id', '>', $trail->id)->latest('id')->first();
+        $signatureUser = $signingTrail
+            ? ($signingTrail->signature_mode === 'electronic' ? $signingTrail->signer : null)
+            : ($trail->is_digitally_signed ? $trail->signer : null);
         $signatureUrl = null;
 
-        if ($signatureUser?->role === 'city_administrator' && $signatureUser->signature_path && Storage::disk('public')->exists($signatureUser->signature_path)) {
+        if ($signatureUser?->signature_path && Storage::disk('public')->exists($signatureUser->signature_path)) {
             $signatureUrl = $forPdf
                 ? $this->imageDataUri(Storage::disk('public')->path($signatureUser->signature_path))
                 : Storage::disk('public')->url($signatureUser->signature_path);

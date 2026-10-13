@@ -77,15 +77,17 @@ class DocumentService
                     'department_id' => $user->department_id, 'received_by' => $user->id,
                     'received_at' => now('Asia/Manila'), 'received_action' => 'Document Scanned & Registered',
                 ]);
-                if ($requiredExecutiveApproval === 'city_mayor') {
-                    // OCM approval is an actual hand-off to the Mayor's office.
-                    // Keep the destination in department_id so the record and
-                    // custody trail both show OCM (currently department 31).
-                    $this->workflow->release($document, $user, 'Submitted for City Mayor approval', $target);
-                    $this->workflow->receive($document, $target, 'Awaiting City Mayor approval');
+                if ($requiredExecutiveApproval) {
+                    // Executive review is an actual hand-off: custody and the trail both
+                    // move to ADM/OCM so the document's path is visible office to office.
+                    [$releaseAction, $receiveAction] = $requiredExecutiveApproval === 'city_mayor'
+                        ? ['Submitted for City Mayor approval', 'Awaiting City Mayor approval']
+                        : ['Forwarded to City Administrator', 'Awaiting referral slip'];
+                    $this->workflow->release($document, $user, $releaseAction, $target);
+                    $this->workflow->receive($document, $target, $receiveAction);
                     $document->department_id = $target;
                     $document->save();
-                } elseif (! $requiredExecutiveApproval && $target !== (int) $user->department_id) {
+                } elseif ($target !== (int) $user->department_id) {
                     $this->workflow->release($document, $user, 'Direct Dispatch', $target);
                     $this->workflow->receive($document, $target, 'Direct Dispatch from Records');
                     $document->department_id = $target;

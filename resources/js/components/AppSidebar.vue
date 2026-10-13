@@ -47,12 +47,12 @@ const mainNavItems = computed<NavItem[]>(() => {
             icon: Inbox,
             roles: ['system_administrator', 'records_manager', 'user', 'staff', 'department_head', 'city_administrator', 'city_mayor'],
         },
-        // NEW: Dedicated Referral Slip Module for the City Admin Hub
+        // Referral Slips: City Administrator generates, ADM Department Head signs (server decides via policy).
         {
             title: 'Referral Slips',
-            href: '/referral-slips', // We will register this route next
+            href: route('referral-slips.index'),
             icon: FileSignature,
-            roles: ['system_administrator', 'city_administrator'],
+            roles: page.props.auth.canViewReferrals ? [userRole.value] : [],
         },
         {
             title: 'OCM Approvals',
