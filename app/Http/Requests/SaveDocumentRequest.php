@@ -44,7 +44,10 @@ class SaveDocumentRequest extends FormRequest
             'classification_id' => ['nullable', 'integer', Rule::exists('document_classifications', 'id')->where('state', 1)],
             'department_id' => ['nullable', 'integer', Rule::exists('departments', 'id')->where('state', 1)],
             'access_code' => ['required', 'string', 'max:20'],
-            'ai_routing_suggestions' => ['nullable', 'array'],
+            'ai_routing_suggestions' => ['nullable', 'array', 'max:10'],
+            'ai_routing_suggestions.*.department_id' => ['required', 'integer'],
+            'ai_routing_suggestions.*.priority' => ['nullable', 'string', 'max:20'],
+            'ai_routing_suggestions.*.reason' => ['nullable', 'string', 'max:1000'],
             'linked_documents' => ['nullable', 'string'],
             'attached_file' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
         ];

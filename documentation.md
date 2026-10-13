@@ -4,7 +4,7 @@
 > handoff, and before `/compact`. Mark facts as **verified** only with evidence.
 > Feature-level health is tracked separately by the user in `status.md`.
 
-Last updated: 2026-10-14 (multi-office custody, holders, role-scoped delinquency, notification bell)
+Last updated: 2026-10-14 (referral slip AI pre-fill fix; earlier: multi-office custody, holders, delinquency scope, bell)
 
 ---
 
@@ -51,7 +51,8 @@ FormRequest (authorize + rules) → service → `DocumentWorkflow` → models/tr
 | `app/Services/IncomingDocumentService.php` | Notification-bell data: open trail entries at the user's office with `received_by` null, filtered to the stages the user's role acts on. Shared lazily as `incoming`. |
 | `app/Services/ReferralService.php` | Two-step ADM referral: `generate()` (City Administrator, slip only → `requires_signature_from=department_head`) and `sign()` (ADM Department Head, `signature_mode` electronic/physical → back to REC). OCM approval `approveOcm()` uses `PdfApprovalStampService`. |
 | `app/Services/PdfApprovalStampService.php` | Stamps the uploaded PDF with a visible signature block and signs it with the certificate from `config/digital-certificate.php`; writes to `storage/app/private/signed-documents` (local disk). Original upload untouched. |
-| `app/Services/DocumentAnalysisService.php` | OCR text + thumbnail → OpenAI JSON extraction for intake (prompt reference: `basis.md`). |
+| `app/Http/Controllers/DocumentController.php` `analyze()` | Live intake AI: OCR text + thumbnail → OpenAI JSON; ADM/OCM ids resolved by code; `routingSuggestions()` validates the routing suggestions. |
+| `app/Services/DocumentAnalysisService.php` | **Unused** older copy of the intake prompt (prompt reference: `basis.md`); not wired to any route. |
 | `app/Policies/DocumentPolicy.php` | All document abilities: `viewAny`, `view`, `create`, `update`, `delete`, `dispatch`, `process`, `viewReferrals`, `viewOcmApprovals`, `refer`, `signReferral`, `viewReferralSlip`. Ownership = user's department equals document's current department. |
 | `app/Http/Requests/*` | `SaveDocumentRequest`, `DispatchDocumentRequest`, `ProcessDocumentRequest`, `GenerateReferralRequest`, `SignReferralRequest`, `ApproveOcmDocumentRequest`, `AnalyzeDocumentRequest`, `DocumentMutationRequest` (base: requires `workflow_version`). |
 | `app/Http/Controllers/DashboardController.php` | Invokable; SLA/delinquency/to-do metrics and drill-down. Delinquency is all-departments for `ALL_DEPARTMENT_ROLES`, otherwise the user's held documents. |
@@ -114,15 +115,17 @@ on style.
 
 ## 5. Current status
 
-Branch `main`. All work through the notification bell is committed and pushed (see `git log`; previous
-milestones `eb09eda` multi-office custody + Released To, `75f4c3b` two-step referral). Migrations to run on other
-environments: `2026_10_13_000000_add_signature_mode_to_document_trails_table`,
-`2026_10_14_000000_add_released_to_offices_to_document_trails_table` (includes a data backfill).
-Checks before the latest commit: Pest 70 passed (706 assertions), ESLint on changed Vue files OK, `npm run build` OK,
-Pint on new PHP files OK.
+Branch `main`. The referral-slip AI pre-fill fix is committed locally but **not pushed** (push when ready).
+Everything before it is pushed (`2cb71ea` bell + delinquency scope + holders, `eb09eda` multi-office custody +
+Released To, `75f4c3b` two-step referral). Migrations to run on other environments:
+`2026_10_13_000000_add_signature_mode_to_document_trails_table`,
+`2026_10_14_000000_add_released_to_offices_to_document_trails_table` (includes a data backfill). The latest fix needs
+no migration.
+Checks before the latest commit: Pest 71 passed (708 assertions), ESLint on changed Vue files OK, `npm run build` OK,
+Pint on changed test/request OK.
 
 ### Implementation status
-- Completed (automated tests pass, 65/65): intake/registration, dispatch, processing, two-step ADM
+- Completed (automated tests pass, 71/71): intake/registration, dispatch, processing, two-step ADM
   referral (generate → Department Head E-/Physical signature → Records), OCM custody + approval,
   stale-form protection, rollback on failure, dashboard metrics.
 - Unverified in a browser: notification bell + Receive modal, role-scoped delinquency card, multi-office
@@ -169,13 +172,16 @@ Pint on new PHP files OK.
 
 1. Browser-test the bell (dispatch to an office with a user, click the ping, Receive & End / Route) and the
    role-scoped delinquency card; revert specific commits if behaviour is not as intended.
+   Also register a new ADM document with AI analysis and confirm Generate Slip pre-ticks the suggested offices
+   (local doc 1 has only an ADM suggestion, so it correctly pre-fills nothing). Then push the local commit.
 2. Add `/public/certificates` to `.gitignore` and resolve the `.gitignore` conflict markers (needs approval).
 3. Fix the ESLint error in `ocm-approvals/Index.vue` and the tsconfig `types` entry so `vue-tsc` runs.
 4. Add `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD=` to `.env.example`.
 5. Decide on authorization for attachment downloads and for `visibleTo` scoping (security #3, #4).
 6. Decide on the timestamp convention (#15) and per-copy SLA (#17) before further date/SLA work.
 7. Transactions page never receives `flash` from `TransactionController` (success toast after processing does not show).
-8. Remove dead code (#6–#8) in a small cleanup change with tests.
+8. Remove dead code (#6–#8, and the unused `DocumentAnalysisService`, whose prompt duplicates the one in
+   `DocumentController::analyze`) in a small cleanup change with tests.
 
 ## 8. Decisions & assumptions
 
@@ -186,6 +192,21 @@ Pint on new PHP files OK.
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-14 — Referral slip: AI routing suggestions pre-fill again (Claude Code)
+- **Bug (user-reported):** Generate Referral Slip did not pre-select the AI-suggested departments. Cause: the AI put
+  ADM itself (the referral office) in `routing_suggestions` (local doc 1 stored only `[{department_id:"3"}]`). ADM is
+  excluded from the slip's department list, so nothing visible was ticked, while id 3 was pre-ticked invisibly and
+  would fail `targets.*` notIn validation on submit.
+- `referral-slips/Index.vue`: pre-ticks only suggestions for listed offices; hint line says whether AI suggestions were
+  applied; suggestion reason on hover.
+- `DocumentController::analyze`: prompt uses ADM/OCM ids resolved by code (was hard-coded 3/31) and forbids ADM in
+  routing suggestions; new `routingSuggestions()` validates AI output (active offices only, excludes ADM and the
+  executive target, int ids, priority Primary/Secondary/FYI, dedupe, max 4).
+- `SaveDocumentRequest`: nested rules for `ai_routing_suggestions.*`.
+- Existing documents whose only suggestion was ADM (e.g. local doc 1) still have nothing to pre-fill; the modal says so.
+- Checks: Pest 71 passed (708 assertions; new `DocumentAnalysisTest` case); ESLint ✅; Pint on changed test/request ✅;
+  build ✅. Not verified in a browser.
 
 ### 2026-10-14 — Role-scoped delinquency + incoming-document notification bell (Claude Code)
 - **Dashboard:** delinquent card/report (and its To-Do / Due Tomorrow counts) cover all departments only for

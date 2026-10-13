@@ -42,6 +42,30 @@ test('analysis returns normalized barcode and usage from a mocked response', fun
     $this->assertDatabaseCount('documents', 0);
 });
 
+test('routing suggestions keep only offices a referral slip can target', function () {
+    $administrator = Department::create(['code' => 'ADM', 'name' => 'Administrator', 'state' => 1]);
+    $health = Department::create(['code' => 'CHO', 'name' => 'Health', 'state' => 1]);
+    $closed = Department::create(['code' => 'OLD', 'name' => 'Closed office', 'state' => 0]);
+    OpenAI::fake([CreateResponse::fake([
+        'choices' => [['message' => ['role' => 'assistant', 'content' => json_encode([
+            'department_id' => $administrator->id,
+            'routing_suggestions' => [
+                ['department_id' => (string) $administrator->id, 'priority' => 'Primary', 'reason' => 'Addressed to ADM'],
+                ['department_id' => (string) $health->id, 'priority' => 'Primary', 'reason' => 'Health concern'],
+                ['department_id' => $health->id, 'priority' => 'FYI', 'reason' => 'Duplicate'],
+                ['department_id' => $closed->id, 'priority' => 'Secondary', 'reason' => 'Inactive'],
+                ['department_id' => 9999, 'priority' => 'Urgent', 'reason' => ['not', 'a', 'string']],
+            ],
+        ])]]],
+    ])]);
+
+    $this->actingAs($this->records)->postJson(route('documents.analyze'), [
+        'extracted_text' => 'Request to the City Administrator', 'ai_thumbnail' => UploadedFile::fake()->image('thumb.jpg'),
+    ])->assertOk()->assertJsonPath('routing_suggestions', [
+        ['department_id' => $health->id, 'priority' => 'Primary', 'reason' => 'Health concern'],
+    ]);
+});
+
 test('invalid analysis responses return a safe failure without exposing provider output', function (string $content) {
     OpenAI::fake([CreateResponse::fake([
         'choices' => [['message' => ['role' => 'assistant', 'content' => $content]]],

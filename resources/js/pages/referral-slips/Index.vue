@@ -78,13 +78,21 @@ function openModal(doc: any) {
     if (typeof suggestions === 'string') {
         try { suggestions = JSON.parse(suggestions); } catch { suggestions = []; }
     }
+    // Only offices the slip can target count: the AI sometimes suggests ADM itself, which is not
+    // listed and would otherwise be pre-ticked invisibly and fail validation on submit.
+    const selectableIds = props.departments.map((department) => department.id);
     const suggestionsMap: Record<number, { reason: string; priority: string }> = {};
-    suggestions.forEach((suggestion: any) => {
-        suggestionsMap[Number(suggestion.department_id)] = { reason: suggestion.reason, priority: suggestion.priority };
+    (Array.isArray(suggestions) ? suggestions : []).forEach((suggestion: any) => {
+        const departmentId = Number(suggestion?.department_id);
+        if (selectableIds.includes(departmentId)) {
+            suggestionsMap[departmentId] = { reason: suggestion.reason || '', priority: suggestion.priority || 'Suggested' };
+        }
     });
     aiSuggestionsMap.value = suggestionsMap;
     generateForm.targets = Object.keys(suggestionsMap).map(Number); // Pre-tick AI suggestions
 }
+
+const hasAiSuggestions = computed(() => Object.keys(aiSuggestionsMap.value).length > 0);
 
 function closeModal() {
     selectedDoc.value = null;
@@ -248,7 +256,11 @@ function submitSignature() {
 
                             <!-- STAGE 1: City Administrator generates the slip only -->
                             <template v-else>
-                                <h3 class="mb-3 text-sm font-bold text-slate-800">Target Departments <span class="text-rose-500">*</span></h3>
+                                <h3 class="mb-1 text-sm font-bold text-slate-800">Target Departments <span class="text-rose-500">*</span></h3>
+                                <p class="mb-3 flex items-center gap-1 text-[11px]" :class="hasAiSuggestions ? 'text-emerald-600' : 'text-slate-500'">
+                                    <Sparkles class="h-3 w-3" aria-hidden="true" />
+                                    {{ hasAiSuggestions ? 'Pre-selected from the AI routing suggestions at intake. Adjust as needed.' : 'No AI routing suggestions for this document. Select the departments manually.' }}
+                                </p>
                                 <div class="mb-1 grid grid-cols-1 gap-3 sm:grid-cols-2">
                                     <label
                                         v-for="dept in departments"
@@ -259,7 +271,7 @@ function submitSignature() {
                                         <input type="checkbox" v-model="generateForm.targets" :value="dept.id" class="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500" />
                                         <div class="flex flex-col">
                                             <span class="text-sm font-bold text-slate-800">{{ dept.code || dept.name }}</span>
-                                            <span v-if="aiSuggestionsMap[dept.id]" class="text-[10px] font-bold text-emerald-600">
+                                            <span v-if="aiSuggestionsMap[dept.id]" class="text-[10px] font-bold text-emerald-600" :title="aiSuggestionsMap[dept.id].reason">
                                                 <Sparkles class="inline h-3 w-3" aria-hidden="true" /> {{ aiSuggestionsMap[dept.id].priority }} Match
                                             </span>
                                         </div>

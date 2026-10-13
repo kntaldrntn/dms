@@ -154,6 +154,8 @@ class DocumentController extends Controller
             $transactionTypes = TransactionType::where('state', 1)->pluck('name', 'id')->toJson();
             $classifications = DocumentClassification::where('state', 1)->pluck('name', 'id')->toJson();
             $deliveryMethods = DeliveryMethod::where('state', 1)->pluck('delivery_method_name', 'id')->toJson();
+            $administratorId = Department::where('code', 'ADM')->where('state', 1)->value('id');
+            $mayorId = Department::where('code', 'OCM')->where('state', 1)->value('id');
 
             $systemInstruction = "You are an advanced document intake AI utilizing OCR-Assisted Vision. You have a blurry thumbnail (only good for general layout) and raw OCR text. YOU MUST RELY ON THE OCR TEXT FOR EXACT SPELLINGS.
             
@@ -284,9 +286,9 @@ class DocumentController extends Controller
 
             'classification_id': 'null or integer ID matching the best classification',
 
-            'department_id': 'Integer or null. Strictly return 31 (Office of the City Mayor), 3 (Office of the City Administrator), or null (Other Departments). ONLY use 31 or 3 if the document is explicitly ADDRESSED TO or REQUIRES APPROVAL FROM them. CRITICAL: Do NOT route it to 3 or 31 if they are the ones SENDING the document. If it is going to a regular department, return null.',
+            'department_id': 'Integer or null. Strictly return {$mayorId} (Office of the City Mayor), {$administratorId} (Office of the City Administrator), or null (Other Departments). ONLY use {$mayorId} or {$administratorId} if the document is explicitly ADDRESSED TO or REQUIRES APPROVAL FROM them. CRITICAL: Do NOT route it to {$administratorId} or {$mayorId} if they are the ones SENDING the document. If it is going to a regular department, return null.',
 
-            'approval_reason': 'String or null. If you selected 3 or 31, briefly explain why.',
+            'approval_reason': 'String or null. If you selected {$administratorId} or {$mayorId}, briefly explain why.',
 
             'routing_suggestions': [
                 {
@@ -296,7 +298,7 @@ class DocumentController extends Controller
                 }
             ],
 
-            'NOTE_FOR_ROUTING': 'Provide 1 to 4 highly relevant routing suggestions. CRITICAL: DO NOT guess or invent hypothetical scenarios. Assign EXACTLY ONE office as Primary (the main executor of the request). Any other offices must be Secondary or FYI (like Budget/Accounting for records). STRICT RULE: If you selected 3 or 31 for the main department_id, DO NOT include them again here.',
+            'NOTE_FOR_ROUTING': 'Provide 1 to 4 highly relevant routing suggestions. CRITICAL: DO NOT guess or invent hypothetical scenarios. Assign EXACTLY ONE office as Primary (the main executor of the request). Any other offices must be Secondary or FYI (like Budget/Accounting for records). STRICT RULE: NEVER include {$administratorId} (Office of the City Administrator) here; the routing suggestions are the offices its referral slip goes to. If you selected {$mayorId} for the main department_id, DO NOT include it again here.',
 
             'confidence_score': 'Integer between 1 and 100.'
             }";
@@ -392,6 +394,11 @@ class DocumentController extends Controller
                 }
             }
 
+            $result['routing_suggestions'] = $this->routingSuggestions(
+                $result['routing_suggestions'] ?? [],
+                array_filter([$administratorId, is_numeric($result['department_id'] ?? null) ? (int) $result['department_id'] : null]),
+            );
+
             if (isset($response->usage)) {
                 $result['meta'] = [
                     'total_tokens' => $response->usage->totalTokens,
@@ -434,6 +441,29 @@ class DocumentController extends Controller
                            ->get();
                            
         return response()->json($results);
+    }
+
+    /**
+     * Keep only AI routing suggestions a referral slip can actually target: active offices other than
+     * the excluded ones (ADM itself and the executive office the document goes to), one entry per office.
+     */
+    private function routingSuggestions(mixed $suggestions, array $excludedOfficeIds): array
+    {
+        if (! is_array($suggestions)) {
+            return [];
+        }
+        $activeOfficeIds = Department::where('state', 1)->pluck('id')->all();
+
+        return collect($suggestions)
+            ->filter(fn ($suggestion) => is_array($suggestion) && is_numeric($suggestion['department_id'] ?? null))
+            ->map(fn ($suggestion) => [
+                'department_id' => (int) $suggestion['department_id'],
+                'priority' => in_array($suggestion['priority'] ?? null, ['Primary', 'Secondary', 'FYI'], true) ? $suggestion['priority'] : 'FYI',
+                'reason' => is_string($suggestion['reason'] ?? null) ? Str::limit(trim($suggestion['reason']), 500, '') : '',
+            ])
+            ->filter(fn ($suggestion) => in_array($suggestion['department_id'], $activeOfficeIds, true)
+                && ! in_array($suggestion['department_id'], $excludedOfficeIds, true))
+            ->unique('department_id')->take(4)->values()->all();
     }
 
     private function ensureActive(Document $document): void
