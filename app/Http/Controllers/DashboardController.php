@@ -12,6 +12,9 @@ use Inertia\Inertia;
 
 class DashboardController extends Controller
 {
+    /** Roles whose delinquency card covers every department; other users see their own office only. */
+    private const ALL_DEPARTMENT_ROLES = ['system_administrator', 'city_administrator', 'records_manager'];
+
     public function __invoke(Request $request)
     {
         $months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -38,13 +41,17 @@ class DashboardController extends Controller
         $internalClients = (clone $monthQuery)->where('source_type', 'Internal')->count();
 
         // ---------------------------------------------------------
-        // 2. DELINQUENT / ACTION REQUIRED (All active departments)
+        // 2. DELINQUENT / ACTION REQUIRED
         // ---------------------------------------------------------
-        // Each document's accessor resolves the SLA from its current department,
-        // so this remains accurate while presenting the dashboard globally.
-        $openDocuments = Document::with(['trails', 'documentType'])
+        // Oversight roles see every active department; everyone else sees only documents
+        // their office currently holds a copy of. Each document's accessor resolves the SLA
+        // from its current department.
+        $user = $request->user();
+        $seesAllDepartments = in_array($user->role, self::ALL_DEPARTMENT_ROLES, true);
+        $openDocuments = Document::with(['trails', 'documentType', 'department'])
             ->where('status', '!=', 'Completed')
             ->where('state', 1)
+            ->when(! $seesAllDepartments, fn ($documents) => $documents->heldBy((int) $user->department_id))
             ->get();
             
         $todoCount = $openDocuments->count();
@@ -137,8 +144,10 @@ class DashboardController extends Controller
                 $page,
                 ['path' => $request->url(), 'pageName' => 'documents_page', 'query' => $request->query()]
             );
-            $reportTitle = 'Delinquent Documents (All Departments)';
-            $reportDescription = 'Performance-standard SLA breaches across all active departments';
+            $reportTitle = $seesAllDepartments ? 'Delinquent Documents (All Departments)' : 'Delinquent Documents (Your Office)';
+            $reportDescription = $seesAllDepartments
+                ? 'Performance-standard SLA breaches across all active departments'
+                : 'Performance-standard SLA breaches for documents your office currently holds';
         }
 
         $now = Carbon::now('Asia/Manila');
@@ -246,6 +255,7 @@ class DashboardController extends Controller
                 'label' => 'Transactions',
                 'todo' => $todoCount,
                 'dueTomorrow' => $dueTomorrowCount,
+                'scope' => $seesAllDepartments ? 'all' : 'office',
             ],
             'pipeline' => $pipeline,
             'processingTimes' => $processingTimes,

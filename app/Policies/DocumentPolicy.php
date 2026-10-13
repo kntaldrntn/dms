@@ -43,7 +43,10 @@ class DocumentPolicy
 
     public function process(User $user, Document $document): bool
     {
+        // Documents waiting on a slip, Department Head signature, or OCM approval are acted on
+        // from their executive queues, never routed or ended from the Office Inbox.
         return $user->state === 1 && $this->owns($user, $document)
+            && ! in_array($document->requires_signature_from, Document::EXECUTIVE_STAGES, true)
             && $user->department()->where('state', 1)->exists();
     }
 

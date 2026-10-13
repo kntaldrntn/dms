@@ -6,8 +6,10 @@ import AppLogo from '@/components/AppLogo.vue';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import type { BreadcrumbItemType } from '@/types';
 import { ref, computed } from 'vue';
-import { usePage, Link } from '@inertiajs/vue3';
-import { User, LogOut, ChevronRight } from 'lucide-vue-next';
+import { usePage, usePoll, Link } from '@inertiajs/vue3';
+import { User, LogOut, ChevronRight, Bell, Inbox } from 'lucide-vue-next';
+
+type IncomingItem = { id: number; barcode: string; subject_matter: string; action: string | null; received_at: string | null; url: string };
 
 interface Props {
     breadcrumbs?: BreadcrumbItemType[];
@@ -20,6 +22,22 @@ withDefaults(defineProps<Props>(), {
 const isProfileOpen = ref(false);
 const page = usePage();
 const user = computed(() => page.props.auth.user);
+
+// Notification bell: documents that arrived at the user's office and nobody there has acted on yet.
+const isBellOpen = ref(false);
+const incoming = computed(() => (page.props.incoming as { count: number; items: IncomingItem[] } | undefined) ?? { count: 0, items: [] });
+const badgeText = computed(() => (incoming.value.count > 99 ? '99+' : String(incoming.value.count)));
+
+// Refresh only the bell every minute; Inertia pauses polling while the tab is hidden and
+// runs it asynchronously so it never cancels a form submission in progress.
+usePoll(60000, { only: ['incoming'] });
+
+// Workflow timestamps are stored as Manila wall-clock time, so drop the trailing "Z" before formatting.
+const formatReceived = (value: string | null) => {
+    if (!value) return '';
+    const date = new Date(value.replace(' ', 'T').replace('Z', ''));
+    return isNaN(date.getTime()) ? '' : date.toLocaleString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+};
 
 const formatRole = (role: string) => {
     if (!role) return 'User';
@@ -61,11 +79,73 @@ const formatRole = (role: string) => {
                 <!-- Right Side: Icons & Profile -->
                 <div class="flex items-center gap-4 sm:gap-6">
                     <div class="hidden sm:block h-6 w-px bg-white/20"></div>
+
+                    <!-- Incoming Documents Bell -->
+                    <div class="relative">
+                        <button
+                            type="button"
+                            @click="isBellOpen = !isBellOpen; isProfileOpen = false"
+                            class="relative flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/5 text-white/90 shadow-sm transition hover:scale-105 hover:bg-white/15 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                            :aria-label="incoming.count ? `${incoming.count} incoming document${incoming.count === 1 ? '' : 's'}` : 'No incoming documents'"
+                            :aria-expanded="isBellOpen"
+                            aria-haspopup="true"
+                        >
+                            <Bell class="h-4 w-4" aria-hidden="true" />
+                            <span
+                                v-if="incoming.count"
+                                class="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-[#265f92]"
+                                aria-hidden="true"
+                            >
+                                {{ badgeText }}
+                            </span>
+                        </button>
+
+                        <div v-if="isBellOpen" @click="isBellOpen = false" class="fixed inset-0 z-40"></div>
+
+                        <transition
+                            enter-active-class="transition ease-out duration-100"
+                            enter-from-class="transform opacity-0 scale-95"
+                            enter-to-class="transform opacity-100 scale-100"
+                            leave-active-class="transition ease-in duration-75"
+                            leave-from-class="transform opacity-100 scale-100"
+                            leave-to-class="transform opacity-0 scale-95"
+                        >
+                            <div v-if="isBellOpen" class="absolute right-0 z-50 mt-3 w-80 origin-top-right overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-[0_10px_40px_-10px_rgba(0,0,0,0.1)]" role="menu" aria-label="Incoming documents">
+                                <div class="flex items-center justify-between border-b border-slate-100 bg-slate-50/50 px-4 py-3">
+                                    <span class="text-sm font-bold text-slate-800">Incoming Documents</span>
+                                    <span v-if="incoming.count" class="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-600">{{ incoming.count }} new</span>
+                                </div>
+
+                                <ul v-if="incoming.items.length" class="max-h-80 divide-y divide-slate-100 overflow-y-auto">
+                                    <li v-for="item in incoming.items" :key="item.id">
+                                        <Link :href="item.url" @click="isBellOpen = false" class="block px-4 py-3 transition hover:bg-slate-50 focus:bg-slate-50 focus:outline-none" role="menuitem">
+                                            <div class="flex items-center justify-between gap-2">
+                                                <span class="font-mono text-xs font-bold text-emerald-600">{{ item.barcode }}</span>
+                                                <span class="text-[10px] text-slate-400">{{ formatReceived(item.received_at) }}</span>
+                                            </div>
+                                            <p class="mt-0.5 line-clamp-2 text-xs font-medium text-slate-700">{{ item.subject_matter }}</p>
+                                            <p v-if="item.action" class="mt-0.5 text-[11px] text-slate-500">{{ item.action }}</p>
+                                        </Link>
+                                    </li>
+                                </ul>
+                                <p v-else class="px-4 py-8 text-center text-sm text-slate-500">No incoming documents for your office.</p>
+
+                                <Link
+                                    :href="route('transactions.inbox')"
+                                    @click="isBellOpen = false"
+                                    class="flex items-center justify-center gap-2 border-t border-slate-100 py-2.5 text-xs font-semibold text-indigo-600 transition hover:bg-slate-50"
+                                >
+                                    <Inbox class="h-3.5 w-3.5" aria-hidden="true" /> Open Office Inbox
+                                </Link>
+                            </div>
+                        </transition>
+                    </div>
+
                     <!-- Profile Dropdown -->
                     <div class="relative">
                         <!-- Trigger Icon (Adapted for Custom Dark Theme) -->
                         <button 
-                            @click="isProfileOpen = !isProfileOpen" 
+                            @click="isProfileOpen = !isProfileOpen; isBellOpen = false"
                             class="flex items-center justify-center h-9 w-9 rounded-full bg-white/5 border border-white/20 text-white/90 shadow-sm focus:outline-none transition transform hover:scale-105 hover:bg-white/15 hover:text-white"
                         >
                             <User class="w-4 h-4" />

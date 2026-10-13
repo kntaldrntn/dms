@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { Search, ScanBarcode, CheckCircle2, FastForward, X, AlertCircle, Clock, FileSignature } from 'lucide-vue-next';
-import { ref, watch, computed } from 'vue';
+import { Search, ScanBarcode, CheckCircle2, FastForward, X, AlertCircle, Clock, FileSignature, Sparkles } from 'lucide-vue-next';
+import { ref, watch, computed, onMounted } from 'vue';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
 
@@ -11,6 +11,8 @@ const props = defineProps<{
     departments: Array<{ id: number; name: string }>;
     filters?: { barcode?: string };
     flash?: { success?: string; error?: string };
+    // Set when arriving from the notification bell; its Receive modal opens immediately.
+    focusDocument?: any | null;
 }>();
 
 const searchTerm = ref(props.filters?.barcode || '');
@@ -87,6 +89,10 @@ function openProcessModal(doc: any) {
 
     showProcessModal.value = true;
 }
+
+onMounted(() => {
+    if (props.focusDocument) openProcessModal(props.focusDocument);
+});
 
 function submitProcess() {
     form.post(route('transactions.process', selectedDocument.value.id), {
@@ -204,7 +210,8 @@ function submitProcess() {
                         </button>
 
                         <div class="px-6 py-5 border-b border-slate-100">
-                            <h2 class="text-lg font-bold text-slate-800 tracking-tight">Process Document</h2>
+                            <h2 class="text-lg font-bold text-slate-800 tracking-tight">Receive &amp; Process Document</h2>
+                            <p class="mt-0.5 text-xs text-slate-500">Receiving is recorded together with the action you choose below.</p>
                         </div>
                         
                         <div class="overflow-y-auto flex-1 p-6">
@@ -255,8 +262,8 @@ function submitProcess() {
                                                     <FastForward class="h-5 w-5" />
                                                 </div>
                                                 <div>
-                                                    <p class="text-sm font-semibold text-slate-900">Route</p>
-                                                    <p class="text-xs text-slate-500">Send to another office</p>
+                                                    <p class="text-sm font-semibold text-slate-900">Receive &amp; Route</p>
+                                                    <p class="text-xs text-slate-500">Act on it, then send to another office</p>
                                                 </div>
                                             </div>
                                         </label>
@@ -268,8 +275,8 @@ function submitProcess() {
                                                     <CheckCircle2 class="h-5 w-5" />
                                                 </div>
                                                 <div>
-                                                    <p class="text-sm font-semibold text-slate-900">End Transaction</p>
-                                                    <p class="text-xs text-slate-500">Archive and close request</p>
+                                                    <p class="text-sm font-semibold text-slate-900">Receive &amp; End Transaction</p>
+                                                    <p class="text-xs text-slate-500">Close your office's copy</p>
                                                 </div>
                                             </div>
                                         </label>
@@ -324,7 +331,7 @@ function submitProcess() {
                                 :class="form.action === 'end' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'"
                                 :disabled="form.processing"
                             >
-                                {{ form.processing ? 'Saving...' : form.action === 'end' ? 'Confirm Archival' : 'Confirm Route' }}
+                                {{ form.processing ? 'Saving...' : form.action === 'end' ? 'Receive & End' : 'Receive & Route' }}
                             </button>
                         </div>
 

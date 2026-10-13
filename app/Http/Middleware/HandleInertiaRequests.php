@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\Document;
+use App\Services\IncomingDocumentService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -48,6 +49,8 @@ class HandleInertiaRequests extends Middleware
                 // Referral access depends on office (ADM Department Head), not role alone.
                 'canViewReferrals' => (bool) $request->user()?->can('viewReferrals', Document::class),
             ],
+            // Lazy so the bell's polling can request it alone (`only: ['incoming']`).
+            'incoming' => fn () => app(IncomingDocumentService::class)->forUser($request->user()),
         ]);
     }
 }

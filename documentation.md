@@ -4,7 +4,7 @@
 > handoff, and before `/compact`. Mark facts as **verified** only with evidence.
 > Feature-level health is tracked separately by the user in `status.md`.
 
-Last updated: 2026-10-13 (state refreshed after two-step ADM referral, Document Route, timezone fix)
+Last updated: 2026-10-14 (multi-office custody, holders, role-scoped delinquency, notification bell)
 
 ---
 
@@ -47,15 +47,16 @@ FormRequest (authorize + rules) → service → `DocumentWorkflow` → models/tr
 | `routes/web.php` | Document, referral, OCM, transaction, dashboard, and admin-registry routes. Processing routes are inside `working_hours` (Mon–Fri 08:00–17:00 Asia/Manila; system admins bypass). Admin registries require `role:system_administrator`. |
 | `app/Services/DocumentWorkflow.php` | Core concurrency/custody engine. `mutate()` locks document + user, authorizes via policy, rejects inactive/completed docs (409), checks `workflow_version`, increments it, retries deadlocks up to 3×. Also `targets()`, `office(code)`, `release()`, `receive()`, `signer()`. |
 | `app/Services/DocumentService.php` | Create/update/deactivate. On create, `ADM` target → custody moves REC → ADM with `requires_signature_from=city_administrator`; `OCM` target → custody moves to OCM with `requires_signature_from=city_mayor`; other targets → direct dispatch. Cleans up uploaded file on failure. |
-| `app/Services/DispatchService.php`, `TransactionService.php` | Records dispatch and department inbox processing, both via `mutate()`. |
+| `app/Services/DispatchService.php`, `TransactionService.php` | Records dispatch (records every target in `released_to_offices`) and per-office inbox processing: each holding office ends or routes its own copy; the document completes when no open copy remains. |
+| `app/Services/IncomingDocumentService.php` | Notification-bell data: open trail entries at the user's office with `received_by` null, filtered to the stages the user's role acts on. Shared lazily as `incoming`. |
 | `app/Services/ReferralService.php` | Two-step ADM referral: `generate()` (City Administrator, slip only → `requires_signature_from=department_head`) and `sign()` (ADM Department Head, `signature_mode` electronic/physical → back to REC). OCM approval `approveOcm()` uses `PdfApprovalStampService`. |
 | `app/Services/PdfApprovalStampService.php` | Stamps the uploaded PDF with a visible signature block and signs it with the certificate from `config/digital-certificate.php`; writes to `storage/app/private/signed-documents` (local disk). Original upload untouched. |
 | `app/Services/DocumentAnalysisService.php` | OCR text + thumbnail → OpenAI JSON extraction for intake (prompt reference: `basis.md`). |
 | `app/Policies/DocumentPolicy.php` | All document abilities: `viewAny`, `view`, `create`, `update`, `delete`, `dispatch`, `process`, `viewReferrals`, `viewOcmApprovals`, `refer`, `signReferral`, `viewReferralSlip`. Ownership = user's department equals document's current department. |
 | `app/Http/Requests/*` | `SaveDocumentRequest`, `DispatchDocumentRequest`, `ProcessDocumentRequest`, `GenerateReferralRequest`, `SignReferralRequest`, `ApproveOcmDocumentRequest`, `AnalyzeDocumentRequest`, `DocumentMutationRequest` (base: requires `workflow_version`). |
-| `app/Http/Controllers/DashboardController.php` | Invokable; SLA/delinquency/to-do metrics and drill-down. |
-| `app/Http/Middleware` | `HandleRoles` (`role:` alias), `CheckWorkingHours`, `TrackUserActivity`, `HandleInertiaRequests` (shares `auth.user`, `auth.canViewReferrals`). |
-| `app/Models` | `Document` (computed `is_delayed`, `is_delinquent`), `DocumentTrail`, `Department`, `User`, registries (`DocumentType`, `TransactionType`, `DocumentClassification`, `DeliveryMethod`, `PerformanceStandard`), `AuditLog`, `LoginHistory`. Active/inactive uses integer `state` (1/0). |
+| `app/Http/Controllers/DashboardController.php` | Invokable; SLA/delinquency/to-do metrics and drill-down. Delinquency is all-departments for `ALL_DEPARTMENT_ROLES`, otherwise the user's held documents. |
+| `app/Http/Middleware` | `HandleRoles` (`role:` alias), `CheckWorkingHours`, `TrackUserActivity`, `HandleInertiaRequests` (shares `auth.user`, `auth.canViewReferrals`, lazy `incoming`). |
+| `app/Models` | `Document` (computed `is_delayed`, `is_delinquent`; `holders()` = offices with an open copy; `scopeHeldBy`; `EXECUTIVE_STAGES`), `DocumentTrail`, `Department`, `User`, registries (`DocumentType`, `TransactionType`, `DocumentClassification`, `DeliveryMethod`, `PerformanceStandard`), `AuditLog`, `LoginHistory`. Active/inactive uses integer `state` (1/0). |
 | `resources/views/referral-slips/print.blade.php` | Printable/PDF referral slip. |
 
 ### Roles (string column `users.role`)
@@ -65,6 +66,11 @@ FormRequest (authorize + rules) → service → `DocumentWorkflow` → models/tr
 ### Department codes the code depends on
 `REC` (Records), `ADM` (City Administrator), `OCM` (Office of the City Mayor). Exactly one
 active department per code is required (`DocumentWorkflow::office()`).
+
+### Custody model
+Custody = open trail entries (`released_at IS NULL`). A multi-office dispatch gives every target office
+its own copy (`Document::holders`). `documents.department_id` is only the primary office (first target or the
+latest office a copy moved to). Inbox, `process`/`update` ownership, "Currently with", and the bell all use the trail.
 
 ### Frontend
 `resources/js/app.ts` boots Inertia; pages resolve from `resources/js/pages/**`.
@@ -108,20 +114,22 @@ on style.
 
 ## 5. Current status
 
-Branch `main`, clean after commit `75f4c3b` (2026-10-13, pushed): "Split City Administrator referral into
-generate + Department Head signature; add document route view". Previous: `e6b7549` (OCM approval,
-dashboard metrics, DTS-style Show.vue, project docs). Checks before commit: Pest 65 passed (456 assertions),
-ESLint on changed Vue files OK, `npm run build` OK, Pint on new PHP files OK, `git diff --check` OK.
-Migration `2026_10_13_000000_add_signature_mode_to_document_trails_table` must be run on other environments.
+Branch `main`. All work through the notification bell is committed and pushed (see `git log`; previous
+milestones `eb09eda` multi-office custody + Released To, `75f4c3b` two-step referral). Migrations to run on other
+environments: `2026_10_13_000000_add_signature_mode_to_document_trails_table`,
+`2026_10_14_000000_add_released_to_offices_to_document_trails_table` (includes a data backfill).
+Checks before the latest commit: Pest 70 passed (706 assertions), ESLint on changed Vue files OK, `npm run build` OK,
+Pint on new PHP files OK.
 
 ### Implementation status
 - Completed (automated tests pass, 65/65): intake/registration, dispatch, processing, two-step ADM
   referral (generate → Department Head E-/Physical signature → Records), OCM custody + approval,
   stale-form protection, rollback on failure, dashboard metrics.
-- Unverified in a browser: the two-step referral UI, Document Route strip, OCM PDF signing in a PDF
-  reader, stale-form UX in two tabs.
-- Blocked for real use of the referral flow: no active `department_head` user exists in ADM locally;
-  one must be created (with an uploaded signature for E-Signature).
+- Unverified in a browser: notification bell + Receive modal, role-scoped delinquency card, multi-office
+  inbox behaviour, OCM PDF signing in a PDF reader, stale-form UX in two tabs. (User walked the two-step
+  referral with E-Signature through to dispatch on 2026-10-14.)
+- Local data has users only in CICTO, REC, ADM, OCM; create users in other offices (e.g. CHO) to exercise
+  the bell and multi-office inboxes.
 
 ## 6. Known issues, risks & technical debt
 
@@ -159,15 +167,15 @@ Migration `2026_10_13_000000_add_signature_mode_to_document_trails_table` must b
 
 ## 7. Next steps (suggested, none started)
 
-1. Create an ADM `department_head` user (+ signature) and manually walk the referral flow:
-   Records intake → City Administrator generate → Dept Head sign (try both modes) → Records dispatch;
-   check the Document Route strip and printed slip at each step.
+1. Browser-test the bell (dispatch to an office with a user, click the ping, Receive & End / Route) and the
+   role-scoped delinquency card; revert specific commits if behaviour is not as intended.
 2. Add `/public/certificates` to `.gitignore` and resolve the `.gitignore` conflict markers (needs approval).
 3. Fix the ESLint error in `ocm-approvals/Index.vue` and the tsconfig `types` entry so `vue-tsc` runs.
 4. Add `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD=` to `.env.example`.
 5. Decide on authorization for attachment downloads and for `visibleTo` scoping (security #3, #4).
-6. Decide on the timestamp convention (#15) before any further date/SLA work.
-7. Remove dead code (#6–#8) in a small cleanup change with tests.
+6. Decide on the timestamp convention (#15) and per-copy SLA (#17) before further date/SLA work.
+7. Transactions page never receives `flash` from `TransactionController` (success toast after processing does not show).
+8. Remove dead code (#6–#8) in a small cleanup change with tests.
 
 ## 8. Decisions & assumptions
 
@@ -178,6 +186,38 @@ Migration `2026_10_13_000000_add_signature_mode_to_document_trails_table` must b
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-14 — Role-scoped delinquency + incoming-document notification bell (Claude Code)
+- **Dashboard:** delinquent card/report (and its To-Do / Due Tomorrow counts) cover all departments only for
+  `system_administrator`, `city_administrator`, `records_manager` (`DashboardController::ALL_DEPARTMENT_ROLES`);
+  everyone else sees documents their office holds (`Document::heldBy`). Payload adds `delinquent.scope` (all|office);
+  card shows "All departments" / "Your office"; report title says "(Your Office)" when scoped. Monthly cards,
+  pipeline and processing times are unchanged (still global).
+- **Bell (AppSidebarLayout):** new `IncomingDocumentService` — "incoming" = open trail entry at the user's office
+  with `received_by` null (nobody there has acted yet; `release()` sets it). No new table. Executive-stage pings go
+  only to the acting role (slip -> city_administrator, signature -> ADM department_head, OCM -> city_mayor).
+  Shared lazily as `incoming` {count, items[5]} by `HandleInertiaRequests`; `usePoll(60000, {only:['incoming']})`
+  refreshes it (async, paused when tab hidden). Items link to: Office Inbox `?document=ID`, Referral Slips, OCM
+  Approvals, or the documents list (signed slip back in Records).
+- **Office Inbox:** `focusDocument` prop auto-opens the modal; actions relabelled "Receive & Route" /
+  "Receive & End Transaction" (receiving is recorded with the action). Fixed missing `Sparkles` import.
+- **Security/flow fix:** `DocumentPolicy::process` refuses documents in an executive stage
+  (`Document::EXECUTIVE_STAGES`) and the inbox excludes them — previously an ADM user could route a document
+  awaiting its referral slip from the Office Inbox, skipping the slip.
+- **Tests:** new `tests/Feature/IncomingDocumentsTest.php` (ping lifecycle, focus doc, executive routing/permission);
+  `DashboardTest` scoped vs all-departments. Pest 70 passed (706 assertions); ESLint ✅; build ✅; Pint on new PHP ✅.
+  Local check: City Mayor (OCM) has 1 ping (document 1). Not verified in a browser.
+
+### 2026-10-14 — `Document::holders` relation; documents list shows every holding office (Claude Code)
+- **User concern:** a 3-office dispatch leaves `documents.department_id` = one office (CHO). A single integer column
+  cannot hold several offices; the open trail entries are the normalized holder set.
+- Added `Document::holders()` (belongsToMany Department through `document_trails` where `released_at` is null,
+  distinct). Verified on local document 1: `holders` = CHO, ENR, OCM while `department_id` = 10 (CHO).
+- `DocumentController::index` eager-loads `holders`; `show` uses the relation. `documents/Index.vue` label now reads
+  "With CHO, ENR, OCM" (full names on hover) and the route/edit gating uses "does my office hold a copy".
+- `department_id` semantics (documented on the relation): primary office only — first dispatch target, or the
+  latest office a copy moved to.
+- Checks: Pest 67 passed (570 assertions; multi-office test asserts holders + index payload); ESLint ✅; build ✅.
 
 ### 2026-10-14 — Trail "Released To" shows every office of a multi-office dispatch (Claude Code)
 - **Why:** `document_trails.released_to` holds one office, so a 3-office dispatch showed only the first in Show.vue.

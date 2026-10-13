@@ -24,7 +24,7 @@ class DocumentController extends Controller
     public function index(Request $request)
     {
         $this->authorize('viewAny', Document::class);
-        $query = Document::visibleTo($request->user())->with(['documentType', 'department', 'transactionType']);
+        $query = Document::visibleTo($request->user())->with(['documentType', 'department', 'transactionType', 'holders:id,code,name']);
 
         if ($request->filled('search')) {
             $searchTerm = $request->search;
@@ -115,7 +115,7 @@ class DocumentController extends Controller
             // Offices a pending referral slip will dispatch to, for the "Next" route step.
             'slipTargets' => Department::whereIn('id', $document->approved_routing_slip ?? [])->get(['id', 'code', 'name']),
             // Every office holding an open copy (more than one after a multi-office dispatch).
-            'holders' => Department::whereIn('id', $document->trails->whereNull('released_at')->pluck('department_id'))->get(['id', 'code', 'name']),
+            'holders' => $document->holders()->get(['departments.id', 'departments.code', 'departments.name']),
         ]);
     }
 

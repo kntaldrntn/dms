@@ -41,6 +41,13 @@ const pendingApprovalLabels: Record<string, string> = {
     city_mayor: 'Pending City Mayor Review',
 };
 
+// A document dispatched to several offices is held by all of them (`holders`); department_id is only the primary one.
+type Holder = { id: number; code: string; name: string };
+const holdersOf = (doc: any): Holder[] => (doc.holders?.length ? doc.holders : doc.department ? [doc.department] : []);
+const holderCodes = (doc: any) => holdersOf(doc).map((office) => office.code || office.name).join(', ') || 'Exec.';
+const holderNames = (doc: any) => holdersOf(doc).map((office) => office.name).join(', ');
+const holdsCopy = (doc: any, officeId: number) => holdersOf(doc).some((office) => office.id === officeId);
+
 const searchTerm = ref(props.filters?.search || '');
 let searchTimeout: ReturnType<typeof setTimeout>;
 
@@ -582,8 +589,8 @@ function submitDocument() {
                                             </a>
 
                                             <!-- ROUTING/STATUS: Hide FastForward while City Administrator approval is pending -->
-                                            <span v-if="pendingApprovalLabels[doc.requires_signature_from] || doc.department_id !== $page.props.auth.user.department_id" class="text-[10px] font-bold uppercase tracking-wider text-slate-500 py-1.5 px-2 bg-slate-100 rounded-md border border-slate-200">
-                                                {{ pendingApprovalLabels[doc.requires_signature_from] || `With ${doc.department?.code || 'Exec.'}` }}
+                                            <span v-if="pendingApprovalLabels[doc.requires_signature_from] || !holdsCopy(doc, $page.props.auth.user.department_id)" class="text-[10px] font-bold uppercase tracking-wider text-slate-500 py-1.5 px-2 bg-slate-100 rounded-md border border-slate-200" :title="holderNames(doc)">
+                                                {{ pendingApprovalLabels[doc.requires_signature_from] || `With ${holderCodes(doc)}` }}
                                             </span>
 
                                             <!-- ROUTING BUTTON: Show only after required approval -->

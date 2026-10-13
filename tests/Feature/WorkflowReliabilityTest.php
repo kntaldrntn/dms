@@ -469,6 +469,11 @@ test('a multi-office dispatch gives every office its own actionable copy', funct
     $this->actingAs($this->records)->get(route('documents.show', $this->document))
         ->assertInertia(fn (Assert $page) => $page->where('trails.0.released_to_list.2.code', 'THD'));
 
+    // department_id keeps one primary office; `holders` lists every office holding a copy.
+    expect($this->document->fresh()->department_id)->toBe($this->target->id);
+    expect($this->document->fresh()->holders->pluck('code')->all())->toEqualCanonicalizing(['DST', 'SEC', 'THD']);
+    $this->get(route('documents.index'))->assertInertia(fn (Assert $page) => $page->has('documents.data.0.holders', 3));
+
     foreach ([$this->staff, $secondStaff, $thirdStaff] as $user) {
         $this->actingAs($user)->get(route('transactions.inbox'))
             ->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));

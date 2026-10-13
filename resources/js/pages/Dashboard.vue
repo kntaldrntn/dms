@@ -45,6 +45,8 @@ function delinquentReportUrl() {
     return `/dashboard?month=${encodeURIComponent(props.selectedMonth)}&delinquent=1`;
 }
 
+const delinquentScopeText = props.delinquent.scope === 'all' ? 'across all departments' : 'held by your office';
+
 function formatDate(value: string | null) {
     if (!value) return '—';
     return new Intl.DateTimeFormat('en-PH', {
@@ -106,10 +108,13 @@ const toneClass: Record<string, string> = {
                     </div>
                 </div>
 
-                <!-- Delinquent / Alerts (All active departments) -->
-                <component :is="delinquent.value > 0 ? Link : 'div'" :href="delinquentReportUrl()" class="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)] transition" :class="delinquent.value > 0 ? 'hover:border-red-200 hover:bg-red-50/30' : 'cursor-default opacity-75'" :title="delinquent.value > 0 ? 'View delinquent documents across all departments' : 'No delinquent documents across all departments'">
+                <!-- Delinquent / Alerts: all departments for oversight roles, otherwise the user's office -->
+                <component :is="delinquent.value > 0 ? Link : 'div'" :href="delinquentReportUrl()" class="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)] transition" :class="delinquent.value > 0 ? 'hover:border-red-200 hover:bg-red-50/30' : 'cursor-default opacity-75'" :title="delinquent.value > 0 ? `View delinquent documents ${delinquentScopeText}` : `No delinquent documents ${delinquentScopeText}`">
                     <div class="flex items-start justify-between">
-                        <span class="text-sm font-semibold text-slate-500">Delinquent</span>
+                        <span class="text-sm font-semibold text-slate-500">
+                            Delinquent
+                            <span class="block text-[11px] font-medium text-slate-400">{{ delinquent.scope === 'all' ? 'All departments' : 'Your office' }}</span>
+                        </span>
                         <span class="rounded-md bg-red-50 px-2 py-1 text-xs font-bold text-red-600">Action Req</span>
                     </div>
                     <div class="mt-4 flex items-end justify-between">

@@ -23,6 +23,9 @@ class Document extends Model
 
     protected $appends = ['is_delayed', 'is_delinquent'];
 
+    /** requires_signature_from values that mean the document waits on an executive queue (slip, signature, OCM). */
+    public const EXECUTIVE_STAGES = ['city_administrator', 'department_head', 'city_mayor'];
+
     // --- Relationships ---
     public function transactionType() { return $this->belongsTo(TransactionType::class); }
     public function documentType() { return $this->belongsTo(DocumentType::class); }
@@ -33,6 +36,18 @@ class Document extends Model
     
     // NEW: Links the document directly to the exact person responsible right now
     public function currentAssignee() { return $this->belongsTo(User::class, 'current_assignee_id'); }
+
+    /**
+     * Every office currently holding an open copy (trail received, not yet released).
+     * After a multi-office dispatch this returns all recipients, while `department_id`
+     * keeps only one primary office (the first target, or the latest office a copy moved to).
+     */
+    public function holders()
+    {
+        return $this->belongsToMany(Department::class, 'document_trails', 'document_id', 'department_id')
+            ->wherePivotNull('released_at')
+            ->distinct();
+    }
 
     protected function casts(): array
     {
