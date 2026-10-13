@@ -9,23 +9,27 @@ const props = defineProps<{
     document: any;
     trails: any[];
     slipTargets: Array<{ id: number; code: string; name: string }>;
+    holders: Array<{ id: number; code: string; name: string }>;
 }>();
 
-type Office = { code: string; name: string };
+// `open` = this office still holds its copy (trail received but not yet released).
+type Office = { code: string; name: string; open?: boolean };
 type RouteStop = { key: string; offices: Office[]; action: string; receivedAt: string };
 
-const officeOf = (department: any): Office => ({ code: department?.code || department?.name || '', name: department?.name || '' });
+const officeOf = (department: any, open = false): Office => ({ code: department?.code || department?.name || '', name: department?.name || '', open });
+const isCurrentStop = (stop: RouteStop) => stop.offices.some((office) => office.open);
 
 // One stop per hand-off; trails received at the same moment (a multi-office dispatch) share a stop.
 const routeStops = computed<RouteStop[]>(() => {
     const stops: RouteStop[] = [];
     for (const trail of props.trails) {
         const previous = stops[stops.length - 1];
+        const office = officeOf(trail.office, !trail.released_at);
         if (previous && trail.received_at && previous.receivedAt === trail.received_at && previous.action === trail.received_action) {
-            previous.offices.push(officeOf(trail.office));
+            previous.offices.push(office);
             continue;
         }
-        stops.push({ key: String(trail.id), offices: [officeOf(trail.office)], action: trail.received_action || '', receivedAt: trail.received_at || '' });
+        stops.push({ key: String(trail.id), offices: [office], action: trail.received_action || '', receivedAt: trail.received_at || '' });
     }
     return stops;
 });
@@ -48,7 +52,7 @@ const nextStop = computed<{ offices: Office[]; action: string } | null>(() => {
             return { offices: [records], action: 'Return to Records after OCM approval' };
     }
     if (props.slipTargets.length) {
-        return { offices: props.slipTargets.map(officeOf), action: 'Dispatch per referral slip' };
+        return { offices: props.slipTargets.map((target) => officeOf(target)), action: 'Dispatch per referral slip' };
     }
     return null;
 });
@@ -172,8 +176,11 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                             <Clock class="mr-1 h-3 w-3" aria-hidden="true" /> Delinquent
                         </span>
                     </div>
-                    <p v-if="document.department?.name" class="mt-1 text-sm text-slate-500">
-                        Currently with <span class="font-semibold text-slate-700">{{ document.department.name }}</span>
+                    <p v-if="!isCompleted && (holders.length || document.department?.name)" class="mt-1 text-sm text-slate-500">
+                        Currently with
+                        <span class="font-semibold text-slate-700">
+                            {{ holders.length ? holders.map((office) => office.name).join(', ') : document.department.name }}
+                        </span>
                     </p>
                 </div>
 
@@ -196,15 +203,24 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                         <ChevronRight v-if="index > 0" class="mx-1 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
                         <div
                             class="flex min-w-[7rem] flex-col rounded-xl border px-3 py-2"
-                            :class="index === routeStops.length - 1 && !isCompleted
+                            :class="isCurrentStop(stop) && !isCompleted
                                 ? 'border-emerald-400 bg-emerald-50 shadow-sm ring-1 ring-emerald-200'
                                 : 'border-slate-200 bg-white'"
-                            :aria-current="index === routeStops.length - 1 && !isCompleted ? 'step' : undefined"
+                            :aria-current="isCurrentStop(stop) && !isCompleted ? 'step' : undefined"
                         >
                             <div class="flex flex-wrap items-center gap-1">
-                                <span v-for="office in stop.offices" :key="office.code" class="text-sm font-bold text-slate-800" :title="office.name">{{ office.code }}</span>
+                                <!-- In a multi-office stop, offices still holding their copy are green; finished ones stay grey. -->
                                 <span
-                                    v-if="index === routeStops.length - 1 && !isCompleted"
+                                    v-for="office in stop.offices"
+                                    :key="office.code"
+                                    class="text-sm font-bold"
+                                    :class="office.open && stop.offices.length > 1 ? 'text-emerald-700' : 'text-slate-800'"
+                                    :title="office.open ? `${office.name} (holding a copy)` : office.name"
+                                >
+                                    {{ office.code }}
+                                </span>
+                                <span
+                                    v-if="isCurrentStop(stop) && !isCompleted"
                                     class="ml-1 rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white"
                                 >
                                     Current
@@ -452,14 +468,18 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                                         </span>
                                     </div>
                                 </td>
+                                <!-- One badge per receiving office (a dispatch can release to many). -->
                                 <td class="break-words border-r border-slate-200 px-2 py-2.5">
-                                    <span
-                                        v-if="trail.released_to_office"
-                                        class="inline-flex items-center rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[11px] font-bold text-indigo-700"
-                                        :title="trail.released_to_office.name"
-                                    >
-                                        {{ trail.released_to_office.code || trail.released_to_office.name }}
-                                    </span>
+                                    <div v-if="trail.released_to_list?.length" class="flex flex-wrap justify-center gap-1">
+                                        <span
+                                            v-for="office in trail.released_to_list"
+                                            :key="office.id"
+                                            class="inline-flex items-center rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[11px] font-bold text-indigo-700"
+                                            :title="office.name"
+                                        >
+                                            {{ office.code || office.name }}
+                                        </span>
+                                    </div>
                                 </td>
 
                                 <!-- Duration -->

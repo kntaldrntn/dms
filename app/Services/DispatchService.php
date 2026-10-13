@@ -13,7 +13,9 @@ class DispatchService
     {
         $this->workflow->mutate($document, $user, (int) $data['workflow_version'], 'dispatch', function (Document $document, User $user) use ($data) {
             $targets = $this->workflow->targets($data['routed_to'], $document->department_id, 'routed_to');
-            $this->workflow->release($document, $user, 'Dispatched to target office(s)', $targets[0]);
+            $this->workflow->release($document, $user, 'Dispatched to target office(s)', $targets[0], null, null, [
+                'released_to_offices' => $targets,
+            ]);
             foreach ($targets as $target) {
                 $this->workflow->receive($document, $target, 'Dispatched from Records');
             }

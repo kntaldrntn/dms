@@ -107,7 +107,10 @@ class DocumentService
     public function deactivate(Document $document, User $user, int $version): void
     {
         $this->workflow->mutate($document, $user, $version, 'delete', function (Document $document, User $user) {
-            $this->workflow->release($document, $user, 'Document deactivated', null);
+            // Close every office's open copy, not just the recorded current office.
+            foreach ($this->workflow->openOffices($document) ?: [(int) $document->department_id] as $office) {
+                $this->workflow->release($document, $user, 'Document deactivated', null, null, null, [], $office);
+            }
             $document->fill(['state' => 0, 'current_assignee_id' => null]);
         });
     }

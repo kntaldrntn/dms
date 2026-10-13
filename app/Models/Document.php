@@ -52,6 +52,12 @@ class Document extends Model
         return $query->where('state', 1);
     }
 
+    /** Documents an office currently holds an open copy of (see DocumentWorkflow::openOffices()). */
+    public function scopeHeldBy(Builder $query, int $departmentId): Builder
+    {
+        return $query->whereHas('trails', fn (Builder $trails) => $trails->where('department_id', $departmentId)->whereNull('released_at'));
+    }
+
     // =====================================================================
     // SMART E.O.D.B. STATUS TRACKERS
     // =====================================================================

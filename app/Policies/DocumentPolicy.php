@@ -113,8 +113,19 @@ class DocumentPolicy
             && !empty($document->approved_routing_slip);
     }
 
+    /**
+     * Custody is held by every office with an open trail entry (a multi-office dispatch creates one per office).
+     * Documents without any open entry fall back to their recorded current office.
+     */
     private function owns(User $user, Document $document): bool
     {
-        return $user->department_id !== null && (int) $user->department_id === (int) $document->department_id;
+        if ($user->department_id === null) {
+            return false;
+        }
+        $holders = $document->trails()->whereNull('released_at')->pluck('department_id')->map(fn ($id) => (int) $id);
+
+        return $holders->isNotEmpty()
+            ? $holders->contains((int) $user->department_id)
+            : (int) $user->department_id === (int) $document->department_id;
     }
 }

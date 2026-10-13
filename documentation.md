@@ -108,18 +108,11 @@ on style.
 
 ## 5. Current status
 
-Branch `main`. Last commit `e6b7549` (2026-10-13, pushed to origin) "Add OCM digital approval,
-dashboard metrics update, DTS-style document view, and project docs" — contains all work up to
-and including the DTS-style Show.vue and the docs/skill.
-
-### Uncommitted working tree (verified 2026-10-13)
-The two-step ADM referral flow, Document Route strip, latest-first trail table, and Date Start
-timezone fix (see §9 entries dated 2026-10-13 above the "Documentation setup" entry):
-modified `DocumentController`, `ReferralSlipController`, `HandleInertiaRequests`,
-`GenerateReferralRequest`, `DocumentTrail`, `DocumentPolicy`, `DocumentService`, `ReferralService`,
-`AppSidebar.vue`, `documents/Index.vue`, `documents/Show.vue`, `referral-slips/Index.vue`, `ziggy.js`,
-`routes/web.php`, `WorkflowReliabilityTest.php`, `documentation.md`; new `SignReferralRequest.php` and
-migration `2026_10_13_000000_add_signature_mode_to_document_trails_table.php` (applied locally, batch 2).
+Branch `main`, clean after commit `75f4c3b` (2026-10-13, pushed): "Split City Administrator referral into
+generate + Department Head signature; add document route view". Previous: `e6b7549` (OCM approval,
+dashboard metrics, DTS-style Show.vue, project docs). Checks before commit: Pest 65 passed (456 assertions),
+ESLint on changed Vue files OK, `npm run build` OK, Pint on new PHP files OK, `git diff --check` OK.
+Migration `2026_10_13_000000_add_signature_mode_to_document_trails_table` must be run on other environments.
 
 ### Implementation status
 - Completed (automated tests pass, 65/65): intake/registration, dispatch, processing, two-step ADM
@@ -161,19 +154,20 @@ migration `2026_10_13_000000_add_signature_mode_to_document_trails_table.php` (a
    `formatUtcDateStr`). Changing `APP` timezone would require migrating existing rows and re-checking SLA math
    (`Document::getIsDelinquentAttribute`, DashboardController) — needs a decision before touching.
 16. `.env.example` defaults to SQLite while local dev uses MySQL; `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD` missing.
+17. SLA/delinquency (`Document::is_delinquent`, dashboard) evaluates only `department_id`; with multi-office copies
+   it reflects one holder. Per-copy SLA would need a per-trail calculation.
 
 ## 7. Next steps (suggested, none started)
 
 1. Create an ADM `department_head` user (+ signature) and manually walk the referral flow:
    Records intake → City Administrator generate → Dept Head sign (try both modes) → Records dispatch;
    check the Document Route strip and printed slip at each step.
-2. Commit/push the uncommitted referral + Show.vue work once verified (needs user authorization).
-3. Add `/public/certificates` to `.gitignore` and resolve the `.gitignore` conflict markers (needs approval).
-4. Fix the ESLint error in `ocm-approvals/Index.vue` and the tsconfig `types` entry so `vue-tsc` runs.
-5. Add `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD=` to `.env.example`.
-6. Decide on authorization for attachment downloads and for `visibleTo` scoping (security #3, #4).
-7. Decide on the timestamp convention (#15) before any further date/SLA work.
-8. Remove dead code (#6–#8) in a small cleanup change with tests.
+2. Add `/public/certificates` to `.gitignore` and resolve the `.gitignore` conflict markers (needs approval).
+3. Fix the ESLint error in `ocm-approvals/Index.vue` and the tsconfig `types` entry so `vue-tsc` runs.
+4. Add `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD=` to `.env.example`.
+5. Decide on authorization for attachment downloads and for `visibleTo` scoping (security #3, #4).
+6. Decide on the timestamp convention (#15) before any further date/SLA work.
+7. Remove dead code (#6–#8) in a small cleanup change with tests.
 
 ## 8. Decisions & assumptions
 
@@ -184,6 +178,40 @@ migration `2026_10_13_000000_add_signature_mode_to_document_trails_table.php` (a
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-14 — Trail "Released To" shows every office of a multi-office dispatch (Claude Code)
+- **Why:** `document_trails.released_to` holds one office, so a 3-office dispatch showed only the first in Show.vue.
+- Migration `2026_10_14_000000_add_released_to_offices_to_document_trails_table`: JSON `released_to_offices`
+  (+ backfill of past dispatches from "Dispatched from Records" arrivals within ±5 s; verified locally: trail #4 ->
+  [10, 20, 31]). `released_to` still stores the first office for existing consumers.
+- `DispatchService` records all targets; `DocumentTrail` casts the column; `DocumentController::show` adds
+  `released_to_list` per trail (falls back to `releasedToOffice` for single-office releases); Show.vue renders one
+  badge per office.
+- Checks: Pest 67 passed (558 assertions, multi-office test extended); Pint on new/changed PHP ✅; ESLint ✅; build ✅.
+  Not verified in a browser.
+
+### 2026-10-13 — Multi-office dispatch: every office gets an actionable copy (Claude Code)
+- **Bug (user-reported):** dispatching to 3 offices wrote 3 trail entries but `documents.department_id` held only
+  the first, so offices 2 and 3 never saw it in their inbox and were refused by the `process` policy.
+- **Rule (user decision):** each office ends or routes its own copy independently; the document is Completed only
+  when no office holds an open copy.
+- **Model:** custody = open trail entries (`released_at IS NULL`). `department_id` remains a single "latest/primary"
+  office for legacy consumers.
+- **Changes:** `DocumentWorkflow::openOffices()`; `release()` takes an optional `$office`; `mutate()` accepts a null
+  version (per-office actions skip the document-wide stale check and guard with the office's open copy instead).
+  `TransactionService::process` rewritten (end closes own copy, completes when none remain; route refuses an office
+  already holding a copy). `DocumentPolicy::owns` uses open trail entries (falls back to `department_id` if none).
+  `Document::scopeHeldBy`; Transactions inbox uses it. `ProcessDocumentRequest` excludes the user's own office as a
+  target. `DocumentService::deactivate` closes every open copy. `DocumentController::show` passes `holders`;
+  Show.vue lists all holders in "Currently with" and marks each holding office in the route strip (also fixed
+  `slipTargets.map(officeOf)` passing the index as a flag).
+- **Existing data:** documents already dispatched to several offices need no migration — offices 2..n already have
+  open trail entries, so the document now appears in their inboxes.
+- **Tests:** 3 fixtures updated to move the open trail with `department_id`; 2 new tests (independent end/route,
+  no duplicate holder, completion on last copy; deactivation closes all copies). Pest 67 passed (547 assertions);
+  Pint on `TransactionService.php` ✅; ESLint Show.vue ✅; build ✅. Not verified in a browser.
+- **Not changed:** `Document::is_delinquent` and the dashboard SLA still evaluate only `department_id`, so a
+  multi-office document's delinquency reflects one office (noted as known issue #17).
 
 ### 2026-10-13 — Show.vue: latest-first trail table; Date Start timezone fix (Claude Code)
 - Routing Trail table lists newest entry first (transit duration still computed chronologically).

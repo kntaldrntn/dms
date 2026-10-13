@@ -18,6 +18,7 @@ class DocumentTrail extends Model
         'released_by',
         'released_at',
         'released_to',
+        'released_to_offices',
         'released_action',
         'remarks',
         'required_actions',
@@ -37,6 +38,7 @@ class DocumentTrail extends Model
             'released_at' => 'datetime',
             'is_digitally_signed' => 'boolean', // Ensures clean JSON boolean outputs
             'required_actions' => 'array',
+            'released_to_offices' => 'array',
         ];
     }
 

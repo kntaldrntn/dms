@@ -16,10 +16,11 @@ class TransactionController extends Controller
      */
     public function index(Request $request)
     {
-        // STRICT FILTER: Only active documents currently assigned to the user's department
+        // STRICT FILTER: Only active documents the user's office holds an open copy of
+        // (a document dispatched to several offices appears in each office's inbox).
         $this->authorize('viewAny', Document::class);
         $query = Document::visibleTo($request->user())->with(['documentType', 'transactionType'])
-            ->where('department_id', $request->user()->department_id)
+            ->heldBy((int) $request->user()->department_id)
             ->where('status', '!=', 'Completed') 
             ->where('state', 1);
 

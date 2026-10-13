@@ -19,14 +19,18 @@ class DocumentWorkflow
 {
     use DetectsConcurrencyErrors;
 
-    public function mutate(Document $document, User $user, int $version, string $ability, Closure $change): Document
+    /**
+     * Pass a null $version for per-office actions on a multi-office document: another office acting on
+     * its own copy must not make this office's form stale. Those callers guard with openOffices() instead.
+     */
+    public function mutate(Document $document, User $user, ?int $version, string $ability, Closure $change): Document
     {
         return $this->transaction(function () use ($document, $user, $version, $ability, $change) {
             $document = Document::query()->lockForUpdate()->findOrFail($document->id);
             $user = User::query()->lockForUpdate()->findOrFail($user->id);
             Gate::forUser($user)->authorize($ability, $document);
             abort_if($document->state !== 1 || $document->status === 'Completed', 409, 'This document is no longer active.');
-            if ($document->workflow_version !== $version) {
+            if ($version !== null && $document->workflow_version !== $version) {
                 throw ValidationException::withMessages(['workflow_version' => 'This document changed after you opened it. Refresh the page and try again.']);
             }
             $change($document, $user);
@@ -81,14 +85,27 @@ class DocumentWorkflow
         return $offices->first();
     }
 
-    /** Close the current custody entry without changing its office or existing receiver. */
-    public function release(Document $document, User $user, string $action, ?int $target, ?string $remarks = null, ?int $signer = null, array $metadata = []): void
+    /**
+     * Offices currently holding an open copy (received, not yet released), locked for this transaction.
+     * A multi-office dispatch leaves one open copy per office; each office acts on its own copy.
+     *
+     * @return list<int>
+     */
+    public function openOffices(Document $document): array
     {
+        return DocumentTrail::where('document_id', $document->id)->whereNull('released_at')
+            ->lockForUpdate()->pluck('department_id')->map(fn ($id) => (int) $id)->unique()->values()->all();
+    }
+
+    /** Close an office's custody entry (default: the document's current office) without changing its existing receiver. */
+    public function release(Document $document, User $user, string $action, ?int $target, ?string $remarks = null, ?int $signer = null, array $metadata = [], ?int $office = null): void
+    {
+        $office ??= $document->department_id;
         $trail = DocumentTrail::where('document_id', $document->id)
-            ->where('department_id', $document->department_id)->whereNull('released_at')->latest('id')->first();
+            ->where('department_id', $office)->whereNull('released_at')->latest('id')->first();
         if (! $trail) {
             $trail = new DocumentTrail([
-                'document_id' => $document->id, 'department_id' => $document->department_id,
+                'document_id' => $document->id, 'department_id' => $office,
                 'received_at' => $document->created_at, 'received_action' => 'Receive Document',
             ]);
         }

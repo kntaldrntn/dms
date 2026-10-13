@@ -96,11 +96,26 @@ class DocumentController extends Controller
             'trails.signer'
         ]);
         
+        // A release can go to several offices (multi-office dispatch); resolve them all for the trail table.
+        $releaseOffices = Department::whereIn('id', $document->trails->pluck('released_to_offices')->flatten()->filter()->unique())
+            ->get(['id', 'code', 'name'])->keyBy('id');
+        $document->trails->each(function ($trail) use ($releaseOffices) {
+            $offices = collect($trail->released_to_offices ?? [])
+                ->map(fn ($id) => $releaseOffices->get((int) $id))->filter()->values();
+            // Single-office releases (route, referral, approvals) only store released_to.
+            if ($offices->isEmpty() && $trail->releasedToOffice) {
+                $offices = collect([$trail->releasedToOffice->only(['id', 'code', 'name'])]);
+            }
+            $trail->setAttribute('released_to_list', $offices);
+        });
+
         return Inertia::render('documents/Show', [
             'document' => $document,
             'trails' => $document->trails,
             // Offices a pending referral slip will dispatch to, for the "Next" route step.
             'slipTargets' => Department::whereIn('id', $document->approved_routing_slip ?? [])->get(['id', 'code', 'name']),
+            // Every office holding an open copy (more than one after a multi-office dispatch).
+            'holders' => Department::whereIn('id', $document->trails->whereNull('released_at')->pluck('department_id'))->get(['id', 'code', 'name']),
         ]);
     }
 

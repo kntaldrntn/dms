@@ -55,6 +55,7 @@ test('staff cannot use records intake or management actions even in their own of
 
 test('records management requires current custody', function () {
     $this->document->update(['department_id' => $this->target->id]);
+    $this->trail->update(['department_id' => $this->target->id]);
     $this->actingAs($this->records)->get(route('documents.edit', $this->document))->assertForbidden();
     $this->putJson(route('documents.update', $this->document), [...$this->data, 'workflow_version' => 0])->assertForbidden();
     $this->deleteJson(route('documents.destroy', $this->document), ['workflow_version' => 0])->assertForbidden();
@@ -78,6 +79,7 @@ test('active users can view the document registry while transactions remain depa
     $this->get(route('transactions.inbox'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 0));
 
     $this->document->update(['department_id' => $this->target->id]);
+    $this->trail->update(['department_id' => $this->target->id]);
     $this->get(route('transactions.inbox'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
 
     $this->document->update(['state' => 0]);
@@ -118,6 +120,7 @@ test('inactive or completed documents cannot be edited dispatched processed or d
 
 test('referrals resolve office codes rather than fixed ids and accept omitted remarks', function () {
     $this->document->update(['department_id' => $this->adminOffice->id]);
+    $this->trail->update(['department_id' => $this->adminOffice->id]);
     $this->actingAs($this->administrator)->postJson(route('referral-slips.generate', $this->document), [
         'workflow_version' => 0, 'targets' => [$this->target->id],
         'required_actions' => ['please_handle', 'other'], 'other_action' => 'Coordinate with legal',
@@ -449,4 +452,72 @@ test('Records cannot dispatch a document while City Administrator review is pend
     expect($this->document->fresh()->department_id)->toBe($this->recordsOffice->id);
     expect($this->document->fresh()->workflow_version)->toBe(0);
     $this->assertDatabaseCount('document_trails', 1);
+});
+
+test('a multi-office dispatch gives every office its own actionable copy', function () {
+    $second = Department::create(['code' => 'SEC', 'name' => 'Second Office', 'state' => 1]);
+    $third = Department::create(['code' => 'THD', 'name' => 'Third Office', 'state' => 1]);
+    $secondStaff = User::factory()->create(['department_id' => $second->id]);
+    $thirdStaff = User::factory()->create(['department_id' => $third->id]);
+
+    $this->actingAs($this->records)->postJson(route('documents.route', $this->document), [
+        'workflow_version' => 0, 'routed_to' => [$this->target->id, $second->id, $third->id],
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    // The dispatch release records every receiving office, and the trail table receives all of them.
+    expect($this->trail->fresh()->released_to_offices)->toBe([$this->target->id, $second->id, $third->id]);
+    $this->actingAs($this->records)->get(route('documents.show', $this->document))
+        ->assertInertia(fn (Assert $page) => $page->where('trails.0.released_to_list.2.code', 'THD'));
+
+    foreach ([$this->staff, $secondStaff, $thirdStaff] as $user) {
+        $this->actingAs($user)->get(route('transactions.inbox'))
+            ->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
+    }
+
+    // The second office ends its copy using the version it loaded; the others still hold theirs.
+    $this->actingAs($secondStaff)->postJson(route('transactions.process', $this->document), [
+        'workflow_version' => 1, 'action' => 'end', 'remarks' => 'Noted',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    expect($this->document->fresh()->status)->not->toBe('Completed');
+    $this->actingAs($secondStaff)->get(route('transactions.inbox'))
+        ->assertInertia(fn (Assert $page) => $page->has('documents.data', 0));
+    $this->postJson(route('transactions.process', $this->document), [
+        'workflow_version' => 2, 'action' => 'end', 'remarks' => 'Again',
+    ])->assertForbidden();
+
+    // The third office routes its copy onward, but not to an office that already holds one.
+    $this->actingAs($thirdStaff)->postJson(route('transactions.process', $this->document), [
+        'workflow_version' => 1, 'action' => 'route', 'remarks' => 'For action', 'routed_to' => $this->target->id,
+    ])->assertUnprocessable()->assertJsonValidationErrors('routed_to');
+    $this->postJson(route('transactions.process', $this->document), [
+        'workflow_version' => 1, 'action' => 'route', 'remarks' => 'For action', 'routed_to' => $second->id,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $this->actingAs($secondStaff)->get(route('transactions.inbox'))
+        ->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
+
+    // Completed only after the last open copy ends.
+    $this->actingAs($this->staff)->postJson(route('transactions.process', $this->document), [
+        'workflow_version' => 0, 'action' => 'end', 'remarks' => 'Done',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    expect($this->document->fresh()->status)->not->toBe('Completed');
+    $this->actingAs($secondStaff)->postJson(route('transactions.process', $this->document), [
+        'workflow_version' => 0, 'action' => 'end', 'remarks' => 'Done',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    expect($this->document->fresh()->status)->toBe('Completed');
+    expect(DocumentTrail::where('document_id', $this->document->id)->whereNull('released_at')->count())->toBe(0);
+
+    $this->actingAs($this->records)->get(route('documents.show', $this->document))
+        ->assertInertia(fn (Assert $page) => $page->has('holders', 0));
+});
+
+test('deactivation closes every open copy of a multi-office document', function () {
+    $second = Department::create(['code' => 'SEC', 'name' => 'Second Office', 'state' => 1]);
+    app(DispatchService::class)->dispatch($this->document, $this->records, ['workflow_version' => 0, 'routed_to' => [$this->target->id, $second->id]]);
+    // A Records-role user in a holding office may deactivate; every office's copy must close.
+    $this->actingAs($this->records)->get(route('documents.show', $this->document))
+        ->assertInertia(fn (Assert $page) => $page->has('holders', 2));
+    $this->staff->update(['role' => 'records_manager']);
+    $this->actingAs($this->staff)->deleteJson(route('documents.destroy', $this->document), ['workflow_version' => 1])
+        ->assertRedirect()->assertSessionHasNoErrors();
+    expect(DocumentTrail::where('document_id', $this->document->id)->whereNull('released_at')->count())->toBe(0);
 });
