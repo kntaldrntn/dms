@@ -30,6 +30,10 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: 'System Documents', href: '/documents' },
 ];
 
+const departmentId = (code: string) => Number(props.departments.find(department => department.code === code)?.id || 0);
+const cityAdministratorId = departmentId('ADM');
+const cityMayorId = departmentId('OCM');
+
 const searchTerm = ref(props.filters?.search || '');
 let searchTimeout: ReturnType<typeof setTimeout>;
 
@@ -94,7 +98,7 @@ const form = useForm({
     linked_documents: '', 
     attached_file: null as File | null, 
 
-    department_id: 3, // Strictly lock default to City Administrator
+    department_id: cityAdministratorId,
     access_code: props.generatedAccessCode,
     ai_routing_suggestions: [] as any[],
 });
@@ -217,12 +221,13 @@ const handleFileUpload = async (event: Event) => {
         if (data.transaction_type_id) form.transaction_type_id = data.transaction_type_id;
         if (data.classification_id) form.classification_id = data.classification_id;
         
-        // Ensure UI defaults strictly to City Admin unless Mayor is explicitly needed
-        if (data.department_id === 31) {
-            form.department_id = 31;
+        // Resolve executive destinations from their configured department codes,
+        // never from seed-only numeric IDs.
+        if (Number(data.department_id) === cityMayorId) {
+            form.department_id = cityMayorId;
             executiveSuggestion.value = { route: 'City Mayor', reason: data.approval_reason || 'Requires explicit Mayoral approval.' };
         } else {
-            form.department_id = 3; 
+            form.department_id = cityAdministratorId;
             executiveSuggestion.value = { route: 'City Administrator', reason: 'Requires standard referral slip processing.' };
         }
         
@@ -271,7 +276,7 @@ function submitDocument() {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-100 min-h-screen">
-            
+
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 class="text-2xl font-bold text-slate-800 tracking-tight">System Documents</h1>
@@ -280,7 +285,7 @@ function submitDocument() {
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                
+
                 <!-- LEFT PANEL: NEW DOCUMENT FORM -->
                 <div class="lg:col-span-5 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                     <div class="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
@@ -329,7 +334,7 @@ function submitDocument() {
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-2 gap-3">
+                        <div class="grid grid-cols-3 gap-3">
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Source Type</label>
                                 <select v-model="form.source_type" 
@@ -351,17 +356,16 @@ function submitDocument() {
                                 </select>
                                 <p v-if="form.errors.source_location && form.source_type === 'Internal'" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
                             </div>
-                        </div>
-
-                        <div>
-                            <label class="block text-xs font-medium text-slate-700 mb-1">Document Classification</label>
-                            <select v-model="form.classification_id" 
-                                class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                :class="form.errors.classification_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
-                                <option value="" disabled>Select Classification</option>
-                                <option v-for="classif in classifications" :key="classif.id" :value="classif.id">{{ classif.name }}</option>
-                            </select>
-                            <p v-if="form.errors.classification_id" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.classification_id }}</p>
+                            <div>
+                                <label class="block text-xs font-medium text-slate-700 mb-1">Classification</label>
+                                <select v-model="form.classification_id"
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.classification_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
+                                    <option value="" disabled>Select</option>
+                                    <option v-for="classif in classifications" :key="classif.id" :value="classif.id">{{ classif.name }}</option>
+                                </select>
+                                <p v-if="form.errors.classification_id" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.classification_id }}</p>
+                            </div>
                         </div>
 
                         <div class="grid grid-cols-3 gap-3">
@@ -433,7 +437,7 @@ function submitDocument() {
                                     @input="handleLinkedDocumentInput"
                                     type="text" 
                                     autocomplete="off"
-                                    placeholder="Type barcode to search, separate multiple with space" 
+                                    placeholder="Type barcode to search, separate multiple with space"
                                     class="w-full rounded-xl border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm transition-colors"
                                     :class="{'border-red-500 focus:border-red-500 focus:ring-red-500': form.errors.linked_documents}" 
                                 />
@@ -504,8 +508,8 @@ function submitDocument() {
                                 <select v-model="form.department_id" 
                                     class="rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors font-semibold bg-indigo-50 text-indigo-800"
                                     :class="form.errors.department_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-indigo-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500'">
-                                    <option :value="3">Route to City Administrator</option>
-                                    <option :value="31">Route to City Mayor</option>
+                                    <option :value="cityAdministratorId">Route to City Administrator</option>
+                                    <option :value="cityMayorId">Route to City Mayor</option>
                                 </select>
                                 <button type="submit" :disabled="form.processing || isAnalyzing" class="bg-emerald-600 text-white text-sm px-5 py-2 rounded-xl font-medium shadow-sm hover:bg-emerald-700 transition disabled:opacity-50">
                                     Save Document
@@ -520,7 +524,7 @@ function submitDocument() {
                     <div class="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-4">
                         <div class="relative w-full max-w-sm">
                             <Search class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                            <input v-model="searchTerm" type="text" placeholder="Search barcode or subject..." class="block w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-10 text-sm placeholder-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" />
+                            <input v-model="searchTerm" type="text" placeholder="Search barcode or subject..." aria-label="Search documents" class="block w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-10 text-sm placeholder-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" />
                             <button v-if="searchTerm" @click="clearSearch" class="absolute top-1/2 right-3 -translate-y-1/2 text-slate-400 hover:text-slate-600">×</button>
                         </div>
                     </div>
@@ -566,13 +570,13 @@ function submitDocument() {
                                         <div class="flex justify-center items-center gap-2">
 
                                             <!-- REFERRAL SLIP: authorized approvers and Records can reopen an approved slip -->
-                                            <a v-if="doc.approved_routing_slip && ['records_manager', 'city_administrator', 'system_administrator'].includes($page.props.auth.user.role)" :href="route('referral-slips.preview', doc.id)" target="_blank" rel="noopener" class="rounded-md border border-violet-200 bg-violet-50 p-1.5 text-violet-700 shadow-sm transition hover:bg-violet-100" title="Open Referral Action Slip PDF preview">
+                                            <a v-if="doc.approved_routing_slip && ['records_manager', 'city_administrator', 'city_mayor', 'system_administrator'].includes($page.props.auth.user.role)" :href="route('referral-slips.preview', doc.id)" target="_blank" rel="noopener" class="rounded-md border border-violet-200 bg-violet-50 p-1.5 text-violet-700 shadow-sm transition hover:bg-violet-100" title="Open Referral Action Slip PDF preview">
                                                 <FileText class="h-4 w-4" />
                                             </a>
 
                                             <!-- ROUTING/STATUS: Hide FastForward while City Administrator approval is pending -->
-                                            <span v-if="doc.requires_signature_from === 'city_administrator' || doc.department_id !== $page.props.auth.user.department_id" class="text-[10px] font-bold uppercase tracking-wider text-slate-500 py-1.5 px-2 bg-slate-100 rounded-md border border-slate-200" title="Waiting for City Administrator approval">
-                                                {{ doc.requires_signature_from === 'city_administrator' ? 'Pending City Administrator Review' : `With ${doc.department?.code || 'Exec.'}` }}
+                                            <span v-if="['city_administrator', 'city_mayor'].includes(doc.requires_signature_from) || doc.department_id !== $page.props.auth.user.department_id" class="text-[10px] font-bold uppercase tracking-wider text-slate-500 py-1.5 px-2 bg-slate-100 rounded-md border border-slate-200" :title="doc.requires_signature_from === 'city_mayor' ? 'Waiting for City Mayor approval' : 'Waiting for City Administrator approval'">
+                                                {{ doc.requires_signature_from === 'city_mayor' ? 'Pending City Mayor Review' : (doc.requires_signature_from === 'city_administrator' ? 'Pending City Administrator Review' : `With ${doc.department?.code || 'Exec.'}`) }}
                                             </span>
 
                                             <!-- ROUTING BUTTON: Show only after required approval -->

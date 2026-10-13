@@ -8,7 +8,6 @@ use App\Models\DocumentType;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 
 class DashboardController extends Controller
@@ -39,28 +38,26 @@ class DashboardController extends Controller
         $internalClients = (clone $monthQuery)->where('source_type', 'Internal')->count();
 
         // ---------------------------------------------------------
-        // 2. DELINQUENT / ACTION REQUIRED (For the current user's office)
+        // 2. DELINQUENT / ACTION REQUIRED (All active departments)
         // ---------------------------------------------------------
-        $userDeptId = Auth::user()->department_id;
-        
-        // Get all pending docs currently sitting in the user's department
-        $myDeptDocs = Document::with(['trails', 'documentType'])
-            ->where('department_id', $userDeptId)
+        // Each document's accessor resolves the SLA from its current department,
+        // so this remains accurate while presenting the dashboard globally.
+        $openDocuments = Document::with(['trails', 'documentType'])
             ->where('status', '!=', 'Completed')
             ->where('state', 1)
             ->get();
             
-        $todoCount = $myDeptDocs->count();
+        $todoCount = $openDocuments->count();
         
         $tomorrowStart = Carbon::tomorrow('Asia/Manila')->startOfDay();
         $tomorrowEnd = Carbon::tomorrow('Asia/Manila')->endOfDay();
         
-        $dueTomorrowCount = $myDeptDocs->where('due_date', '>=', $tomorrowStart)
+        $dueTomorrowCount = $openDocuments->where('due_date', '>=', $tomorrowStart)
                                        ->where('due_date', '<=', $tomorrowEnd)
                                        ->count();
         
         // Uses the dynamic 'is_delinquent' EODB accessor from your Document model!
-        $delinquentCount = $myDeptDocs->filter(function($doc) {
+        $delinquentCount = $openDocuments->filter(function($doc) {
             return $doc->is_delinquent; 
         })->count();
 
@@ -126,9 +123,9 @@ class DashboardController extends Controller
             $reportTitle = ($pipelineLabels[$selectedPipeline] ?? 'All').' '.$selectedCategory.' Documents';
             $reportDescription = $selectedMonthName.' '.$year;
         } elseif ($request->boolean('delinquent')) {
-            // Delinquency is office-specific and comes from PerformanceStandard,
-            // so use the Document accessor that powers the dashboard counter.
-            $delinquentDocuments = $myDeptDocs->filter(fn (Document $document) => $document->is_delinquent)
+            // Delinquency comes from each document's current department's
+            // PerformanceStandard, so use the same accessor as the card.
+            $delinquentDocuments = $openDocuments->filter(fn (Document $document) => $document->is_delinquent)
                 ->sortByDesc('created_at')
                 ->values();
             $page = LengthAwarePaginator::resolveCurrentPage('documents_page');
@@ -140,8 +137,8 @@ class DashboardController extends Controller
                 $page,
                 ['path' => $request->url(), 'pageName' => 'documents_page', 'query' => $request->query()]
             );
-            $reportTitle = 'Delinquent Documents (My Department)';
-            $reportDescription = 'Performance-standard SLA breaches in your current office';
+            $reportTitle = 'Delinquent Documents (All Departments)';
+            $reportDescription = 'Performance-standard SLA breaches across all active departments';
         }
 
         $now = Carbon::now('Asia/Manila');

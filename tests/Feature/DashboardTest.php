@@ -61,3 +61,34 @@ test('clicking a dashboard category returns that category report on the dashboar
         ->where('reportTitle', 'On-Time Simple Documents')
         ->has('drillDownDocuments.data', 0));
 });
+
+test('the delinquent dashboard card and report include documents from every department', function () {
+    $this->travelTo(Carbon::parse('2026-10-05 10:00:00', 'Asia/Manila'));
+
+    $records = Department::create(['code' => 'REC', 'name' => 'Records', 'state' => 1]);
+    $engineering = Department::create(['code' => 'ENG', 'name' => 'Engineering', 'state' => 1]);
+    $user = User::factory()->create(['department_id' => $records->id]);
+    $transactionType = TransactionType::create(['name' => 'Simple', 'processing_days' => 3, 'state' => 1]);
+
+    $document = Document::create([
+        'barcode' => 'GLOBAL-DELINQUENT',
+        'access_code' => 'ACCESS1',
+        'transaction_type_id' => $transactionType->id,
+        'department_id' => $engineering->id,
+        'source_name' => 'Test Client',
+        'subject_matter' => 'A delinquent document held outside the viewer department',
+    ]);
+    $document->forceFill([
+        'created_at' => Carbon::now('Asia/Manila')->subDays(6),
+        'updated_at' => Carbon::now('Asia/Manila')->subDays(6),
+    ])->save();
+
+    $this->actingAs($user)
+        ->get(route('dashboard', ['delinquent' => 1]))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('delinquent.value', 1)
+            ->where('delinquent.todo', 1)
+            ->where('reportTitle', 'Delinquent Documents (All Departments)')
+            ->has('drillDownDocuments.data', 1)
+            ->where('drillDownDocuments.data.0.barcode', 'GLOBAL-DELINQUENT'));
+});

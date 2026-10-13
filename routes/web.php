@@ -41,7 +41,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // --- NEW: Referral Slip Generation ---
         Route::get('/referral-slips', [App\Http\Controllers\ReferralSlipController::class, 'index'])->name('referral-slips.index');
+        Route::get('/ocm-approvals', [App\Http\Controllers\ReferralSlipController::class, 'ocmIndex'])->name('ocm-approvals.index');
+        Route::post('/ocm-approvals/{document}/approve', [App\Http\Controllers\ReferralSlipController::class, 'approveOcm'])->name('ocm-approvals.approve');
         Route::post('/referral-slips/{document}/generate', [App\Http\Controllers\ReferralSlipController::class, 'generate'])->name('referral-slips.generate');
+        Route::post('/referral-slips/{document}/stamp-placement', [App\Http\Controllers\ReferralSlipController::class, 'findStampPlacement'])->name('referral-slips.stamp-placement');
     Route::get('/referral-slips/{document}/print', [App\Http\Controllers\ReferralSlipController::class, 'print'])->name('referral-slips.print');
     Route::get('/referral-slips/{document}/preview', [App\Http\Controllers\ReferralSlipController::class, 'preview'])->name('referral-slips.preview');
         
@@ -53,6 +56,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // 2. READ-ONLY ROUTES (Must go LAST)
     Route::get('documents', [DocumentController::class, 'index'])->name('documents.index');
     Route::get('documents/{document}', [DocumentController::class, 'show'])->name('documents.show');
+    Route::get('documents/{document}/ocm-approved-pdf', [App\Http\Controllers\ReferralSlipController::class, 'previewSigned'])->name('documents.ocm-approved-pdf');
 
     // 3. DASHBOARD
     Route::get('dashboard', DashboardController::class)->name('dashboard');

@@ -20,9 +20,11 @@ beforeEach(function () {
     $this->travelTo(now('Asia/Manila')->setDate(2026, 9, 24)->setTime(10, 0));
     $this->recordsOffice = Department::create(['code' => 'REC', 'name' => 'Records', 'state' => 1]);
     $this->adminOffice = Department::create(['code' => 'ADM', 'name' => 'Administrator', 'state' => 1]);
+    $this->mayorOffice = Department::create(['code' => 'OCM', 'name' => 'City Mayor', 'state' => 1]);
     $this->target = Department::create(['code' => 'DST', 'name' => 'Destination', 'state' => 1]);
     $this->records = User::factory()->create(['role' => 'records_manager', 'department_id' => $this->recordsOffice->id]);
     $this->administrator = User::factory()->create(['role' => 'city_administrator', 'department_id' => $this->adminOffice->id]);
+    $this->mayor = User::factory()->create(['role' => 'city_mayor', 'department_id' => $this->mayorOffice->id]);
     $this->systemAdministrator = User::factory()->create(['role' => 'system_administrator', 'department_id' => $this->adminOffice->id]);
     $this->staff = User::factory()->create(['department_id' => $this->target->id]);
     $type = DocumentType::create(['document_code' => 'TEST', 'document_type' => 'Test', 'state' => 1]);
@@ -355,6 +357,31 @@ test('intake accepts an internal office id and queues City Administrator review 
     $this->actingAs($this->administrator)->get(route('referral-slips.index'))
         ->assertOk()->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
     expect($created->due_date->toDateString())->toBe('2026-09-29');
+});
+
+test('intake transfers an OCM approval document to the City Mayor office and queue', function () {
+    $this->actingAs($this->records)->postJson(route('documents.store'), [
+        ...$this->data,
+        'barcode' => 'OCM-001',
+        'department_id' => $this->mayorOffice->id,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $created = Document::where('barcode', 'OCM-001')->firstOrFail();
+
+    expect($created->department_id)->toBe($this->mayorOffice->id)
+        ->and($created->requires_signature_from)->toBe('city_mayor')
+        ->and($created->trails()->count())->toBe(2);
+    expect($created->trails()->oldest('id')->first()->released_to)->toBe($this->mayorOffice->id)
+        ->and($created->trails()->oldest('id')->first()->released_action)->toBe('Submitted for City Mayor approval');
+    expect($created->trails()->latest('id')->first()->department_id)->toBe($this->mayorOffice->id)
+        ->and($created->trails()->latest('id')->first()->received_action)->toBe('Awaiting City Mayor approval');
+
+    $this->actingAs($this->mayor)->get(route('ocm-approvals.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page->has('documents.data', 1)->where('documents.data.0.id', $created->id));
+    $this->actingAs($this->administrator)->get(route('referral-slips.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page->has('documents.data', 0));
 });
 
 test('Records cannot dispatch a document while City Administrator review is pending', function () {

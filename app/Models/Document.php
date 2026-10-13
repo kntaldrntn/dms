@@ -78,7 +78,7 @@ class Document extends Model
             ->first();
 
         $allocatedMinutes = $standard ? $standard->allocated_minutes : 7200;
-        $minutesSpent = Carbon::now('Asia/Manila')->diffInMinutes($startTime);
+        $minutesSpent = Carbon::parse($startTime, 'Asia/Manila')->diffInMinutes(Carbon::now('Asia/Manila'), true);
 
         return $minutesSpent > $allocatedMinutes;
     }

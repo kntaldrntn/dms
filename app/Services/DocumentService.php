@@ -61,18 +61,31 @@ class DocumentService
                 Gate::forUser($user)->authorize('create', Document::class);
                 $target = empty($data['department_id']) ? (int) $user->department_id : (int) $data['department_id'];
                 $this->workflow->targets([$target], null, 'department_id');
-                $requiresAdministratorReview = Department::whereKey($target)->where('code', 'ADM')->exists();
+                $executiveOfficeCode = Department::whereKey($target)->where('state', 1)->value('code');
+                $requiredExecutiveApproval = match ($executiveOfficeCode) {
+                    'ADM' => 'city_administrator',
+                    'OCM' => 'city_mayor',
+                    default => null,
+                };
                 $type = TransactionType::findOrFail($data['transaction_type_id']);
                 $document = Document::create([
                     ...$data, 'department_id' => $user->department_id, 'status' => 'Pending',
-                    'requires_signature_from' => $requiresAdministratorReview ? 'city_administrator' : ($data['requires_signature_from'] ?? 'none'),
+                    'requires_signature_from' => $requiredExecutiveApproval ?? ($data['requires_signature_from'] ?? 'none'),
                     'due_date' => now('Asia/Manila')->addWeekdays($type->processing_days),
                 ]);
                 $document->trails()->create([
                     'department_id' => $user->department_id, 'received_by' => $user->id,
                     'received_at' => now('Asia/Manila'), 'received_action' => 'Document Scanned & Registered',
                 ]);
-                if (! $requiresAdministratorReview && $target !== (int) $user->department_id) {
+                if ($requiredExecutiveApproval === 'city_mayor') {
+                    // OCM approval is an actual hand-off to the Mayor's office.
+                    // Keep the destination in department_id so the record and
+                    // custody trail both show OCM (currently department 31).
+                    $this->workflow->release($document, $user, 'Submitted for City Mayor approval', $target);
+                    $this->workflow->receive($document, $target, 'Awaiting City Mayor approval');
+                    $document->department_id = $target;
+                    $document->save();
+                } elseif (! $requiredExecutiveApproval && $target !== (int) $user->department_id) {
                     $this->workflow->release($document, $user, 'Direct Dispatch', $target);
                     $this->workflow->receive($document, $target, 'Direct Dispatch from Records');
                     $document->department_id = $target;

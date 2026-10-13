@@ -1,4 +1,4 @@
-# Project health and improvement tracker - 2026-10-05
+# Project health and improvement tracker - 2026-10-09
 
 ## Legend
 
@@ -6,13 +6,27 @@
 - 🟡 Working, but needs manual confirmation or is a future improvement
 - 🔴 Known issue that needs action before relying on the feature
 
+## Updates since the previous tracker review
+
+This section supersedes older overlapping notes below.
+
+- [Done] OCM approval now provides an uploaded-PDF preview before **Digitally Stamp & Return**.
+- [Done] Fixed the OCM PDF-preview canvas error caused by a local variable hiding the browser `document` object.
+- [Done] OCM stamp placement now uses the AI result when available and a conservative browser-side blank-area fallback when it is not.
+- [Done] The approved OCM PDF opens as an authorized inline preview from Document Details rather than forcing a download.
+- [Done] The visible OCM stamp now contains a transparent black signature on the left and the certificate holder, City Mayor role, and signing time in plain black text on the right.
+- [Done] The configured certificate is issued by DICT Government Authentication CA - G2, has Digital Signature key usage, and is valid until May 15, 2027.
+- [Done] Dashboard delinquency, To-Do, and Due Tomorrow metrics and their drill-down now cover all active departments, while evaluating each document against its current department's SLA.
+- [Done] Fixed the delinquency elapsed-time calculation so overdue documents are counted correctly with the installed Carbon version.
+- [Done] Verification after these updates: dashboard tests (4), workflow reliability tests (27), PHP syntax validation, production frontend build, and whitespace validation pass.
+
 ## Current platform and code health
 
 ### Automated checks
 
 - 🟢 PHP syntax validation passes for controllers, models, services, requests, policies, and migrations.
 - 🟢 Laravel route registration passes with 62 active routes.
-- 🟢 Automated tests pass: **58 tests, 264 assertions**.
+- 🟢 Automated tests pass; the dedicated workflow suite includes OCM-to-Mayor custody and queue coverage.
 - 🟢 ESLint passes with no errors.
 - 🟢 Production frontend build completes successfully.
 - 🟢 `git diff --check` passes with no whitespace errors.
@@ -39,6 +53,10 @@
 ### Document registration, update, dispatch, referral, and processing
 
 - 🟢 These flows now use request validation, authorization, and transactional services.
+- 🟢 OCM routing: documents addressed to the active department coded `OCM` are transferred into City Mayor custody, recorded with `department_id = OCM`, and marked `requires_signature_from = city_mayor`. The original custody release and OCM receipt are retained in the trail.
+- 🟢 The City Mayor uses the dedicated **OCM Approvals** queue, not the City Administrator Referral Slips page. Referral Slips remain restricted to City Administrator and System Administrator roles.
+- 🟡 OCM PDF approval: the one-step **Digitally Stamp & Return** action renders up to five PDF page previews, asks the existing OpenAI vision integration to locate a blank signature area, validates the normalized coordinates server-side, visibly stamps the supplied signature, cryptographically signs a separate PDF, and returns the document directly to Records. The original upload remains unchanged and the signed copy is stored privately for authorized download from Document Details.
+- 🟡 Before live signing, configure `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD` in the local environment. Certificate material is read from `storage/app/certificates/`; duplicate private-key and certificate copies under `public/certificates/` must be removed before deployment.
 - 🟢 Failed uploads and failed workflow writes roll back instead of leaving partial document trails or orphaned files.
 - 🟢 Active destination offices are rechecked during the transaction.
 - 🟢 Referral and Records office lookups use `ADM` and `REC` department codes instead of hard-coded database IDs.
@@ -64,11 +82,12 @@
 
 ## Future improvements
 
-### Integrating embedded uploaded signature in an uploaded PDF file
+### OCM PDF approval and certificate signing
 
-- 🟡 Deferred. Uploaded-document PDF stamping, its storage field, download endpoint, and FPDI/FPDF dependencies have been removed.
-- 🟢 Current scope: the browser-print Referral/Action Slip displays the approving City Administrator's uploaded signature directly above the fixed **ATTY. GILBERT L. CALOZA** signatory block whenever that user's signature is on file.
-- 🟢 Manually verified: the uploaded signature is embedded and visible in the generated Referral/Action Slip.
+- 🟢 Added private `signed_file_path` tracking on the OCM approval trail, plus an authorized download endpoint for the resulting approved PDF.
+- 🟢 Added FPDI/TCPDF dependencies to stamp the original uploaded PDF without replacing it and apply the certificate-backed PDF signature.
+- 🟡 Manual browser test still required: use a real PDF with a clearly blank signature area, sign in as the City Mayor, complete **Digitally Stamp & Return**, and verify both visual placement and certificate status in a PDF reader.
+- 🔴 Do not deploy while `private.key` or the `.p12` certificate bundle remains in `public/certificates/`; those duplicate files are web-accessible and must be removed after confirming the protected storage copies are available.
 
 ### Enhancing the City Administrator Referral/Action Slip modal
 
@@ -101,7 +120,7 @@
 - 🟡 Future decision: replace the current "select ADM department" trigger with a clearer explicit "requires City Administrator approval" field if staff find the current intake selection confusing.
 
 ### Frontend performance
-
+ 
 - 🟡 Vite reports a JavaScript chunk larger than 500 kB, likely because the document page includes OCR/PDF libraries. Consider lazy-loading the OCR feature when performance optimization becomes a priority.
 
 ### Audit and operational review

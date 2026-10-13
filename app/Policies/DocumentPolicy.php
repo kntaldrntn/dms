@@ -38,7 +38,7 @@ class DocumentPolicy
     public function dispatch(User $user, Document $document): bool
     {
         return $this->update($user, $document)
-            && $document->requires_signature_from !== 'city_administrator';
+            && ! in_array($document->requires_signature_from, ['city_administrator', 'city_mayor'], true);
     }
 
     public function process(User $user, Document $document): bool
@@ -53,13 +53,31 @@ class DocumentPolicy
             && $user->department()->where('state', 1)->exists();
     }
 
+    public function viewOcmApprovals(User $user): bool
+    {
+        return $user->state === 1 && in_array($user->role, ['city_mayor', 'system_administrator'], true)
+            && $user->department()->where('state', 1)->exists();
+    }
+
     public function refer(User $user, Document $document): bool
     {
-        return $this->viewReferrals($user)
-            && (
-                $document->requires_signature_from === 'city_administrator'
-                || $document->department()->where('code', 'ADM')->where('state', 1)->exists()
-            );
+        if ($user->role === 'system_administrator') {
+            return in_array($document->requires_signature_from, ['city_administrator', 'city_mayor'], true)
+                || $document->department()->whereIn('code', ['ADM', 'OCM'])->where('state', 1)->exists();
+        }
+
+        if ($user->role === 'city_mayor') {
+            return $this->viewOcmApprovals($user)
+                && ($document->requires_signature_from === 'city_mayor'
+                    || $document->department()->where('code', 'OCM')->where('state', 1)->exists());
+        }
+
+        if (! $this->viewReferrals($user)) {
+            return false;
+        }
+
+        return $document->requires_signature_from === 'city_administrator'
+            || $document->department()->where('code', 'ADM')->where('state', 1)->exists();
     }
 
     public function viewReferralSlip(User $user, Document $document): bool

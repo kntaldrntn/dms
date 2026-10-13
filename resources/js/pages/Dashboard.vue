@@ -72,7 +72,7 @@ const toneClass: Record<string, string> = {
             <!-- Header & Filters -->
             <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                 <div>
-                    <h1 class="text-2xl font-bold tracking-tight text-slate-800">Document Tracking Pulse</h1>
+                    <h1 class="text-2xl font-bold tracking-tight text-slate-800">Document Tracking Status</h1>
                     <p class="mt-1 text-sm text-slate-500">Segmented indicators calculated from this month's activity.</p>
                 </div>
                 <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
@@ -106,10 +106,10 @@ const toneClass: Record<string, string> = {
                     </div>
                 </div>
 
-                <!-- Delinquent / Alerts (Specific to Auth User's Department) -->
-                <component :is="delinquent.value > 0 ? Link : 'div'" :href="delinquentReportUrl()" class="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)] transition" :class="delinquent.value > 0 ? 'hover:border-red-200 hover:bg-red-50/30' : 'cursor-default opacity-75'" :title="delinquent.value > 0 ? 'View delinquent documents in my department' : 'No delinquent documents in my department'">
+                <!-- Delinquent / Alerts (All active departments) -->
+                <component :is="delinquent.value > 0 ? Link : 'div'" :href="delinquentReportUrl()" class="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)] transition" :class="delinquent.value > 0 ? 'hover:border-red-200 hover:bg-red-50/30' : 'cursor-default opacity-75'" :title="delinquent.value > 0 ? 'View delinquent documents across all departments' : 'No delinquent documents across all departments'">
                     <div class="flex items-start justify-between">
-                        <span class="text-sm font-semibold text-slate-500">Delinquent (My Dept)</span>
+                        <span class="text-sm font-semibold text-slate-500">Delinquent</span>
                         <span class="rounded-md bg-red-50 px-2 py-1 text-xs font-bold text-red-600">Action Req</span>
                     </div>
                     <div class="mt-4 flex items-end justify-between">

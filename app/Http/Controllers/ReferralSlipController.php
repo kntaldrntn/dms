@@ -5,11 +5,14 @@ namespace App\Http\Controllers;
 use App\Models\Document;
 use App\Models\Department;
 use App\Http\Requests\GenerateReferralRequest;
+use App\Http\Requests\ApproveOcmDocumentRequest;
 use App\Services\ReferralService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
+use OpenAI\Laravel\Facades\OpenAI;
 
 class ReferralSlipController extends Controller
 {
@@ -27,6 +30,12 @@ class ReferralSlipController extends Controller
             ->latest()
             ->paginate(10);
 
+        if ($request->user()->role !== 'system_administrator') {
+            $documents = Document::with(['documentType', 'transactionType'])
+                ->where('requires_signature_from', 'city_administrator')
+                ->where('status', 'Pending')->where('state', 1)->latest()->paginate(10);
+        }
+
         return Inertia::render('referral-slips/Index', [
             'documents' => $documents,
             'departments' => Department::where('state', 1)->where('code', '!=', 'ADM')->get(),
@@ -37,11 +46,99 @@ class ReferralSlipController extends Controller
         ]);
     }
 
+    public function ocmIndex(Request $request)
+    {
+        $this->authorize('viewOcmApprovals', Document::class);
+
+        $documents = Document::with(['documentType', 'transactionType'])
+            ->where('requires_signature_from', 'city_mayor')
+            ->where('status', 'Pending')->where('state', 1)->latest()->paginate(10);
+
+        return Inertia::render('ocm-approvals/Index', [
+            'documents' => $documents,
+            'departments' => Department::where('state', 1)->where('code', '!=', 'OCM')->get(),
+            'flash' => ['success' => session('success'), 'error' => session('error')],
+        ]);
+    }
+
+    public function approveOcm(ApproveOcmDocumentRequest $request, Document $document, ReferralService $referrals)
+    {
+        $referrals->approveOcm($document, $request->user(), $request->validated());
+
+        return response()->json(['message' => 'OCM approval completed.']);
+    }
+
     public function generate(GenerateReferralRequest $request, Document $document, ReferralService $referrals)
     {
         $referrals->generate($document, $request->user(), $request->validated());
 
         return redirect()->back()->with('success', 'Routing Slip approved. You can view or print it from the document actions.');
+    }
+
+    public function findStampPlacement(Request $request, Document $document)
+    {
+        $this->authorize('refer', $document);
+        abort_unless($document->requires_signature_from === 'city_mayor', 422, 'Only OCM approval uses the certificate stamp.');
+
+        $validated = $request->validate([
+            'thumbnails' => ['required', 'array', 'min:1', 'max:5'],
+            'thumbnails.*' => ['required', 'image', 'mimes:jpg,jpeg,png', 'max:4096'],
+            'pages' => ['required', 'array', 'min:1', 'max:5'],
+            'pages.*.page' => ['required', 'integer', 'min:1', 'max:100'],
+        ]);
+        abort_unless(count($validated['thumbnails']) === count($validated['pages']), 422, 'Page preview data is incomplete.');
+
+        $content = [[
+            'type' => 'text',
+            'text' => 'Find one completely blank rectangle for a City Mayor digital-signature image on these numbered PDF page previews. Return JSON only: {"page":integer,"x":number,"y":number,"width":number,"height":number}. Coordinates are normalized 0-1000 from the top-left. The rectangle must be at least 180 wide and 70 high, entirely inside the page, and must not overlap any text, handwriting, seal, barcode, table, footer, or existing signature. A large blank margin is acceptable even when it is not labelled as a signature field; prefer the lower half of a later page. Only return {"page":null} when every page has no blank rectangle of this size.',
+        ]];
+        foreach ($validated['thumbnails'] as $index => $thumbnail) {
+            $content[] = ['type' => 'text', 'text' => 'PDF page '.$validated['pages'][$index]['page']];
+            $content[] = ['type' => 'image_url', 'image_url' => ['url' => 'data:'.$thumbnail->getMimeType().';base64,'.base64_encode(file_get_contents($thumbnail->path())), 'detail' => 'high']];
+        }
+
+        try {
+            $response = OpenAI::chat()->create([
+                'model' => 'gpt-4o-mini', 'response_format' => ['type' => 'json_object'],
+                'messages' => [['role' => 'user', 'content' => $content]], 'temperature' => 0,
+            ]);
+            $placement = json_decode($response->choices[0]->message->content, true, 512, JSON_THROW_ON_ERROR);
+            $allowedPages = collect($validated['pages'])->pluck('page')->map(fn ($page) => (int) $page)->all();
+            if (! is_array($placement) || ! in_array((int) ($placement['page'] ?? 0), $allowedPages, true)) {
+                throw new \UnexpectedValueException('No suitable blank area was found.');
+            }
+            validator(['stamp_placement' => $placement], [
+                'stamp_placement' => ['required', 'array:page,x,y,width,height'],
+                'stamp_placement.page' => ['required', 'integer', 'min:1', 'max:100'],
+                'stamp_placement.x' => ['required', 'numeric', 'min:0', 'max:950'],
+                'stamp_placement.y' => ['required', 'numeric', 'min:0', 'max:950'],
+                'stamp_placement.width' => ['required', 'numeric', 'min:180', 'max:500'],
+                'stamp_placement.height' => ['required', 'numeric', 'min:70', 'max:300'],
+            ])->validate();
+
+            return response()->json(['placement' => $placement]);
+        } catch (\Throwable $exception) {
+            Log::warning('OCM stamp placement analysis failed.', [
+                'document_id' => $document->id,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return response()->json(['error' => 'AI could not find a safe signature area. Choose another PDF or add a clear signature space.'], 422);
+        }
+    }
+
+    public function previewSigned(Document $document)
+    {
+        $this->authorize('view', $document);
+        $trail = $document->trails()->whereNotNull('signed_file_path')->latest('id')->firstOrFail();
+        abort_unless(Storage::disk('local')->exists($trail->signed_file_path), 404);
+
+        return Storage::disk('local')->response(
+            $trail->signed_file_path,
+            "{$document->barcode}-ocm-approved.pdf",
+            ['Content-Type' => 'application/pdf'],
+            'inline',
+        );
     }
 
     public function print(Request $request, Document $document)

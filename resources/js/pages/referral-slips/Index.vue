@@ -5,10 +5,15 @@ import { ref, watch } from 'vue';
 import { FileSignature, Sparkles, X, CheckCircle2 } from 'lucide-vue-next';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
+import axios from 'axios';
+import * as pdfjsLib from 'pdfjs-dist';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 const props = defineProps<{
     documents: any;
     departments: Array<{ id: number; name: string; code: string }>;
+    approvalMode?: 'referral' | 'ocm';
     flash?: { success?: string; error?: string };
 }>();
 
@@ -24,7 +29,7 @@ watch(() => props.flash, (flash) => {
 }, { immediate: true, deep: true });
 
 const breadcrumbs = [
-    { title: 'Referral Slips', href: '/referral-slips' },
+    { title: props.approvalMode === 'ocm' ? 'OCM Approvals' : 'Referral Slips', href: props.approvalMode === 'ocm' ? '/ocm-approvals' : '/referral-slips' },
 ];
 
 const actionOptions = [
@@ -50,6 +55,7 @@ const form = useForm({
     remarks: '',
     attach_signature: false,
     workflow_version: 0,
+    stamp_placement: null as { page: number; x: number; y: number; width: number; height: number } | null,
 });
 
 function openModal(doc: any) {
@@ -78,7 +84,41 @@ function openModal(doc: any) {
     showModal.value = true;
 }
 
-function submitSlip() {
+async function findOcmStampPlacement() {
+    if (!selectedDoc.value?.attached_file?.toLowerCase().endsWith('.pdf')) {
+        throw new Error('OCM approval/signature requires the document to have an uploaded PDF.');
+    }
+    const response = await fetch(`/storage/${selectedDoc.value.attached_file}`);
+    if (!response.ok) throw new Error('The uploaded PDF could not be read for AI placement analysis.');
+    const pdf = await pdfjsLib.getDocument({ data: await response.arrayBuffer() }).promise;
+    const payload = new FormData();
+    const pageCount = Math.min(pdf.numPages, 5);
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+        const page = await pdf.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: canvas.getContext('2d')!, viewport }).promise;
+        const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('Unable to prepare a PDF page preview.')), 'image/jpeg', 0.82));
+        payload.append('thumbnails[]', new File([blob], `page-${pageNumber}.jpg`, { type: 'image/jpeg' }));
+        payload.append('pages[]', JSON.stringify({ page: pageNumber }));
+    }
+    // Laravel accepts an array of fields, so send the page metadata as indexed objects.
+    payload.delete('pages[]');
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) payload.append(`pages[${pageNumber - 1}][page]`, String(pageNumber));
+    const result = await axios.post(route('referral-slips.stamp-placement', selectedDoc.value.id), payload, { headers: { 'Content-Type': 'multipart/form-data' } });
+    return result.data.placement;
+}
+
+async function submitSlip() {
+    const needsOcmStamp = selectedDoc.value?.requires_signature_from === 'city_mayor' && form.attach_signature;
+    try {
+        form.stamp_placement = needsOcmStamp ? await findOcmStampPlacement() : null;
+    } catch (error: any) {
+        notyf.error(error?.response?.data?.error || error?.message || 'AI could not find a safe signature area.');
+        return;
+    }
     form.post(route('referral-slips.generate', selectedDoc.value.id), {
         preserveScroll: true,
         onSuccess: () => {
@@ -92,11 +132,11 @@ function submitSlip() {
 </script>
 
 <template>
-    <Head title="Referral Slips" />
+    <Head :title="approvalMode === 'ocm' ? 'OCM Approvals' : 'Referral Slips'" />
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-100 min-h-screen">
-            <h1 class="text-2xl font-bold text-slate-800">Admin Referral Slips</h1>
-            <p class="text-sm text-slate-500 -mt-4">Generate and authorize routing slips for incoming documents.</p>
+            <h1 class="text-2xl font-bold text-slate-800">{{ approvalMode === 'ocm' ? 'OCM Approval Queue' : 'Admin Referral Slips' }}</h1>
+            <p class="text-sm text-slate-500 -mt-4">{{ approvalMode === 'ocm' ? 'Approve OCM documents and digitally stamp their uploaded PDF when authorized.' : 'Generate and authorize routing slips for incoming documents.' }}</p>
 
             <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <table class="w-full text-left text-sm text-slate-700">
@@ -113,7 +153,7 @@ function submitSlip() {
                             <td class="px-4 py-3">{{ doc.subject_matter }}</td>
                             <td class="px-4 py-3 text-center">
                                 <button @click="openModal(doc)" class="bg-indigo-50 text-indigo-700 px-4 py-1.5 rounded-lg font-bold hover:bg-indigo-100 border border-indigo-100">
-                                    Review & Generate Slip
+                                    {{ approvalMode === 'ocm' ? 'Review & Approve' : 'Review & Generate Slip' }}
                                 </button>
                             </td>
                         </tr>
@@ -130,7 +170,7 @@ function submitSlip() {
                     <div class="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl flex flex-col">
                         <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
                             <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
-                                <FileSignature class="w-5 h-5 text-indigo-600"/> Generate Slip: {{ selectedDoc?.barcode }}
+                                <FileSignature class="w-5 h-5 text-indigo-600"/> {{ approvalMode === 'ocm' ? 'OCM Approval' : 'Generate Slip' }}: {{ selectedDoc?.barcode }}
                             </h2>
                             <button @click="showModal = false" class="text-slate-400 hover:text-slate-600"><X class="w-5 h-5"/></button>
                         </div>
@@ -198,9 +238,9 @@ function submitSlip() {
                                 <input type="checkbox" v-model="form.attach_signature" class="rounded text-amber-600 focus:ring-amber-500 w-4 h-4" />
                                 <div class="flex flex-col">
                                     <span class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                                        <FileSignature class="w-4 h-4 text-amber-600"/> Attach Authorized Signature
+                                        <FileSignature class="w-4 h-4 text-amber-600"/> {{ approvalMode === 'ocm' ? 'Digitally Sign and Stamp PDF' : 'Attach Authorized Signature' }}
                                     </span>
-                                    <span class="text-xs text-slate-500 mt-0.5">Applies your digital signature to officially approve this routing slip.</span>
+                                    <span class="text-xs text-slate-500 mt-0.5">{{ approvalMode === 'ocm' ? 'Uses AI to find blank space, then visibly stamps and cryptographically signs the uploaded PDF.' : 'Applies your digital signature to officially approve this routing slip.' }}</span>
                                 </div>
                             </label>
                             <p v-if="form.errors.attach_signature" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.attach_signature }}</p>

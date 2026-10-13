@@ -55,6 +55,12 @@ const mainNavItems = computed<NavItem[]>(() => {
             roles: ['system_administrator', 'city_administrator'],
         },
         {
+            title: 'OCM Approvals',
+            href: route('ocm-approvals.index'),
+            icon: FileSignature,
+            roles: ['system_administrator', 'city_mayor'],
+        },
+        {
             title: 'Settings',
             icon: Settings,
             roles: ['system_administrator'],
