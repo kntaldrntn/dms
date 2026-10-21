@@ -4,7 +4,7 @@
 > handoff, and before `/compact`. Mark facts as **verified** only with evidence.
 > Feature-level health is tracked separately by the user in `status.md`.
 
-Last updated: 2026-10-14 (referral slip AI pre-fill fix; earlier: multi-office custody, holders, delinquency scope, bell)
+Last updated: 2026-10-14 (per-office seed accounts; referral slip AI pre-fill fix; earlier: multi-office custody, holders, delinquency scope, bell)
 
 ---
 
@@ -131,8 +131,9 @@ Pint on changed test/request OK.
 - Unverified in a browser: notification bell + Receive modal, role-scoped delinquency card, multi-office
   inbox behaviour, OCM PDF signing in a PDF reader, stale-form UX in two tabs. (User walked the two-step
   referral with E-Signature through to dispatch on 2026-10-14.)
-- Local data has users only in CICTO, REC, ADM, OCM; create users in other offices (e.g. CHO) to exercise
-  the bell and multi-office inboxes.
+- `DatabaseSeeder` now creates one Department Head (`<code>.dh@gmail.com`) and one Staff (`<code>.staff@gmail.com`)
+  per office, password `password`. Run `php artisan db:seed` locally to get them (not run yet). Note: re-seeding also
+  resets the four executive/admin accounts' passwords to `password` and their office (existing seeder behaviour).
 
 ## 6. Known issues, risks & technical debt
 
@@ -192,6 +193,55 @@ Pint on changed test/request OK.
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-14 — Government-style sign-in page (Claude Code)
+- `AuthLayout.vue` rewritten (used by every auth page): identity bar (Republic of the Philippines / City Government),
+  navy identity panel with the city seal + DMS chevron mark, form panel, footer. Palette from the DMS logo added to
+  `tailwind.config.js` as `gov.{navy,navy-dark,blue,orange,gold}`; new `components/DmsLogoMark.vue` (SVG redraw of
+  the logo; swap for the original file if available).
+- `Login.vue`: Sign-up link removed (accounts are created by the System Administrator), show/hide password,
+  positive tabindex values removed, errors tied to inputs via `aria-describedby`.
+- `Login.vue` has Employee / Guest tabs (radix-vue Tabs). Guest tab (Barcode number + Access code) is a
+  **placeholder**: button disabled, no route, nothing submitted; a public lookup endpoint (rate-limited, matching
+  `barcode` + `access_code`) is still to be designed.
+- **Open (security):** `/register` route and `Register.vue` still exist, so anyone can still self-register by URL.
+- Checks: ESLint ✅; build ✅; Auth tests 16 passed. Not viewed in a browser.
+
+### 2026-10-14 — Intake AI autofill: visible failure reasons; PNG uploads fixed (Claude Code)
+- **User report:** AI autofill fails from `documents/Index.vue`. Server path verified working (direct `analyze()` run
+  with sample OCR text returned 200 with all fields; OpenAI key OK). Exact browser-side cause not yet identified.
+- `DocumentController::analyze` now logs the swallowed exception (`Document intake analysis failed.`) — check
+  `storage/logs/laravel.log` after the next failure.
+- `documents/Index.vue`: images (PNG/large JPG) are re-encoded to an 800px JPEG thumbnail (PNG was sent as-is and
+  always failed `ai_thumbnail` `mimes:jpg,jpeg`); empty OCR text stops early with a message; the failure reason
+  (422 field error, 419 session, 403, server error, browser read error, non-JSON redirect) is shown above the form.
+- Observed, not fixed: in the sample run the model returned barcode `C000000003` for OCR text `C003196699`.
+- Checks: ESLint ✅; build ✅; DocumentAnalysisTest 8 passed.
+
+### 2026-10-14 — OCM approval: success toast survives; stamp stays on the page (Claude Code)
+- **Bugs (user-reported):** after the Mayor's PNPKI stamp the page did `window.location.reload()` right after the
+  toast, so the toast vanished; the stamp's certificate name ran past the page edge and the AI rectangle was not
+  checked against the page.
+- `ocm-approvals/Index.vue`: `router.reload({ only: ['documents'] })` instead of a full reload (toast stays); the AI
+  rectangle is used only if it fits on the page and the rendered pixels there are blank, otherwise the measured
+  pixel scan picks the area (now 300 wide); page pixels read once per page. Unused `props` removed (fixes the
+  ESLint error noted in §4).
+- `ApproveOcmDocumentRequest`: shared `placementRules()` (min width 250) + `ensureFitsOnPage()` (x+width and
+  y+height ≤ 1000), reused by `ReferralSlipController::findStampPlacement`; prompt states the bounds.
+- `PdfApprovalStampService`: text scales down (to 60% min) to fit the stamp box; date and file name use Asia/Manila
+  (the stamp showed UTC, e.g. 00:41 instead of 08:41).
+- New `tests/Feature/OcmStampPlacementTest.php`. Pest 74 passed (816 assertions); Pint ✅; ESLint ✅; build ✅.
+  Not verified with a real signed PDF in a browser.
+
+### 2026-10-14 — Seeder: one Department Head + one Staff per office (Claude Code)
+- `DatabaseSeeder`: generates `<code>.dh@gmail.com` (department_head) and `<code>.staff@gmail.com` (staff) for all
+  48 offices (96 accounts, password `password`). Executive/admin accounts now resolve their office by code instead of
+  IDs 24/43/3/31. The old `dh@gmail.com` / `staff@gmail.com` entries were removed from the seeder (the local rows are
+  untouched; locally they sit in ADM and CHO, so ADM/CHO will have two heads/staff until those are deactivated).
+- Bug fixed: `document_types` used `upsert()` keyed on `document_code`, which has no unique index, so every MySQL
+  re-seed inserted 12 duplicates (and SQLite refused it). Now `updateOrInsert` like the other registries.
+- New `tests/Feature/DatabaseSeederTest.php` (seeds twice; one head + one staff per office; no duplicate types).
+  Pest 72 passed (810 assertions); Pint applied to the seeder. Seeder not yet run against local MySQL.
 
 ### 2026-10-14 — Referral slip: AI routing suggestions pre-fill again (Claude Code)
 - **Bug (user-reported):** Generate Referral Slip did not pre-select the AI-suggested departments. Cause: the AI put

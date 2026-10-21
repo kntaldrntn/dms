@@ -20,6 +20,14 @@ export default {
                 sm: 'calc(var(--radius) - 4px)',
             },
             colors: {
+                // City Government / DMS logo palette (navy field with blue, orange and gold chevrons).
+                gov: {
+                    navy: '#0B2A5B',
+                    'navy-dark': '#071D40',
+                    blue: '#2A7DE1',
+                    orange: '#F7941D',
+                    gold: '#FDB913',
+                },
                 background: 'hsl(var(--background))',
                 foreground: 'hsl(var(--foreground))',
                 card: {

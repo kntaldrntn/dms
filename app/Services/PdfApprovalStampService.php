@@ -74,7 +74,7 @@ class PdfApprovalStampService
                 ],
             );
 
-            $path = "signed-documents/{$document->barcode}-ocm-approved-".now()->format('YmdHis').'.pdf';
+            $path = "signed-documents/{$document->barcode}-ocm-approved-".now('Asia/Manila')->format('YmdHis').'.pdf';
             Storage::disk('local')->put($path, $pdf->Output(basename($path), 'S'));
 
             return $path;
@@ -145,15 +145,29 @@ class PdfApprovalStampService
         $signatureHeight = min($height * 0.62, $signatureWidth / 2.64);
         $signatureY = $y + (($height - $signatureHeight) / 2);
 
+        $lines = [
+            $this->certificateName($certificatePath, $signer->name),
+            'City Mayor',
+            'Date: '.now('Asia/Manila')->format('Y-m-d H:i:s'),
+        ];
+
+        // Shrink the text so the longest line (usually the certificate name) stays inside the stamp box
+        // instead of running past the page edge.
+        $widest = max($pdf->GetStringWidth('Digitally Signed', 'helvetica', 'B', 7.5), ...array_map(
+            fn (string $line) => $pdf->GetStringWidth($line, 'helvetica', '', 7.2),
+            $lines,
+        ));
+        $scale = $widest > $textWidth ? max(0.6, $textWidth / $widest) : 1;
+        $lineHeight = 3.5 * $scale;
+
         $pdf->Image($signaturePath, $x, $signatureY, $signatureWidth, $signatureHeight, 'PNG');
         $pdf->SetTextColor(0, 0, 0);
-        $pdf->SetFont('helvetica', 'B', 7.5);
+        $pdf->SetFont('helvetica', 'B', 7.5 * $scale);
         $pdf->Text($textX, $textY, 'Digitally Signed');
-        $pdf->SetFont('helvetica', '', 7.2);
-        $lineHeight = 3.5;
-        $pdf->Text($textX, $textY + $lineHeight, $this->certificateName($certificatePath, $signer->name));
-        $pdf->Text($textX, $textY + ($lineHeight * 2), 'City Mayor');
-        $pdf->Text($textX, $textY + ($lineHeight * 3), 'Date: '.now()->format('Y-m-d H:i:s'));
+        $pdf->SetFont('helvetica', '', 7.2 * $scale);
+        foreach ($lines as $index => $line) {
+            $pdf->Text($textX, $textY + ($lineHeight * ($index + 1)), $line);
+        }
     }
 
     private function certificateName(string $certificatePath, string $fallback): string

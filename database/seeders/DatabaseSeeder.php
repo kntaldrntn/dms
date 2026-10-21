@@ -29,11 +29,13 @@ class DatabaseSeeder extends Seeder
             ['document_code' => 'VC', 'document_type' => 'Disbursement Voucher/Petty Cash', 'state' => 1],
         ];
 
-        DB::table('document_types')->upsert(
-            $documentTypes,
-            ['document_code'],           // unique key to match on
-            ['document_type', 'state']   // columns to update if it already exists
-        );
+        // document_code has no unique index, so upsert() would insert duplicates on every run.
+        foreach ($documentTypes as $data) {
+            DB::table('document_types')->updateOrInsert(
+                ['document_code' => $data['document_code']],
+                $data
+            );
+        }
 
         // Departments
         $departments = [
@@ -82,9 +84,9 @@ class DatabaseSeeder extends Seeder
             ['code' => 'REC', 'name' => 'Records Office', 'state' => 1],
             ['code' => 'REG', 'name' => 'Office of the Civil Registrar', 'state' => 1],
             ['code' => 'SNC', 'name' => 'Senior Citizen', 'state' => 1],
-            ['code' => 'SWD', 'name' => "Office of the City Social Welfare and Development", "state" => 1],
-            ['code' => "VET", "name" => "Office of the City Veterinarian", "state" => 1],
-            ['code' => "YESDO", "name" => "Youth Development Office", "state" => 1],
+            ['code' => 'SWD', 'name' => 'Office of the City Social Welfare and Development', 'state' => 1],
+            ['code' => 'VET', 'name' => 'Office of the City Veterinarian', 'state' => 1],
+            ['code' => 'YESDO', 'name' => 'Youth Development Office', 'state' => 1],
         ];
 
         foreach ($departments as $data) {
@@ -94,59 +96,60 @@ class DatabaseSeeder extends Seeder
             );
         }
 
-        // Users (Department IDs kept null or specific if you re-add departments later)
+        // Offices are resolved by code; IDs differ between databases.
+        $departmentIds = DB::table('departments')->pluck('id', 'code');
+        $password = bcrypt('password');
+
         $users = [
             [
                 'name' => 'System Admin',
                 'email' => 'sysadm@gmail.com',
                 'role' => 'system_administrator',
-                'department_id' => 24,
+                'department_id' => $departmentIds['CICTO'],
                 'state' => 1,
-                'password' => bcrypt('password'), 
+                'password' => $password,
             ],
             [
                 'name' => 'Records Manager',
                 'email' => 'rm@gmail.com',
                 'role' => 'records_manager',
-                'department_id' => 43,
+                'department_id' => $departmentIds['REC'],
                 'state' => 1,
-                'password' => bcrypt('password'), 
+                'password' => $password,
             ],
-            // --- NEW EXECUTIVE TEST ACCOUNTS ---
             [
                 'name' => 'City Administrator',
                 'email' => 'admin@gmail.com',
                 'role' => 'city_administrator',
-                'department_id' => 3, // Hardcoded to your Controller's logic
+                'department_id' => $departmentIds['ADM'],
                 'state' => 1,
-                'password' => bcrypt('password'),
+                'password' => $password,
             ],
             [
                 'name' => 'City Mayor',
                 'email' => 'mayor@gmail.com',
                 'role' => 'city_mayor',
-                'department_id' => 31, // Hardcoded to your Controller's logic
+                'department_id' => $departmentIds['OCM'],
                 'state' => 1,
-                'password' => bcrypt('password'),
-            ],
-            // --- NEW DEPARTMENT TEST ACCOUNTS ---
-            [
-                'name' => 'IT Department Head',
-                'email' => 'dh@gmail.com',
-                'role' => 'department_head',
-                'department_id' => 24, // Change this to whatever a valid ID is in your departments table
-                'state' => 1,
-                'password' => bcrypt('password'),
-            ],
-            [
-                'name' => 'IT Staff',
-                'email' => 'staff@gmail.com',
-                'role' => 'staff',
-                'department_id' => 24, // Must match the DH above so they can see the same files
-                'state' => 1,
-                'password' => bcrypt('password'),
+                'password' => $password,
             ],
         ];
+
+        // One Department Head and one Staff account per office, e.g. cho.dh@gmail.com / cho.staff@gmail.com.
+        foreach ($departments as $department) {
+            $prefix = strtolower($department['code']);
+
+            foreach (['department_head' => ['dh', 'Department Head'], 'staff' => ['staff', 'Staff']] as $role => [$suffix, $title]) {
+                $users[] = [
+                    'name' => "{$department['code']} {$title}",
+                    'email' => "{$prefix}.{$suffix}@gmail.com",
+                    'role' => $role,
+                    'department_id' => $departmentIds[$department['code']],
+                    'state' => 1,
+                    'password' => $password,
+                ];
+            }
+        }
 
         foreach ($users as $data) {
             User::query()->updateOrCreate(
@@ -174,7 +177,7 @@ class DatabaseSeeder extends Seeder
         // Transaction Types
 
         $transactionTypes = [
-            
+
             ['name' => 'Simple Transaction', 'processing_days' => 3, 'state' => 1],
             ['name' => 'Complex Transaction', 'processing_days' => 7, 'state' => 1],
             ['name' => 'Highly Technical Transaction', 'processing_days' => 20, 'state' => 1],
@@ -188,7 +191,7 @@ class DatabaseSeeder extends Seeder
         }
 
         // Document Classifications
-    
+
         $documentClassifications = [
             ['name' => 'AICS', 'description' => null, 'state' => 1],
             ['name' => 'Barangay/SK Resolution', 'description' => null, 'state' => 1],

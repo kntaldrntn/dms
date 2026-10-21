@@ -15,6 +15,7 @@ use App\Models\DocumentClassification;
 use App\Models\DeliveryMethod;
 use App\Models\Department;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Illuminate\Support\Str;
 use OpenAI\Laravel\Facades\OpenAI;
@@ -409,7 +410,13 @@ class DocumentController extends Controller
 
             return response()->json($result);
 
-        } catch (\Throwable) {
+        } catch (\Throwable $exception) {
+            Log::warning('Document intake analysis failed.', [
+                'user_id' => $request->user()?->id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
             return response()->json(['error' => 'Document analysis is unavailable. Please try again later.'], 502);
         }
     }

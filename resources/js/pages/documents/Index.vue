@@ -165,6 +165,29 @@ watch(() => form.source_type, (newType) => {
     else if (newType === 'Internal') form.source_location = ''; 
 });
 
+/** Downscale a rendered page or image to an 800px-wide JPEG for the vision model. */
+function jpegThumbnail(source: CanvasImageSource, width: number, height: number): Promise<Blob> {
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = Math.round(height * (800 / width));
+    canvas.getContext('2d')?.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+    return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Unable to prepare the page image.'))), 'image/jpeg', 0.6));
+}
+
+/** Tell Records why autofill failed instead of one generic message. */
+function analysisFailureReason(err: any): string {
+    const status = err?.response?.status;
+    const data = err?.response?.data;
+    if (status === 422) return String(Object.values(data?.errors ?? {}).flat()[0] ?? data?.message ?? 'The file could not be analyzed.');
+    if (status === 419) return 'Your session expired. Refresh the page and try again.';
+    if (status === 403) return 'Your account is not allowed to use AI autofill.';
+    if (data?.error) return data.error;
+    if (err?.message && !err?.response) return `The file could not be read in the browser: ${err.message}`;
+
+    return 'Document uploaded, but automatic analysis failed. You can fill the fields manually.';
+}
+
 const handleFileUpload = async (event: Event) => {
     const target = event.target as HTMLInputElement;
     const file = target.files?.[0];
@@ -199,27 +222,33 @@ const handleFileUpload = async (event: Event) => {
             extractedText = ret.data.text;
             await worker.terminate();
 
-            const visionCanvas = document.createElement('canvas');
-            const scaleFactor = 800 / viewport.width;
-            visionCanvas.width = 800;
-            visionCanvas.height = viewport.height * scaleFactor;
-            visionCanvas.getContext('2d')?.drawImage(tempCanvas, 0, 0, visionCanvas.width, visionCanvas.height);
-            aiThumbnailBlob = await new Promise<Blob>((resolve) => visionCanvas.toBlob(resolve as BlobCallback, 'image/jpeg', 0.6));
+            aiThumbnailBlob = await jpegThumbnail(tempCanvas, viewport.width, viewport.height);
         } else {
             const worker = await Tesseract.createWorker('eng');
             const ret = await worker.recognize(file);
             extractedText = ret.data.text;
             await worker.terminate();
-            aiThumbnailBlob = file; 
+            // The server only accepts a JPEG thumbnail, so PNGs and large photos are re-encoded.
+            const bitmap = await createImageBitmap(file);
+            aiThumbnailBlob = await jpegThumbnail(bitmap, bitmap.width, bitmap.height);
+            bitmap.close();
+        }
+
+        if (!extractedText.trim()) {
+            throw new Error('No readable text was found in the file. Upload a clearer scan or fill the fields manually.');
         }
 
         const compressedFile = new File([aiThumbnailBlob], 'thumb.jpg', { type: 'image/jpeg' });
         payload.append('ai_thumbnail', compressedFile);
         payload.append('extracted_text', extractedText);
 
-        const response = await axios.post('/documents/analyze', payload, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const response = await axios.post(route('documents.analyze'), payload, { headers: { 'Content-Type': 'multipart/form-data' } });
         const data = response.data;
-        
+        // A redirect (e.g. outside working hours) is followed by the browser and returns an HTML page, not JSON.
+        if (!data || typeof data !== 'object') {
+            throw new Error('The server did not return analysis results. Refresh the page and check that it is within working hours.');
+        }
+
         if (data.barcode) form.barcode = data.barcode;
         if (data.source_type) form.source_type = data.source_type;
         if (data.source_location) {
@@ -261,7 +290,7 @@ const handleFileUpload = async (event: Event) => {
 
         notyf.success('AI successfully extracted data.');
     } catch (err: any) {
-        analysisError.value = err.response?.data?.error || 'Document uploaded, but automatic analysis failed. You can fill the fields manually.';
+        analysisError.value = analysisFailureReason(err);
         notyf.error('AI Analysis failed. Please input manually.');
     } finally {
         isAnalyzing.value = false;
@@ -316,7 +345,11 @@ function submitDocument() {
                     </div>
 
                     <form @submit.prevent="submitDocument" class="p-5 flex flex-col gap-4">
-                        
+                        <p v-if="analysisError" role="alert" class="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                            <AlertCircle class="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                            {{ analysisError }}
+                        </p>
+
                         <div class="grid grid-cols-3 gap-3">
                             <div>
                                 <label class="block text-xs font-medium text-slate-700 mb-1">Barcode</label>

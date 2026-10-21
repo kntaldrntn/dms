@@ -93,7 +93,7 @@ class ReferralSlipController extends Controller
 
         $content = [[
             'type' => 'text',
-            'text' => 'Find one completely blank rectangle for a City Mayor digital-signature image on these numbered PDF page previews. Return JSON only: {"page":integer,"x":number,"y":number,"width":number,"height":number}. Coordinates are normalized 0-1000 from the top-left. The rectangle must be at least 180 wide and 70 high, entirely inside the page, and must not overlap any text, handwriting, seal, barcode, table, footer, or existing signature. A large blank margin is acceptable even when it is not labelled as a signature field; prefer the lower half of a later page. Only return {"page":null} when every page has no blank rectangle of this size.',
+            'text' => 'Find one completely blank rectangle for a City Mayor digital-signature image on these numbered PDF page previews. Return JSON only: {"page":integer,"x":number,"y":number,"width":number,"height":number}. Coordinates are normalized 0-1000 from the top-left. The rectangle must be at least 250 wide and 70 high, entirely inside the page (x + width <= 1000 and y + height <= 1000), and must not overlap any text, handwriting, seal, barcode, table, footer, or existing signature. A large blank margin is acceptable even when it is not labelled as a signature field; prefer the lower half of a later page. Only return {"page":null} when every page has no blank rectangle of this size.',
         ]];
         foreach ($validated['thumbnails'] as $index => $thumbnail) {
             $content[] = ['type' => 'text', 'text' => 'PDF page '.$validated['pages'][$index]['page']];
@@ -110,14 +110,9 @@ class ReferralSlipController extends Controller
             if (! is_array($placement) || ! in_array((int) ($placement['page'] ?? 0), $allowedPages, true)) {
                 throw new \UnexpectedValueException('No suitable blank area was found.');
             }
-            validator(['stamp_placement' => $placement], [
-                'stamp_placement' => ['required', 'array:page,x,y,width,height'],
-                'stamp_placement.page' => ['required', 'integer', 'min:1', 'max:100'],
-                'stamp_placement.x' => ['required', 'numeric', 'min:0', 'max:950'],
-                'stamp_placement.y' => ['required', 'numeric', 'min:0', 'max:950'],
-                'stamp_placement.width' => ['required', 'numeric', 'min:180', 'max:500'],
-                'stamp_placement.height' => ['required', 'numeric', 'min:70', 'max:300'],
-            ])->validate();
+            validator(['stamp_placement' => $placement], ApproveOcmDocumentRequest::placementRules())
+                ->after(fn ($validator) => ApproveOcmDocumentRequest::ensureFitsOnPage($validator))
+                ->validate();
 
             return response()->json(['placement' => $placement]);
         } catch (\Throwable $exception) {

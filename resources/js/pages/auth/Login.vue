@@ -7,7 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AuthBase from '@/layouts/AuthLayout.vue';
 import { Head, useForm } from '@inertiajs/vue3';
-import { LoaderCircle } from 'lucide-vue-next';
+import { Barcode, Eye, EyeOff, Info, KeyRound, LoaderCircle, LockKeyhole, Mail, Search, UserRound, Users } from 'lucide-vue-next';
+import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'radix-vue';
+import { computed, ref } from 'vue';
 
 defineProps<{
     status?: string;
@@ -20,6 +22,18 @@ const form = useForm({
     remember: false,
 });
 
+const showPassword = ref(false);
+
+const activeTab = ref<'staff' | 'guest'>('staff');
+const heading = computed(() =>
+    activeTab.value === 'staff'
+        ? { title: 'Sign in', description: 'Use the official account issued to you by the System Administrator.' }
+        : { title: 'Track a document', description: 'Check the status of a document you submitted to the City Government.' },
+);
+
+// Guest tracking is a placeholder until the public lookup endpoint exists; nothing is submitted.
+const guest = ref({ barcode: '', accessCode: '' });
+
 const submit = () => {
     form.post(route('login'), {
         onFinish: () => form.reset('password'),
@@ -28,64 +42,178 @@ const submit = () => {
 </script>
 
 <template>
-    <AuthBase title="Log in to your account" description="Enter your email and password below to log in">
-        <Head title="Log in" />
+    <AuthBase :title="heading.title" :description="heading.description">
+        <Head title="Sign in" />
 
-        <div v-if="status" class="mb-4 text-center text-sm font-medium text-green-600">
-            {{ status }}
-        </div>
+        <TabsRoot v-model="activeTab">
+            <TabsList aria-label="Sign-in type" class="mb-5 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+                <TabsTrigger
+                    value="staff"
+                    class="flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 transition hover:text-gov-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gov-blue data-[state=active]:bg-white data-[state=active]:text-gov-navy data-[state=active]:shadow-sm"
+                >
+                    <UserRound class="h-4 w-4" aria-hidden="true" />
+                    Employee
+                </TabsTrigger>
+                <TabsTrigger
+                    value="guest"
+                    class="flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 transition hover:text-gov-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gov-blue data-[state=active]:bg-white data-[state=active]:text-gov-navy data-[state=active]:shadow-sm"
+                >
+                    <Users class="h-4 w-4" aria-hidden="true" />
+                    Guest
+                </TabsTrigger>
+            </TabsList>
 
-        <form @submit.prevent="submit" class="flex flex-col gap-6">
-            <div class="grid gap-6">
-                <div class="grid gap-2">
-                    <Label for="email">Email address</Label>
-                    <Input
-                        id="email"
-                        type="email"
-                        required
-                        autofocus
-                        tabindex="1"
-                        autocomplete="email"
-                        v-model="form.email"
-                        placeholder="email@example.com"
-                    />
-                    <InputError :message="form.errors.email" />
+            <TabsContent value="staff" class="focus-visible:outline-none">
+                <div
+                    v-if="status"
+                    role="status"
+                    class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700"
+                >
+                    {{ status }}
                 </div>
 
-                <div class="grid gap-2">
-                    <div class="flex items-center justify-between">
-                        <Label for="password">Password</Label>
-                        <TextLink v-if="canResetPassword" :href="route('password.request')" class="text-sm" tabindex="5"> Forgot password? </TextLink>
+                <form @submit.prevent="submit" class="flex flex-col gap-4">
+                    <div class="grid gap-2">
+                        <Label for="email" class="text-slate-700">Email address</Label>
+                        <div class="relative">
+                            <Mail class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                            <Input
+                                id="email"
+                                type="email"
+                                required
+                                autofocus
+                                autocomplete="email"
+                                v-model="form.email"
+                                placeholder="name@example.com"
+                                class="h-10 pl-9 focus-visible:ring-gov-blue"
+                                :aria-invalid="!!form.errors.email"
+                                aria-describedby="email-error"
+                            />
+                        </div>
+                        <InputError id="email-error" :message="form.errors.email" />
                     </div>
-                    <Input
-                        id="password"
-                        type="password"
-                        required
-                        tabindex="2"
-                        autocomplete="current-password"
-                        v-model="form.password"
-                        placeholder="Password"
-                    />
-                    <InputError :message="form.errors.password" />
-                </div>
 
-                <div class="flex items-center justify-between" tabindex="3">
-                    <Label for="remember" class="flex items-center space-x-3">
-                        <Checkbox id="remember" v-model:checked="form.remember" tabindex="4" />
-                        <span>Remember me</span>
+                    <div class="grid gap-2">
+                        <div class="flex items-center justify-between">
+                            <Label for="password" class="text-slate-700">Password</Label>
+                            <!-- <TextLink v-if="canResetPassword" :href="route('password.request')" class="text-sm text-gov-blue">
+                                Forgot password?
+                            </TextLink> -->
+                        </div>
+                        <div class="relative">
+                            <LockKeyhole
+                                class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                                aria-hidden="true"
+                            />
+                            <Input
+                                id="password"
+                                :type="showPassword ? 'text' : 'password'"
+                                required
+                                autocomplete="current-password"
+                                v-model="form.password"
+                                placeholder="Password"
+                                class="h-10 pl-9 pr-10 focus-visible:ring-gov-blue"
+                                :aria-invalid="!!form.errors.password"
+                                aria-describedby="password-error"
+                            />
+                            <button
+                                type="button"
+                                @click="showPassword = !showPassword"
+                                class="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-500 hover:text-gov-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gov-blue"
+                                :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                                :aria-pressed="showPassword"
+                            >
+                                <EyeOff v-if="showPassword" class="h-4 w-4" aria-hidden="true" />
+                                <Eye v-else class="h-4 w-4" aria-hidden="true" />
+                            </button>
+                        </div>
+                        <InputError id="password-error" :message="form.errors.password" />
+                    </div>
+
+                    <Label for="remember" class="flex w-fit items-center gap-3 font-normal text-slate-600">
+                        <Checkbox id="remember" v-model:checked="form.remember" />
+                        <span>Keep me signed in on this device</span>
                     </Label>
-                </div>
 
-                <Button type="submit" class="mt-4 w-full" tabindex="4" :disabled="form.processing">
-                    <LoaderCircle v-if="form.processing" class="h-4 w-4 animate-spin" />
-                    Log in
-                </Button>
-            </div>
+                    <Button
+                        type="submit"
+                        class="mt-1 h-10 w-full bg-gov-navy text-white hover:bg-gov-navy-dark focus-visible:ring-gov-orange"
+                        :disabled="form.processing"
+                    >
+                        <LoaderCircle v-if="form.processing" class="h-4 w-4 animate-spin" aria-hidden="true" />
+                        Sign in
+                    </Button>
+                </form>
 
-            <div class="text-center text-sm text-muted-foreground">
-                Don't have an account?
-                <TextLink :href="route('register')" :tabindex="5">Sign up</TextLink>
-            </div>
-        </form>
+                <p
+                    class="mt-5 flex items-start gap-2 rounded-lg border border-gov-gold/40 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-slate-600"
+                >
+                    <Info class="mt-0.5 h-4 w-4 shrink-0 text-gov-orange" aria-hidden="true" />
+                    <span
+                        >Accounts are created by the System Administrator. If you need access or a password reset, contact your Department Head or the
+                        CICTO.</span
+                    >
+                </p>
+            </TabsContent>
+
+            <TabsContent value="guest" class="focus-visible:outline-none">
+                <form @submit.prevent class="flex flex-col gap-4">
+                    <div class="grid gap-2">
+                        <Label for="guest-barcode" class="text-slate-700">Barcode Number</Label>
+                        <div class="relative">
+                            <Barcode class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                            <Input
+                                id="guest-barcode"
+                                v-model="guest.barcode"
+                                autocomplete="off"
+                                maxlength="10"
+                                placeholder="e.g. C003196677"
+                                class="h-10 pl-9 font-mono uppercase focus-visible:ring-gov-blue"
+                                aria-describedby="guest-barcode-hint"
+                            />
+                        </div>
+                        <p id="guest-barcode-hint" class="text-xs text-slate-500">
+                            Printed on the receiving copy given to you by the Records Office.
+                        </p>
+                    </div>
+
+                    <div class="grid gap-2">
+                        <Label for="guest-access-code" class="text-slate-700">Access Code</Label>
+                        <div class="relative">
+                            <KeyRound
+                                class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                                aria-hidden="true"
+                            />
+                            <Input
+                                id="guest-access-code"
+                                v-model="guest.accessCode"
+                                autocomplete="off"
+                                maxlength="20"
+                                placeholder="6-character code"
+                                class="h-10 pl-9 font-mono uppercase focus-visible:ring-gov-blue"
+                            />
+                        </div>
+                    </div>
+
+                    <Button
+                        type="submit"
+                        disabled
+                        aria-describedby="guest-coming-soon"
+                        class="mt-1 h-10 w-full bg-gov-navy text-white hover:bg-gov-navy-dark"
+                    >
+                        <Search class="h-4 w-4" aria-hidden="true" />
+                        Track document
+                    </Button>
+                </form>
+
+                <p
+                    id="guest-coming-soon"
+                    class="mt-5 flex items-start gap-2 rounded-lg border border-gov-blue/30 bg-sky-50 px-3 py-2 text-xs leading-relaxed text-slate-600"
+                >
+                    <Info class="mt-0.5 h-4 w-4 shrink-0 text-gov-blue" aria-hidden="true" />
+                    <span>Online document tracking for the public is coming soon. For now, please inquire at the Records Office.</span>
+                </p>
+            </TabsContent>
+        </TabsRoot>
     </AuthBase>
 </template>
