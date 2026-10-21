@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
+import InputError from '@/components/InputError.vue';
+import { useIntakeRulebook, type IntakeDocumentType } from '@/composables/useIntakeRulebook';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Save, ArrowLeft, Link as LinkIcon, FileUp, Download } from 'lucide-vue-next';
@@ -11,7 +13,7 @@ import axios from 'axios';
 const props = defineProps<{
     document: any;
     transactionTypes: Array<{ id: number; name: string }>;
-    documentTypes: Array<{ id: number; document_type: string }>;
+    documentTypes: IntakeDocumentType[];
     classifications: Array<{ id: number; name: string }>;
     deliveryMethods: Array<{ id: number; delivery_method_name: string }>;
     departments: Array<{ id: number; name: string }>;
@@ -33,6 +35,8 @@ const form = useForm({
     source_type: props.document.source_type,
     source_location: props.document.source_location || 'N/A',  
     classification_id: props.document.classification_id || '',
+    is_confidential: Boolean(props.document.is_confidential),
+    route_mode: (props.document.route_mode || 'paper') as 'paperless' | 'paper',
     delivery_method_id: props.document.delivery_method_id || '',
     source_name: props.document.source_name,
     gender: props.document.gender || '',
@@ -47,6 +51,12 @@ const form = useForm({
     department_id: props.document.department_id,
     access_code: props.document.access_code,
     workflow_version: props.document.workflow_version,
+});
+
+const { selectedType, allowedClassifications, paperlessAllowed } = useIntakeRulebook(form, () => props.documentTypes, () => props.classifications);
+
+watch(() => form.is_confidential, (isConfidential) => {
+    if (isConfidential) form.attached_file = null;
 });
 
 watch(() => form.source_type, (newType) => {
@@ -159,11 +169,12 @@ function updateDocument() {
                     <!-- Row 3 & 4 (Combined into a cleaner layout) -->
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
-                            <label class="block text-sm font-medium text-slate-700 mb-1.5">Classification</label>
-                            <select v-model="form.classification_id" class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm">
+                            <label for="edit_classification" class="block text-sm font-medium text-slate-700 mb-1.5">Classification</label>
+                            <select id="edit_classification" v-model="form.classification_id" class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm">
                                 <option value="" disabled>Select One</option>
-                                <option v-for="classif in classifications" :key="classif.id" :value="classif.id">{{ classif.name }}</option>
+                                <option v-for="classif in allowedClassifications" :key="classif.id" :value="classif.id">{{ classif.name }}</option>
                             </select>
+                            <InputError class="mt-1" :message="form.errors.classification_id" />
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-slate-700 mb-1.5">Delivery Method</label>
@@ -179,6 +190,32 @@ function updateDocument() {
                                 <option value="Male">Male</option>
                                 <option value="Female">Female</option>
                             </select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+                        <div class="md:col-span-2 flex items-start gap-2 rounded-xl border px-4 py-3"
+                            :class="form.is_confidential ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'">
+                            <input id="edit_confidential" v-model="form.is_confidential" type="checkbox" aria-describedby="edit_confidential_hint"
+                                class="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500" />
+                            <div>
+                                <label for="edit_confidential" class="text-sm font-semibold text-slate-800">Confidential document</label>
+                                <p id="edit_confidential_hint" class="text-xs text-slate-500">
+                                    {{ selectedType?.may_be_confidential ? 'This document type may be confidential. ' : '' }}No AI autofill and no upload. Paper route.
+                                </p>
+                                <InputError class="mt-1" :message="form.errors.is_confidential" />
+                            </div>
+                        </div>
+                        <div>
+                            <label for="edit_route_mode" class="block text-sm font-medium text-slate-700 mb-1.5">Route</label>
+                            <select id="edit_route_mode" v-model="form.route_mode" aria-describedby="edit_route_mode_hint" class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm">
+                                <option value="paperless" :disabled="!paperlessAllowed">Paperless (PNPKI)</option>
+                                <option value="paper">Paper (wet signature)</option>
+                            </select>
+                            <p id="edit_route_mode_hint" class="text-xs text-slate-500 mt-1">
+                                {{ paperlessAllowed ? 'Needs the scanned copy.' : 'Paperless needs a digitally signed, non-confidential type.' }}
+                            </p>
+                            <InputError class="mt-1" :message="form.errors.route_mode" />
                         </div>
                     </div>
 
@@ -223,13 +260,18 @@ function updateDocument() {
                             </a>
                         </div>
 
+                        <p v-if="form.is_confidential" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                            Confidential documents are not uploaded.
+                        </p>
+
                         <!-- Manual Upload replacement -->
-                        <div>
+                        <div v-else>
                             <label class="block text-sm font-medium text-slate-700 mb-1.5">
                                 {{ document.attached_file ? 'Replace File (Optional)' : 'Upload Scanned File (Optional)' }}
                             </label>
                             <input type="file" accept=".pdf,.jpg,.jpeg,.png" @change="(e: any) => form.attached_file = e.target.files[0]" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 border border-slate-300 rounded-xl shadow-sm bg-white" />
                         </div>
+                        <InputError :message="form.errors.attached_file" />
                     </div>
 
                     <!-- Smart Barcode Search -->

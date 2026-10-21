@@ -2,6 +2,8 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import DeleteConfirmationModal from '@/components/DeleteConfirmationModal.vue';
 import RoutingModal from '@/components/RoutingModal.vue';
+import InputError from '@/components/InputError.vue';
+import { useIntakeRulebook, type IntakeDocumentType } from '@/composables/useIntakeRulebook';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { Search, Pencil, Trash2, FastForward, AlertCircle, Clock, Loader2, Sparkles, Link as LinkIcon, FileUp, X, FileText } from 'lucide-vue-next';
@@ -18,7 +20,7 @@ const props = defineProps<{
     documents: any;
     departments: Array<{ id: number; name: string; code: string }>;
     transactionTypes: Array<{ id: number; name: string }>;
-    documentTypes: Array<{ id: number; document_type: string }>;
+    documentTypes: IntakeDocumentType[];
     classifications: Array<{ id: number; name: string }>;
     deliveryMethods: Array<{ id: number; delivery_method_name: string }>;
     generatedAccessCode: string;
@@ -100,8 +102,10 @@ const form = useForm({
     transaction_type_id: '',
     document_type_id: '',
     source_type: 'External', 
-    source_location: 'N/A',  
+    source_location: 'N/A',
     classification_id: '',
+    is_confidential: false,
+    route_mode: 'paper' as 'paperless' | 'paper',
     delivery_method_id: '',
     source_name: '',
     gender: '',
@@ -115,6 +119,17 @@ const form = useForm({
     department_id: cityAdministratorId,
     access_code: props.generatedAccessCode,
     ai_routing_suggestions: [] as any[],
+});
+
+const { selectedType, allowedClassifications, paperlessAllowed } = useIntakeRulebook(form, () => props.documentTypes, () => props.classifications);
+
+// Confidential documents get no AI assist and no upload (FGD), so drop anything the AI or a scan already added.
+watch(() => form.is_confidential, (isConfidential) => {
+    if (!isConfidential) return;
+    form.attached_file = null;
+    form.ai_routing_suggestions = [];
+    executiveSuggestion.value = null;
+    analysisError.value = '';
 });
 
 // --- SMART BARCODE SEARCH ---
@@ -335,8 +350,8 @@ function submitDocument() {
                         <h2 class="text-base font-bold text-slate-800 tracking-tight">New Document</h2>
                         
                         <div class="relative flex items-center">
-                            <input type="file" id="ai-upload" accept=".pdf,.jpg,.png" class="hidden" :disabled="isAnalyzing" @change="handleFileUpload" />
-                            <label for="ai-upload" class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold cursor-pointer hover:bg-emerald-100 transition" :class="{'opacity-50 pointer-events-none': isAnalyzing}">
+                            <input type="file" id="ai-upload" accept=".pdf,.jpg,.png" class="hidden" :disabled="isAnalyzing || form.is_confidential" @change="handleFileUpload" />
+                            <label for="ai-upload" class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold cursor-pointer hover:bg-emerald-100 transition" :class="{'opacity-50 pointer-events-none': isAnalyzing || form.is_confidential}" :title="form.is_confidential ? 'AI autofill is off for confidential documents' : undefined">
                                 <Loader2 v-if="isAnalyzing" class="w-3.5 h-3.5 animate-spin" />
                                 <Sparkles v-else class="w-3.5 h-3.5" />
                                 {{ isAnalyzing ? 'Scanning...' : 'AI Autofill' }}
@@ -360,8 +375,8 @@ function submitDocument() {
                                 <p v-if="form.errors.barcode" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.barcode }}</p>
                             </div>
                             <div>
-                                <label class="block text-xs font-medium text-slate-700 mb-1">Transaction Type</label>
-                                <select v-model="form.transaction_type_id" 
+                                <label for="intake_transaction_type" class="block text-xs font-medium text-slate-700 mb-1">Transaction Type</label>
+                                <select id="intake_transaction_type" v-model="form.transaction_type_id"
                                     class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
                                     :class="form.errors.transaction_type_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
                                     <option value="" disabled>Select</option>
@@ -370,8 +385,8 @@ function submitDocument() {
                                 <p v-if="form.errors.transaction_type_id" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
                             </div>
                             <div>
-                                <label class="block text-xs font-medium text-slate-700 mb-1">Document Type</label>
-                                <select v-model="form.document_type_id" 
+                                <label for="intake_document_type" class="block text-xs font-medium text-slate-700 mb-1">Document Type</label>
+                                <select id="intake_document_type" v-model="form.document_type_id"
                                     class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
                                     :class="form.errors.document_type_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
                                     <option value="" disabled>Select</option>
@@ -404,14 +419,42 @@ function submitDocument() {
                                 <p v-if="form.errors.source_location && form.source_type === 'Internal'" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
                             </div>
                             <div>
-                                <label class="block text-xs font-medium text-slate-700 mb-1">Classification</label>
-                                <select v-model="form.classification_id"
+                                <label for="intake_classification" class="block text-xs font-medium text-slate-700 mb-1">Classification</label>
+                                <select id="intake_classification" v-model="form.classification_id"
                                     class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
                                     :class="form.errors.classification_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
                                     <option value="" disabled>Select</option>
-                                    <option v-for="classif in classifications" :key="classif.id" :value="classif.id">{{ classif.name }}</option>
+                                    <option v-for="classif in allowedClassifications" :key="classif.id" :value="classif.id">{{ classif.name }}</option>
                                 </select>
                                 <p v-if="form.errors.classification_id" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.classification_id }}</p>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-3 items-start">
+                            <div class="col-span-2 flex items-start gap-2 rounded-xl border px-3 py-2"
+                                :class="form.is_confidential ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'">
+                                <input id="intake_confidential" v-model="form.is_confidential" type="checkbox" aria-describedby="intake_confidential_hint"
+                                    class="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500" />
+                                <div>
+                                    <label for="intake_confidential" class="text-xs font-semibold text-slate-800">Confidential document</label>
+                                    <p id="intake_confidential_hint" class="text-[11px] leading-tight text-slate-500">
+                                        {{ selectedType?.may_be_confidential ? 'This document type may be confidential. ' : '' }}No AI autofill and no upload; encode details manually. Paper route.
+                                    </p>
+                                    <InputError class="mt-1" :message="form.errors.is_confidential" />
+                                </div>
+                            </div>
+                            <div>
+                                <label for="intake_route_mode" class="block text-xs font-medium text-slate-700 mb-1">Route</label>
+                                <select id="intake_route_mode" v-model="form.route_mode" aria-describedby="intake_route_mode_hint"
+                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
+                                    :class="form.errors.route_mode ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
+                                    <option value="paperless" :disabled="!paperlessAllowed">Paperless (PNPKI)</option>
+                                    <option value="paper">Paper (wet signature)</option>
+                                </select>
+                                <p id="intake_route_mode_hint" class="text-[10px] text-slate-500 mt-1">
+                                    {{ paperlessAllowed ? 'Scan required before saving.' : 'Paperless needs a digitally signed, non-confidential type.' }}
+                                </p>
+                                <InputError class="mt-1" :message="form.errors.route_mode" />
                             </div>
                         </div>
 
@@ -502,8 +545,13 @@ function submitDocument() {
                         </div>
 
                         <div>
-                            <label class="block text-xs font-medium text-slate-700 mb-1">Attached Document (Optional)</label>
-                            <div v-if="form.attached_file" class="flex items-center justify-between p-2 bg-emerald-50 border border-emerald-200 rounded-xl shadow-sm">
+                            <label class="block text-xs font-medium text-slate-700 mb-1">
+                                Attached Document {{ form.route_mode === 'paperless' ? '(Required for paperless)' : '(Optional)' }}
+                            </label>
+                            <p v-if="form.is_confidential" class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                Confidential documents are not uploaded.
+                            </p>
+                            <div v-else-if="form.attached_file" class="flex items-center justify-between p-2 bg-emerald-50 border border-emerald-200 rounded-xl shadow-sm">
                                 <div class="flex items-center gap-2 overflow-hidden pl-1">
                                     <FileUp class="w-4 h-4 text-emerald-600 shrink-0" />
                                     <span class="text-xs font-medium text-emerald-800 truncate">
@@ -594,7 +642,14 @@ function submitDocument() {
                                     </td>
                                     <td class="px-4 py-3">
                                         <p class="font-medium text-slate-800 line-clamp-2" :title="doc.subject_matter">{{ doc.subject_matter }}</p>
-                                        <p class="text-[11px] text-slate-500 mt-0.5">{{ doc.document_type?.document_type }}</p>
+                                        <p class="text-[11px] text-slate-500 mt-0.5 flex flex-wrap items-center gap-1.5">
+                                            {{ doc.document_type?.document_type }}
+                                            <span v-if="doc.is_confidential" class="rounded border border-amber-200 bg-amber-50 px-1.5 text-[10px] font-bold uppercase text-amber-800">Confidential</span>
+                                            <span class="rounded border px-1.5 text-[10px] font-bold uppercase"
+                                                :class="doc.route_mode === 'paperless' ? 'border-sky-200 bg-sky-50 text-sky-800' : 'border-slate-200 bg-slate-100 text-slate-600'">
+                                                {{ doc.route_mode === 'paperless' ? 'Paperless' : 'Paper' }}
+                                            </span>
+                                        </p>
                                     </td>
                                     <td class="px-4 py-3 whitespace-nowrap text-slate-600">{{ doc.source_name }}</td>
                                     <td class="px-4 py-3 whitespace-nowrap">

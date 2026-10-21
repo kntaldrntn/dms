@@ -175,6 +175,18 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                         >
                             <Clock class="mr-1 h-3 w-3" aria-hidden="true" /> Delinquent
                         </span>
+                        <span
+                            v-if="document.is_confidential"
+                            class="inline-flex items-center rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800"
+                        >
+                            Confidential
+                        </span>
+                        <span
+                            class="inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-bold"
+                            :class="document.route_mode === 'paperless' ? 'border-sky-200 bg-sky-50 text-sky-800' : 'border-slate-200 bg-slate-100 text-slate-600'"
+                        >
+                            {{ document.route_mode === 'paperless' ? 'Paperless route' : 'Paper route' }}
+                        </span>
                     </div>
                     <p v-if="!isCompleted && (holders.length || document.department?.name)" class="mt-1 text-sm text-slate-500">
                         Currently with

@@ -135,7 +135,7 @@ Pint on changed test/request OK.
   per office, password `password`. Run `php artisan db:seed` locally to get them (not run yet). Note: re-seeding also
   resets the four executive/admin accounts' passwords to `password` and their office (existing seeder behaviour).
 
-### FGD process transition (started 2026-10-21; Phase 0 done, uncommitted)
+### FGD process transition (started 2026-10-21; Phase 0 committed `8611c98`, Phase 1 done, uncommitted)
 
 Source: Google Slides "Document Management Focus Group Discussion" (presentationId
 `1re2mVrRkyyvndW1gAm3F6DvMXTyrgjYDKDS0AzLelno`), slides 5–9 (workflows, RBAC) and 13–16 (FGD answers).
@@ -160,10 +160,12 @@ category; external clients see the latest status only.
    editable in the registry; 1440-min delinquency default; registries opened to Records (users stay Sys Admin).
    The "category" already exists per document as `transaction_type_id` (Simple 3 / Complex 7 / HT 20 days), so no
    new category column. Document fields and the stage refactor moved to Phases 1–2, where they are first used.
-1. Records intake: document `is_confidential` + `route_mode` (paperless|paper, from the type, override allowed);
-   category defaulted from the type; classification dropdown filtered by type; confidential = AI off + no upload;
-   paperless requires the scan before transmit; transmit online to ADM, OCM or departments. Fresh document data.
-2. Replace the overloaded `requires_signature_from` with an explicit stage per open copy. ADM: ADM staff
+1. ✅ **Done 2026-10-21** — document `is_confidential` + `route_mode`; rulebook enforced server-side and mirrored
+   on the intake/edit forms (see change log). Intake routing (ADM/OCM/direct) and the fresh-data reset were left for
+   Phase 2, because Phase 2 rewrites those flows and the old documents still work under Phase 1.
+2. Reset document data (fresh start, user-approved 2026-10-21; confirm before running). Intake target choice:
+   ADM, OCM or departments directly. Replace the overloaded `requires_signature_from` with an explicit stage per
+   open copy. ADM: ADM staff
    receive (notified) → City Administrator approves (paperless: PNPKI stamp via
    `PdfApprovalStampService`; paper: scan in signed copy) → routes to OCM or departments, AI suggestion pre-filled.
    Retire referral-slip generate/sign.
@@ -272,6 +274,29 @@ revocation). That needs a design before Phase 2.
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-21 — FGD Phase 1: Records intake follows the rulebook (Claude Code)
+- Migration `2026_10_21_010000_add_confidential_and_route_mode_to_documents_table`: `documents.is_confidential`
+  (bool, default false), `documents.route_mode` (paperless|paper, default paper). **Applied locally**; existing
+  documents became non-confidential / paper.
+- `SaveDocumentRequest`: new fields (omitted on update = keep current values); `after()` rulebook checks —
+  confidential ⇒ no scan (new or existing) and no AI routing suggestions; paperless ⇒ type signed `digital`, not
+  confidential, and a scan present (new or existing); classification must be in the type's list when it has one.
+  `DocumentType::allowsPaperless()` holds the rule.
+- **Decision (assumption, confirm):** the confidential tick is available for every type; "may be confidential" on the
+  type only shows a hint. Blocking a tag was judged riskier than allowing it (e.g. AICS vouchers).
+- Forms: new composable `resources/js/composables/useIntakeRulebook.ts` (used by `documents/Index.vue` and
+  `documents/Edit.vue`): category pre-filled from the type's default, classification list filtered, route set to the
+  rulebook default (Records may choose paper), confidential disables AI Autofill and the upload and clears AI results.
+  List and `Show.vue` show Confidential + Paper/Paperless badges. `DocumentController` sends each type's rulebook entry.
+- New `tests/Feature/RecordsIntakeTest.php` (6 tests). Pest 85 passed (907 assertions); Pint ✅ on changed/new PHP;
+  ESLint ✅; Prettier ✅ on the composable; build ✅.
+- **Browser-checked** (records_manager on a temporary `php artisan serve` at 127.0.0.1:8001, nothing submitted):
+  Payroll → Complex + Paper (Paperless disabled) + AICS/Financial only; Communications → Paperless + 17
+  classifications + hint; ticking Confidential → Paper, AI Autofill disabled, upload replaced by a note.
+  Added `.claude/launch.json` (`dms-local`, port 8001) for that preview.
+- Known: picking a type with no default category keeps the previously selected category; the AI analyze endpoint
+  cannot tell confidential intake server-side (the form blocks it; the save rejects AI suggestions).
 
 ### 2026-10-21 — FGD Phase 0: document-type rulebook, 24 h delinquency, registry access (Claude Code)
 - **Why:** the DMS moves to the FGD process (deck + rulebook sheet; see §5 "FGD process transition").

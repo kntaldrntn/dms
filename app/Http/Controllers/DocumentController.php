@@ -47,7 +47,7 @@ class DocumentController extends Controller
                 'error' => session('error')
             ],
             'transactionTypes' => TransactionType::where('state', 1)->get(),
-            'documentTypes' => DocumentType::where('state', 1)->get(),
+            'documentTypes' => $this->intakeDocumentTypes(),
             'classifications' => DocumentClassification::where('state', 1)->get(),
             'deliveryMethods' => DeliveryMethod::where('state', 1)->get(),
             'generatedAccessCode' => strtoupper(Str::random(6)),
@@ -127,7 +127,7 @@ class DocumentController extends Controller
         return Inertia::render('documents/Edit', [
             'document' => $document,
             'transactionTypes' => TransactionType::where('state', 1)->get(),
-            'documentTypes' => DocumentType::where('state', 1)->get(),
+            'documentTypes' => $this->intakeDocumentTypes(),
             'classifications' => DocumentClassification::where('state', 1)->get(),
             'deliveryMethods' => DeliveryMethod::where('state', 1)->get(),
             'departments' => Department::where('state', 1)->get(),
@@ -471,6 +471,13 @@ class DocumentController extends Controller
             ->filter(fn ($suggestion) => in_array($suggestion['department_id'], $activeOfficeIds, true)
                 && ! in_array($suggestion['department_id'], $excludedOfficeIds, true))
             ->unique('department_id')->take(4)->values()->all();
+    }
+
+    /** Active types with their rulebook entry, for the intake/edit forms (category default, route, classifications). */
+    private function intakeDocumentTypes()
+    {
+        return DocumentType::where('state', 1)->with('classifications:id')
+            ->get(['id', 'document_code', 'document_type', 'signature_type', 'may_be_confidential', 'default_transaction_type_id']);
     }
 
     private function ensureActive(Document $document): void

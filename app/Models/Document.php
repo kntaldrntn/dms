@@ -14,7 +14,7 @@ class Document extends Model
 
     protected $fillable = [
         'barcode', 'access_code', 'transaction_type_id', 'document_type_id',
-        'classification_id', 'delivery_method_id', 'department_id',
+        'classification_id', 'is_confidential', 'route_mode', 'delivery_method_id', 'department_id',
         'current_assignee_id', 'requires_signature_from', 'approved_routing_slip',
         'source_type', 'source_location', 'source_name', 'gender',
         'contact_no', 'email', 'subject_matter', 'linked_documents', 'attached_file',
@@ -53,6 +53,7 @@ class Document extends Model
     {
         return [
             'state' => 'integer',
+            'is_confidential' => 'boolean',
             'due_date' => 'datetime',
             'completed_at' => 'datetime',
             'ai_routing_suggestions' => 'array',
