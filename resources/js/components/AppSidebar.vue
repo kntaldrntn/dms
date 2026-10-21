@@ -63,7 +63,7 @@ const mainNavItems = computed<NavItem[]>(() => {
         {
             title: 'Settings',
             icon: Settings,
-            roles: ['system_administrator'],
+            roles: ['system_administrator', 'records_manager'],
             isActive: route().current('departments.*') || 
                       route().current('users.*') ||
                       route().current('document-classifications.*') ||
@@ -102,11 +102,16 @@ const mainNavItems = computed<NavItem[]>(() => {
                     href: route('transaction-types.index'),
                     icon: ArrowLeftRight,
                 },
-                {
-                    title: 'User Management',
-                    href: route('users.index'),
-                    icon: Users,
-                },
+                // User management stays with the System Administrator.
+                ...(userRole.value === 'system_administrator'
+                    ? [
+                          {
+                              title: 'User Management',
+                              href: route('users.index'),
+                              icon: Users,
+                          },
+                      ]
+                    : []),
             ],
         },
     ];

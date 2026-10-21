@@ -11,6 +11,7 @@ const props = defineProps<{
     departments: Array<{ id: number; name: string }>;
     documentTypes: Array<{ id: number; document_code: string }>;
     existingStandards: Array<{ department_id: number; document_type_id: number; allocated_minutes: number }>;
+    defaultMinutes: number;
     flash?: { success?: string; error?: string };
 }>();
 
@@ -46,7 +47,7 @@ onMounted(() => {
             const existing = props.existingStandards.find(
                 s => Number(s.department_id) === Number(dept.id) && Number(s.document_type_id) === Number(doc.id)
             );
-            grid.value[dept.id][doc.id] = existing ? Number(existing.allocated_minutes) : 7200;
+            grid.value[dept.id][doc.id] = existing ? Number(existing.allocated_minutes) : props.defaultMinutes;
         });
     });
 
@@ -100,7 +101,7 @@ function saveStandards() {
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Office Performance Standards Settings</h1>
-                    <p class="text-sm text-slate-500 mt-1">Configure allocated processing minutes per department and document type (Default: 7200 mins = 5 days).</p>
+                    <p class="text-sm text-slate-500 mt-1">Configure allocated processing minutes per department and document type (Default: {{ defaultMinutes }} mins = 24 hours, pending CART calibration).</p>
                 </div>
                 
                 <div class="flex flex-col sm:flex-row items-center gap-3">

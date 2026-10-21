@@ -92,14 +92,18 @@ class Document extends Model
         }
 
         $latestTrail = $this->trails()->where('released_to', $this->department_id)->latest()->first();
-        $startTime = $latestTrail ? ($latestTrail->released_at ?? $latestTrail->created_at) : $this->created_at;
+        // released_at is Manila wall-clock stored as if UTC, while created_at is true UTC
+        // (documentation.md §6 #15), so each is converted to a real Manila time before diffing.
+        $startTime = $latestTrail?->released_at
+            ? Carbon::parse($latestTrail->released_at->format('Y-m-d H:i:s'), 'Asia/Manila')
+            : ($latestTrail?->created_at ?? $this->created_at)->copy()->setTimezone('Asia/Manila');
 
         $standard = \App\Models\PerformanceStandard::where('department_id', $this->department_id)
             ->where('document_type_id', $this->document_type_id)
             ->first();
 
-        $allocatedMinutes = $standard ? $standard->allocated_minutes : 7200;
-        $minutesSpent = Carbon::parse($startTime, 'Asia/Manila')->diffInMinutes(Carbon::now('Asia/Manila'), true);
+        $allocatedMinutes = $standard ? $standard->allocated_minutes : \App\Models\PerformanceStandard::DEFAULT_ALLOCATED_MINUTES;
+        $minutesSpent = $startTime->diffInMinutes(Carbon::now('Asia/Manila'), true);
 
         return $minutesSpent > $allocatedMinutes;
     }

@@ -4,7 +4,7 @@
 > handoff, and before `/compact`. Mark facts as **verified** only with evidence.
 > Feature-level health is tracked separately by the user in `status.md`.
 
-Last updated: 2026-10-14 (per-office seed accounts; referral slip AI pre-fill fix; earlier: multi-office custody, holders, delinquency scope, bell)
+Last updated: 2026-10-21 (FGD transition plan + Phase 0 rulebook; earlier: per-office seed accounts, referral slip AI pre-fill fix)
 
 ---
 
@@ -135,6 +135,85 @@ Pint on changed test/request OK.
   per office, password `password`. Run `php artisan db:seed` locally to get them (not run yet). Note: re-seeding also
   resets the four executive/admin accounts' passwords to `password` and their office (existing seeder behaviour).
 
+### FGD process transition (started 2026-10-21; Phase 0 done, uncommitted)
+
+Source: Google Slides "Document Management Focus Group Discussion" (presentationId
+`1re2mVrRkyyvndW1gAm3F6DvMXTyrgjYDKDS0AzLelno`), slides 5–9 (workflows, RBAC) and 13–16 (FGD answers).
+Checkpoint before the transition: commit `8f59dea` (Pest 74 passed, 816 assertions).
+
+**User decisions (2026-10-21):** City Administrator gives a single approval (no slip generate + ADM Dept Head
+signature); paperless vs paper route comes from the Document Type (Records may override); start with fresh
+document data (keep offices, users, registries); no migration of in-flight documents.
+
+**FGD decisions already in the deck:** 24 h delinquency per office for now (CC timeline review later, by CART);
+delayed = end-to-end beyond the category limit (Simple 3 / Complex 7 / Highly Technical 20 days, RA 11032);
+ADM monitors and tags delinquency; confidential documents are tagged at intake, get no AI assist and no upload;
+ADM/OCM route directly to the concerned departments (not back to Records); supervisory level can change the
+category; external clients see the latest status only.
+
+**Keep as-is:** `DocumentWorkflow` (mutate/locks/`workflow_version`/release/receive), multi-office copies and
+`holders`, trail table, notification bell, intake AI + barcode/OCR, `PdfApprovalStampService`, registries.
+
+**Phases** (each a separate, tested change):
+0. ✅ **Done 2026-10-21** — Document Type rulebook (`signature_type`, `may_be_confidential`,
+   `default_transaction_type_id`, `rulebook_remarks`) + classification-per-type pivot, seeded from the sheet and
+   editable in the registry; 1440-min delinquency default; registries opened to Records (users stay Sys Admin).
+   The "category" already exists per document as `transaction_type_id` (Simple 3 / Complex 7 / HT 20 days), so no
+   new category column. Document fields and the stage refactor moved to Phases 1–2, where they are first used.
+1. Records intake: document `is_confidential` + `route_mode` (paperless|paper, from the type, override allowed);
+   category defaulted from the type; classification dropdown filtered by type; confidential = AI off + no upload;
+   paperless requires the scan before transmit; transmit online to ADM, OCM or departments. Fresh document data.
+2. Replace the overloaded `requires_signature_from` with an explicit stage per open copy. ADM: ADM staff
+   receive (notified) → City Administrator approves (paperless: PNPKI stamp via
+   `PdfApprovalStampService`; paper: scan in signed copy) → routes to OCM or departments, AI suggestion pre-filled.
+   Retire referral-slip generate/sign.
+3. OCM: Mayor approves (exists) → routes directly to departments.
+4. Receiving office: Receiving Officer receives → Dept Head action if needed (PNPKI or wet sign + upload) →
+   final action + remarks → end or route to the next office.
+5. Monitoring: 24 h delinquency per open copy (fixes known issue #17); delayed by category; ADM views all.
+6. Later, pending FGD answers: client status lookup, email/SMS alerts, PDF/spreadsheet reports, office-scoped
+   visibility (security #4), classification-per-type filtering.
+
+**Answers (user, 2026-10-21):**
+- **Delinquency:** 1440 minutes (24 h, counted per minute) per office for now; default replaces the current
+  7200-minute fallback in `Document::is_delinquent`. Per-office/type calibration stays in the `performance_standards`
+  registry, pending CART's review of the Citizen's Charter.
+- **RBAC:** follow deck slide 9 (the version in the memo). Matrix read from the slide image:
+  | Capability | Sys Admin | Records Section | Supervisory | Workstation | External client |
+  | --- | --- | --- | --- | --- | --- |
+  | User management | ✔ | | | | |
+  | System settings & registries | ✔ | ✔ | | | |
+  | Document registration (barcode, scan, AI form) | ✔ | ✔ | | | |
+  | Dashboard | all offices | all offices | all offices | own department | |
+  | View transactions | all | all | all | own department | |
+  | Transact | any document | any document | edit only if endorsed to them | own department | |
+  | Referral slips & OCM approvals | ✔ | ✔ | sign / approve when endorsed | | |
+  | Track document status | | | | | ✔ (latest status only) |
+  Assumed mapping (to confirm): Supervisory = `city_administrator`, `city_mayor`, `department_head`;
+  Workstation = `staff`; Records Section = users in the `REC` office (incl. `records_manager`); External client = no
+  account (barcode + access code lookup). Supervisory also may adjust the category (FGD slide 14).
+- **Document-type rulebook:** Google Sheet "Document Management System Sheets"
+  (`1monsI2DhgNCQoWd9Kuam-KBMM5Es3XJAyfjEuFJ2OfQ`), tab *Rulebook* (ADM response) — Route = Paperless only when
+  Signature = Digital **and** Confidential = No, else Paper. Current answers: Digital = Communications, Project
+  Proposal (both marked Confidential = Yes, so both still Paper); Handwritten = the other 10 except Permits
+  (blank, "to be consulted"). Category per type: Simple = AOC, AIR/RIS, BAC Resolution, OBR, Permits, PO, PR;
+  Complex = Payroll; Highly Technical = IPW ("with extension"); varies by content = Communications,
+  Disbursement Voucher (Simple for Petty Cash/AICS, Complex for procurement), Project Proposal (Complex or HT).
+  Confidential is blank for OBR, Payroll, PO, PR, Permits. Tab *Classifications* maps the 18 classifications to
+  types (Communications carries 17; Financial applies to 11 types; Special Mayor's Permit → Permits only).
+- **PNPKI signatories:** per slide 7 (and slide 3): the Department Head signs digitally with PNPKI unless the
+  document needs a wet signature; slide 3 also lists the City Administrator and the City Mayor.
+
+**Design consequences:** category is a per-document field defaulted from the type (blank or "varies" types need
+Records/AI to choose; Supervisory can change it). Classification dropdown is filtered by the type (new pivot
+table). Rulebook values are seeded but editable in the Document Types registry, since several are still blank.
+
+**Still open:** (a) Does "Confidential = Yes" on a type mean *always* confidential or *may be* confidential
+(ticked per document)? As written, every type is Paper today. (b) Confirm the role mapping above.
+**Risk:** the stamp service signs with one certificate from `config/digital-certificate.php`, but PNPKI for the
+City Administrator, Mayor and every Department Head needs a certificate per signer (storage, passwords,
+revocation). That needs a design before Phase 2.
+
 ## 6. Known issues, risks & technical debt
 
 **Security (high)**
@@ -193,6 +272,30 @@ Pint on changed test/request OK.
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-21 — FGD Phase 0: document-type rulebook, 24 h delinquency, registry access (Claude Code)
+- **Why:** the DMS moves to the FGD process (deck + rulebook sheet; see §5 "FGD process transition").
+- Migration `2026_10_21_000000_add_rulebook_columns_to_document_types_table`: `document_types.signature_type`
+  (digital|handwritten, nullable), `may_be_confidential`, `default_transaction_type_id` (FK, null on delete),
+  `rulebook_remarks`; pivot `document_classification_document_type` (FK names shortened: MySQL's 64-char limit
+  broke the first local run, which left a partial schema that was removed before re-running); default
+  `performance_standards.allocated_minutes` 7200 → 1440. **Applied locally**; rollback + re-apply verified on MySQL.
+- New `DocumentTypeRulebookSeeder` (called by `DatabaseSeeder`) with the sheet's answers; run locally (32 links).
+- `DocumentType` relations `classifications()`, `defaultTransactionType()`; new `SaveDocumentTypeRequest`;
+  `DocumentTypeController` saves + syncs classifications in a transaction and passes category/classification lists.
+- `document-types/Index.vue`: Signature, May Be Confidential, Default Category, Route (auto), Classifications
+  columns; modal edits them (labelled inputs, `InputError`, dialog `aria-*`, Esc closes).
+- `PerformanceStandard::DEFAULT_ALLOCATED_MINUTES = 1440` used by `Document::is_delinquent` and the standards grid
+  (the grid used to pre-fill 7200 and would save it on submit).
+- **Bug fixed:** `is_delinquent` read Manila wall-clock `released_at` as UTC (8 h error; known issue #15). It now
+  converts each start time to real Manila time. Found by the new 24 h test.
+- Routes: `users` = `auth` + `role:system_administrator`; other registries = `auth` +
+  `role:system_administrator,records_manager` (admin groups previously had no `auth`). Sidebar shows Settings to
+  Records Manager without User Management.
+- New `tests/Feature/DocumentTypeRulebookTest.php` (access matrix, save/sync, validation, seeded rulebook,
+  24 h delinquency). Pest 79 passed (863 assertions); Pint ✅ on new files; ESLint ✅; build ✅. Pre-existing Pint
+  issues remain in `Document.php`, `PerformanceStandard.php`, `PerformanceStandardController.php`, `routes/web.php`
+  (not reformatted to keep the diff small). Not viewed in a browser.
 
 ### 2026-10-14 — Government-style sign-in page (Claude Code)
 - `AuthLayout.vue` rewritten (used by every auth page): identity bar (Republic of the Philippines / City Government),

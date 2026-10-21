@@ -63,10 +63,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', DashboardController::class)->name('dashboard');
 });
 
-// ADMIN ONLY REGISTRIES
-Route::middleware(['role:system_administrator'])->group(function () {
-    Route::resource('departments', DepartmentController::class)->only(['index', 'store', 'update', 'destroy']);
+// User management: System Administrator only (FGD access matrix, slide 9).
+Route::middleware(['auth', 'role:system_administrator'])->group(function () {
     Route::resource('users', UserController::class)->only(['index', 'store', 'update', 'destroy']);
+});
+
+// System settings & registries: System Administrator and Records Section (slide 9).
+Route::middleware(['auth', 'role:system_administrator,records_manager'])->group(function () {
+    Route::resource('departments', DepartmentController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::resource('document-classifications', DocumentClassificationController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::resource('document-types', DocumentTypeController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::resource('delivery-methods', DeliveryMethodController::class)->only(['index', 'store', 'update', 'destroy']);

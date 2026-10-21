@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DeleteConfirmationModal from '@/components/DeleteConfirmationModal.vue';
+import InputError from '@/components/InputError.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router, useForm } from '@inertiajs/vue3';
@@ -8,14 +9,26 @@ import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
 import { ref, watch } from 'vue';
 
+type SignatureType = 'digital' | 'handwritten' | null;
+
+interface DocumentTypeRow {
+    id: number;
+    document_code: string;
+    document_type: string;
+    signature_type: SignatureType;
+    may_be_confidential: boolean;
+    default_transaction_type_id: number | null;
+    rulebook_remarks: string | null;
+    default_transaction_type: { id: number; name: string } | null;
+    classifications: Array<{ id: number; name: string }>;
+    state: number;
+}
+
 const props = defineProps<{
+    transactionTypes: Array<{ id: number; name: string }>;
+    classifications: Array<{ id: number; name: string }>;
     documenttypes: {
-        data: Array<{
-            id: number;
-            document_code: string;
-            document_type: string;
-            state: number;
-        }>;
+        data: DocumentTypeRow[];
         current_page: number;
         last_page: number;
         per_page: number;
@@ -129,25 +142,55 @@ const itemToDeleteName = ref('');
 const form = useForm({
     document_code: '',
     document_type: '',
+    signature_type: null as SignatureType,
+    may_be_confidential: false,
+    default_transaction_type_id: null as number | null,
+    rulebook_remarks: '',
+    classification_ids: [] as number[],
     state: 1, // Default to Active
 });
+
+// Rulebook: paperless only when the signature is digital and the document is not tagged confidential.
+function routeLabel(docType: DocumentTypeRow): string {
+    if (docType.signature_type !== 'digital') return 'Paper';
+    return docType.may_be_confidential ? 'Paperless unless confidential' : 'Paperless';
+}
+
+function signatureLabel(signature: SignatureType): string {
+    if (signature === 'digital') return 'Digital';
+    if (signature === 'handwritten') return 'Handwritten';
+    return 'Not set';
+}
+
+function rowPayload(docType: DocumentTypeRow, state: number) {
+    return {
+        document_code: docType.document_code,
+        document_type: docType.document_type,
+        signature_type: docType.signature_type,
+        may_be_confidential: docType.may_be_confidential,
+        default_transaction_type_id: docType.default_transaction_type_id,
+        rulebook_remarks: docType.rulebook_remarks ?? '',
+        classification_ids: docType.classifications.map((classification) => classification.id),
+        state,
+    };
+}
 
 // Open modal for new document type
 function openAddDialog() {
     isEdit.value = false;
     editingId.value = null;
     form.reset();
-    form.state = 1; 
+    form.clearErrors();
+    form.state = 1;
     showDialog.value = true;
 }
 
 // Open modal for editing
-function openEditDialog(docType: any) {
+function openEditDialog(docType: DocumentTypeRow) {
     isEdit.value = true;
     editingId.value = docType.id;
-    form.document_code = docType.document_code;
-    form.document_type = docType.document_type;
-    form.state = docType.state;
+    form.clearErrors();
+    Object.assign(form, rowPayload(docType, docType.state));
     showDialog.value = true;
 }
 
@@ -159,12 +202,8 @@ function openDeleteModal(docType: { id: number; document_type: string }) {
 }
 
 // Quick Reactivate Action
-function reactivateDocumentType(docType: any) {
-    router.put(route('document-types.update', docType.id), {
-        document_type: docType.document_type,
-        document_code: docType.document_code,
-        state: 1 // Force state back to 1
-    }, {
+function reactivateDocumentType(docType: DocumentTypeRow) {
+    router.put(route('document-types.update', docType.id), rowPayload(docType, 1), {
         preserveScroll: true,
     });
 }
@@ -200,7 +239,7 @@ function submitForm() {
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 class="text-2xl font-bold text-slate-800 tracking-tight">System Document Types</h1>
-                    <p class="text-sm text-slate-500 mt-1">Manage global document categories and their routing codes.</p>
+                    <p class="text-sm text-slate-500 mt-1">Manage document types and their rulebook: signature, confidentiality, default category and allowed classifications.</p>
                 </div>
                 
                 <div class="flex flex-col sm:flex-row items-center gap-3">
@@ -243,6 +282,11 @@ function submitForm() {
                                 <th class="px-4 py-2.5 font-bold w-24">ID</th>
                                 <th class="px-4 py-2.5 font-bold">Document Type</th>
                                 <th class="px-4 py-2.5 font-bold">Code</th>
+                                <th class="px-4 py-2.5 font-bold">Signature</th>
+                                <th class="px-4 py-2.5 font-bold">May Be Confidential</th>
+                                <th class="px-4 py-2.5 font-bold">Default Category</th>
+                                <th class="px-4 py-2.5 font-bold">Route</th>
+                                <th class="px-4 py-2.5 font-bold">Classifications</th>
                                 <th class="px-4 py-2.5 font-bold w-32">Status</th>
                                 <th class="px-4 py-2.5 text-center font-bold w-40">Actions</th>
                             </tr>
@@ -256,6 +300,20 @@ function submitForm() {
                                 <td class="px-4 py-2">
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-sm font-medium bg-slate-100 text-slate-700 border border-slate-200">
                                         {{ docType.document_code || 'N/A' }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-2" :class="{ 'text-slate-400 italic': !docType.signature_type }">
+                                    {{ signatureLabel(docType.signature_type) }}
+                                </td>
+                                <td class="px-4 py-2">{{ docType.may_be_confidential ? 'Yes' : 'No' }}</td>
+                                <td class="px-4 py-2">
+                                    <span v-if="docType.default_transaction_type">{{ docType.default_transaction_type.name }}</span>
+                                    <span v-else class="text-slate-400 italic" :title="docType.rulebook_remarks ?? undefined">Chosen per document</span>
+                                </td>
+                                <td class="px-4 py-2">{{ routeLabel(docType) }}</td>
+                                <td class="px-4 py-2">
+                                    <span :title="docType.classifications.map((classification) => classification.name).join(', ')">
+                                        {{ docType.classifications.length }}
                                     </span>
                                 </td>
                                 <!-- Status Column -->
@@ -274,8 +332,9 @@ function submitForm() {
                                             class="rounded-md bg-slate-50 p-1.5 text-slate-600 transition hover:bg-slate-100 border border-slate-200"
                                             @click="openEditDialog(docType)"
                                             title="Edit"
+                                            :aria-label="`Edit ${docType.document_type}`"
                                         >
-                                            <Pencil class="h-4 w-4" />
+                                            <Pencil class="h-4 w-4" aria-hidden="true" />
                                         </button>
                                         
                                         <!-- Delete (Deactivate) Button -->
@@ -358,8 +417,13 @@ function submitForm() {
 
             <!-- Form Modal -->
             <Transition name="fade">
-                <div v-if="showDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4">
-                    <div class="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-xl border border-slate-200">
+                <div v-if="showDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4" @keydown.esc="showDialog = false">
+                    <div
+                        class="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl border border-slate-200"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="document-type-dialog-title"
+                    >
                         
                         <!-- Standardized Close Button -->
                         <button
@@ -370,7 +434,7 @@ function submitForm() {
                             <X class="h-5 w-5" />
                         </button>
 
-                        <h2 class="mb-6 pr-8 text-lg font-bold text-slate-800 tracking-tight">
+                        <h2 id="document-type-dialog-title" class="mb-6 pr-8 text-lg font-bold text-slate-800 tracking-tight">
                             {{ isEdit ? 'Edit Document Type' : 'Create Document Type' }}
                         </h2>
                         
@@ -385,7 +449,7 @@ function submitForm() {
                                     required
                                     placeholder="e.g. Purchase Request"
                                 />
-                                <p v-if="form.errors.document_type" class="mt-1 text-xs text-red-500">{{ form.errors.document_type }}</p>
+                                <InputError class="mt-1" :message="form.errors.document_type" />
                             </div>
                             <div>
                                 <label class="mb-1.5 block text-sm font-medium text-slate-700" for="document_code">Type Code</label>
@@ -397,9 +461,89 @@ function submitForm() {
                                     required
                                     placeholder="e.g. PR"
                                 />
-                                <p v-if="form.errors.document_code" class="mt-1 text-xs text-red-500">{{ form.errors.document_code }}</p>
+                                <InputError class="mt-1" :message="form.errors.document_code" />
                             </div>
-                            
+
+                            <div class="grid gap-4 sm:grid-cols-2">
+                                <div>
+                                    <label class="mb-1.5 block text-sm font-medium text-slate-700" for="signature_type">Signature</label>
+                                    <select
+                                        v-model="form.signature_type"
+                                        id="signature_type"
+                                        class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm"
+                                    >
+                                        <option :value="null">Not set yet</option>
+                                        <option value="digital">Digital (PNPKI)</option>
+                                        <option value="handwritten">Handwritten (wet signature)</option>
+                                    </select>
+                                    <InputError class="mt-1" :message="form.errors.signature_type" />
+                                </div>
+                                <div>
+                                    <label class="mb-1.5 block text-sm font-medium text-slate-700" for="default_transaction_type_id">Default Category</label>
+                                    <select
+                                        v-model="form.default_transaction_type_id"
+                                        id="default_transaction_type_id"
+                                        class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm"
+                                    >
+                                        <option :value="null">Chosen per document</option>
+                                        <option v-for="transactionType in transactionTypes" :key="transactionType.id" :value="transactionType.id">
+                                            {{ transactionType.name }}
+                                        </option>
+                                    </select>
+                                    <InputError class="mt-1" :message="form.errors.default_transaction_type_id" />
+                                </div>
+                            </div>
+
+                            <div class="flex items-start gap-2">
+                                <input
+                                    v-model="form.may_be_confidential"
+                                    id="may_be_confidential"
+                                    type="checkbox"
+                                    aria-describedby="may_be_confidential_hint"
+                                    class="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                />
+                                <div>
+                                    <label class="text-sm font-medium text-slate-700" for="may_be_confidential">May be confidential</label>
+                                    <p id="may_be_confidential_hint" class="text-xs text-slate-500">
+                                        Records can tag a document of this type as confidential at intake (no AI assist, no upload, paper route).
+                                    </p>
+                                </div>
+                            </div>
+                            <InputError :message="form.errors.may_be_confidential" />
+
+                            <div>
+                                <label class="mb-1.5 block text-sm font-medium text-slate-700" for="rulebook_remarks">Rulebook Remarks</label>
+                                <input
+                                    v-model="form.rulebook_remarks"
+                                    id="rulebook_remarks"
+                                    type="text"
+                                    maxlength="255"
+                                    class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 placeholder-slate-400 shadow-sm"
+                                    placeholder="e.g. Simple for Petty Cash, Complex for procurement"
+                                />
+                                <InputError class="mt-1" :message="form.errors.rulebook_remarks" />
+                            </div>
+
+                            <fieldset>
+                                <legend class="mb-1.5 text-sm font-medium text-slate-700">Allowed Classifications</legend>
+                                <div class="grid max-h-48 gap-1.5 overflow-y-auto rounded-xl border border-slate-200 p-3 sm:grid-cols-2">
+                                    <label
+                                        v-for="classification in classifications"
+                                        :key="classification.id"
+                                        class="flex items-center gap-2 text-sm text-slate-700"
+                                    >
+                                        <input
+                                            v-model="form.classification_ids"
+                                            type="checkbox"
+                                            :value="classification.id"
+                                            class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                        />
+                                        {{ classification.name }}
+                                    </label>
+                                </div>
+                                <InputError class="mt-1" :message="form.errors.classification_ids" />
+                            </fieldset>
+
                             <div class="pt-3 flex justify-end gap-3">
                                 <button
                                     type="button"

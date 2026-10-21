@@ -27,6 +27,7 @@ class PerformanceStandardController extends Controller
             'departments' => $departments,
             'documentTypes' => $documentTypes,
             'existingStandards' => $standards,
+            'defaultMinutes' => PerformanceStandard::DEFAULT_ALLOCATED_MINUTES,
         ]);
     }
 

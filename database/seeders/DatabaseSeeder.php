@@ -219,5 +219,8 @@ class DatabaseSeeder extends Seeder
                 $data
             );
         }
+
+        // Needs document types, transaction types and classifications to exist first.
+        $this->call(DocumentTypeRulebookSeeder::class);
     }
 }
