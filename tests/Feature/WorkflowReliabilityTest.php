@@ -454,62 +454,55 @@ test('Records cannot dispatch a document while City Administrator review is pend
     $this->assertDatabaseCount('document_trails', 1);
 });
 
-test('a multi-office dispatch gives every office its own actionable copy', function () {
+test('a multi-office dispatch makes one office Primary and gives the others view-only copies', function () {
     $second = Department::create(['code' => 'SEC', 'name' => 'Second Office', 'state' => 1]);
     $third = Department::create(['code' => 'THD', 'name' => 'Third Office', 'state' => 1]);
     $secondStaff = User::factory()->create(['department_id' => $second->id]);
     $thirdStaff = User::factory()->create(['department_id' => $third->id]);
 
     $this->actingAs($this->records)->postJson(route('documents.route', $this->document), [
-        'workflow_version' => 0, 'routed_to' => [$this->target->id, $second->id, $third->id],
+        'workflow_version' => 0, 'routed_to' => [$this->target->id, $second->id, $third->id], 'primary_office_id' => $second->id,
     ])->assertRedirect()->assertSessionHasNoErrors();
 
     // The dispatch release records every receiving office, and the trail table receives all of them.
     expect($this->trail->fresh()->released_to_offices)->toBe([$this->target->id, $second->id, $third->id]);
     $this->actingAs($this->records)->get(route('documents.show', $this->document))
-        ->assertInertia(fn (Assert $page) => $page->where('trails.0.released_to_list.2.code', 'THD'));
+        ->assertInertia(fn (Assert $page) => $page->where('trails.0.released_to_list.2.code', 'THD')
+            ->where('holders.0.code', 'SEC')->where('holders.0.pivot.copy_role', 'primary')->has('holders', 3));
 
-    // department_id keeps one primary office; `holders` lists every office holding a copy.
-    expect($this->document->fresh()->department_id)->toBe($this->target->id);
-    expect($this->document->fresh()->holders->pluck('code')->all())->toEqualCanonicalizing(['DST', 'SEC', 'THD']);
-    $this->get(route('documents.index'))->assertInertia(fn (Assert $page) => $page->has('documents.data.0.holders', 3));
-
-    foreach ([$this->staff, $secondStaff, $thirdStaff] as $user) {
+    // department_id is the Primary office; only it has the document in its inbox.
+    expect($this->document->fresh()->department_id)->toBe($second->id);
+    $this->actingAs($secondStaff)->get(route('transactions.inbox'))
+        ->assertInertia(fn (Assert $page) => $page->has('documents.data', 1)->has('copies.data', 0));
+    foreach ([$this->staff, $thirdStaff] as $user) {
         $this->actingAs($user)->get(route('transactions.inbox'))
-            ->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
+            ->assertInertia(fn (Assert $page) => $page->has('documents.data', 0)->has('copies.data', 1)->where('copies.data.0.copy_received', false));
     }
 
-    // The second office ends its copy using the version it loaded; the others still hold theirs.
-    $this->actingAs($secondStaff)->postJson(route('transactions.process', $this->document), [
+    // A copy office cannot act on the document.
+    $this->actingAs($thirdStaff)->postJson(route('transactions.process', $this->document), [
         'workflow_version' => 1, 'action' => 'end', 'remarks' => 'Noted',
-    ])->assertRedirect()->assertSessionHasNoErrors();
-    expect($this->document->fresh()->status)->not->toBe('Completed');
-    $this->actingAs($secondStaff)->get(route('transactions.inbox'))
-        ->assertInertia(fn (Assert $page) => $page->has('documents.data', 0));
-    $this->postJson(route('transactions.process', $this->document), [
-        'workflow_version' => 2, 'action' => 'end', 'remarks' => 'Again',
     ])->assertForbidden();
 
-    // The third office routes its copy onward, but not to an office that already holds one.
-    $this->actingAs($thirdStaff)->postJson(route('transactions.process', $this->document), [
-        'workflow_version' => 1, 'action' => 'route', 'remarks' => 'For action', 'routed_to' => $this->target->id,
-    ])->assertUnprocessable()->assertJsonValidationErrors('routed_to');
-    $this->postJson(route('transactions.process', $this->document), [
-        'workflow_version' => 1, 'action' => 'route', 'remarks' => 'For action', 'routed_to' => $second->id,
-    ])->assertRedirect()->assertSessionHasNoErrors();
-    $this->actingAs($secondStaff)->get(route('transactions.inbox'))
-        ->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
-
-    // Completed only after the last open copy ends.
-    $this->actingAs($this->staff)->postJson(route('transactions.process', $this->document), [
-        'workflow_version' => 0, 'action' => 'end', 'remarks' => 'Done',
-    ])->assertRedirect()->assertSessionHasNoErrors();
-    expect($this->document->fresh()->status)->not->toBe('Completed');
+    // The Primary office routes it on: the target becomes Primary and an extra office gets a copy.
+    $fourth = Department::create(['code' => 'FTH', 'name' => 'Fourth Office', 'state' => 1]);
     $this->actingAs($secondStaff)->postJson(route('transactions.process', $this->document), [
-        'workflow_version' => 0, 'action' => 'end', 'remarks' => 'Done',
+        'workflow_version' => 1, 'action' => 'route', 'remarks' => 'For action', 'routed_to' => [$third->id, $fourth->id], 'primary_office_id' => $third->id,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    expect($this->document->fresh()->department_id)->toBe($third->id);
+    // Third office held a copy; that copy closed when it became Primary.
+    expect(DocumentTrail::where('document_id', $this->document->id)->where('department_id', $third->id)->whereNull('released_at')->pluck('copy_role')->all())->toBe(['primary']);
+    $this->actingAs($thirdStaff)->get(route('transactions.inbox'))
+        ->assertInertia(fn (Assert $page) => $page->has('documents.data', 1)->has('copies.data', 0));
+
+    // Ending the transaction completes the document and closes every copy.
+    $this->postJson(route('transactions.process', $this->document), [
+        'workflow_version' => 2, 'action' => 'end', 'remarks' => 'Done',
     ])->assertRedirect()->assertSessionHasNoErrors();
     expect($this->document->fresh()->status)->toBe('Completed');
     expect(DocumentTrail::where('document_id', $this->document->id)->whereNull('released_at')->count())->toBe(0);
+    // Copies that were never received keep no receiver.
+    expect(DocumentTrail::where('document_id', $this->document->id)->where('copy_role', 'copy')->where('released_action', 'Closed with document')->whereNull('received_by')->count())->toBe(2);
 
     $this->actingAs($this->records)->get(route('documents.show', $this->document))
         ->assertInertia(fn (Assert $page) => $page->has('holders', 0));

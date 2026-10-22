@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Document;
-use App\Models\Department;
+use App\Http\Requests\ChangePrimaryOfficeRequest;
 use App\Http\Requests\ProcessDocumentRequest;
+use App\Http\Requests\ReceiveCopyRequest;
+use App\Models\Department;
+use App\Models\Document;
+use App\Models\DocumentTrail;
 use App\Services\TransactionService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -40,8 +43,19 @@ class TransactionController extends Controller
             ? $inbox()->whereKey($request->integer('document'))->first()
             : null;
 
+        // View-only copies sent to this office: it can receive and view them but not act on them.
+        $office = (int) $request->user()->department_id;
+        $copies = Document::visibleTo($request->user())->copiedTo($office)
+            ->where('status', '!=', 'Completed')
+            ->with(['documentType:id,document_type', 'department:id,code,name'])
+            ->withExists(['trails as copy_received' => fn ($trails) => $trails->where('department_id', $office)
+                ->where('copy_role', DocumentTrail::COPY)->whereNull('released_at')->whereNotNull('received_by')])
+            ->latest()->paginate(10, ['*'], 'copies_page')->withQueryString();
+
         return Inertia::render('transactions/Index', [
             'documents' => $documents,
+            'copies' => $copies,
+            'focusCopy' => $request->integer('copy') ?: null,
             // Exclude the current department from the route list so they don't route it to themselves
             'departments' => Department::where('state', 1)->where('id', '!=', $request->user()->department_id)->get(),
             'filters' => $request->only(['barcode']),
@@ -57,5 +71,19 @@ class TransactionController extends Controller
         $transactions->process($document, $request->user(), $request->validated());
 
         return redirect()->back()->with('success', 'Transaction successfully processed.');
+    }
+
+    public function receiveCopy(ReceiveCopyRequest $request, Document $document, TransactionService $transactions)
+    {
+        $transactions->receiveCopy($document, $request->user());
+
+        return redirect()->back()->with('success', 'Copy received.');
+    }
+
+    public function changePrimary(ChangePrimaryOfficeRequest $request, Document $document, TransactionService $transactions)
+    {
+        $transactions->changePrimary($document, $request->user(), $request->integer('primary_office_id'));
+
+        return redirect()->back()->with('success', 'Primary office changed.');
     }
 }

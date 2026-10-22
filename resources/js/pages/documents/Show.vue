@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head, Link } from '@inertiajs/vue3';
+import InputError from '@/components/InputError.vue';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import { AlertCircle, ArrowLeft, ArrowLeftRight, CheckCircle2, ChevronRight, Clock, FileSignature, FileText, FileUp, History, Link2, MapPin, Paperclip, ShieldCheck, UserRound } from 'lucide-vue-next';
 import { computed } from 'vue';
 
@@ -9,8 +10,19 @@ const props = defineProps<{
     document: any;
     trails: any[];
     slipTargets: Array<{ id: number; code: string; name: string }>;
-    holders: Array<{ id: number; code: string; name: string }>;
+    // Primary office first; the others hold view-only copies.
+    holders: Array<{ id: number; code: string; name: string; pivot?: { copy_role: 'primary' | 'copy' } }>;
+    canChangePrimary: boolean;
+    offices?: Array<{ id: number; code: string; name: string }>;
 }>();
+
+const primaryHolder = computed(() => props.holders.find((office) => office.pivot?.copy_role === 'primary') ?? null);
+const copyHolders = computed(() => props.holders.filter((office) => office.pivot?.copy_role === 'copy'));
+
+const primaryForm = useForm({ primary_office_id: '' as number | '' });
+function changePrimary() {
+    primaryForm.post(route('documents.primary-office', props.document.id), { preserveScroll: true, onSuccess: () => primaryForm.reset() });
+}
 
 // `open` = this office still holds its copy (trail received but not yet released).
 type Office = { code: string; name: string; open?: boolean };
@@ -190,10 +202,37 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                     </div>
                     <p v-if="!isCompleted && (holders.length || document.department?.name)" class="mt-1 text-sm text-slate-500">
                         Currently with
-                        <span class="font-semibold text-slate-700">
-                            {{ holders.length ? holders.map((office) => office.name).join(', ') : document.department.name }}
-                        </span>
+                        <span class="font-semibold text-slate-700">{{ primaryHolder?.name ?? document.department?.name }}</span>
+                        <span v-if="primaryHolder" class="ml-1 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">Primary</span>
+                        <template v-if="copyHolders.length">
+                            <span class="mx-1">·</span> View-only copies:
+                            <span class="font-semibold text-slate-700">{{ copyHolders.map((office) => office.code || office.name).join(', ') }}</span>
+                        </template>
                     </p>
+                    <form v-if="!isCompleted && canChangePrimary && offices" class="mt-2 flex flex-wrap items-center gap-2" @submit.prevent="changePrimary">
+                        <label for="primary_office_id" class="text-xs font-medium text-slate-600">Change Primary office</label>
+                        <select
+                            id="primary_office_id"
+                            v-model="primaryForm.primary_office_id"
+                            aria-describedby="primary_office_hint"
+                            class="rounded-lg border border-slate-300 px-2 py-1 text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                            required
+                        >
+                            <option value="" disabled>Select office...</option>
+                            <option v-for="office in offices.filter((o) => o.id !== primaryHolder?.id)" :key="office.id" :value="office.id">
+                                {{ office.code }}: {{ office.name }}
+                            </option>
+                        </select>
+                        <button
+                            type="submit"
+                            :disabled="primaryForm.processing || !primaryForm.primary_office_id"
+                            class="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
+                        >
+                            Change
+                        </button>
+                        <span id="primary_office_hint" class="text-[11px] text-slate-500">The current Primary keeps a view-only copy.</span>
+                        <InputError class="w-full" :message="primaryForm.errors.primary_office_id" />
+                    </form>
                 </div>
 
                 <Link

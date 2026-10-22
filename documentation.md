@@ -135,7 +135,7 @@ Pint on changed test/request OK.
   per office, password `password`. Run `php artisan db:seed` locally to get them (not run yet). Note: re-seeding also
   resets the four executive/admin accounts' passwords to `password` and their office (existing seeder behaviour).
 
-### FGD process transition (started 2026-10-21; Phase 0 committed `8611c98`, Phase 1 done, uncommitted)
+### FGD process transition (started 2026-10-21; Phases 0–1 committed and pushed to `origin/main` at `79f08d8`; next: Phase 2)
 
 Source: Google Slides "Document Management Focus Group Discussion" (presentationId
 `1re2mVrRkyyvndW1gAm3F6DvMXTyrgjYDKDS0AzLelno`), slides 5–9 (workflows, RBAC) and 13–16 (FGD answers).
@@ -206,6 +206,39 @@ category; external clients see the latest status only.
 - **PNPKI signatories:** per slide 7 (and slide 3): the Department Head signs digitally with PNPKI unless the
   document needs a wet signature; slide 3 also lists the City Administrator and the City Mayor.
 
+- **Client tracking (FGD slide 13, 2026-10-22):** clients see only the latest status of their document, never the
+  full trail. For confidential documents clients likewise see only the latest status, and only Records has access to
+  the document's data. (Open: whether "only Records" also limits what receiving offices can see inside the DMS.)
+- **Performance tracking (slide 13):** city-level records and reports for the Supervisory Level, Records and the
+  System Administrator only; every other department sees and reports on its own department's data only.
+
+**Built 2026-10-22 (uncommitted; migration not yet applied locally because MySQL was not running):
+Primary office + view-only copies.** User accepted all eight defaults: Records picks the Primary (AI Primary
+pre-selected); Records or the Supervisory Level can change it (old Primary keeps a copy, logged as new trail entries);
+copy offices only receive (name + time) and view; copies close when the Primary ends the transaction; routing on makes
+the target Primary (with optional copies); delinquency counts the Primary only; confidential documents get no copies;
+the client status lookup (not built yet) shows the Primary only. See the change log entry of 2026-10-22.
+Original plan: When a document goes to
+several offices, only the **Primary** office can act on it (receive, act, end, route on); the others get a
+**view-only copy** they are notified of and can receive and view. This replaces the 2026-10-13 rule that every office
+gets its own actionable copy. Added to the FGD summary doc (Records Section + Open Items).
+Draft design (pending the user's answers, see the chat of 2026-10-22):
+- Schema: `document_trails.copy_role` enum('primary','copy') default 'primary' (new migration). `documents.department_id`
+  stays the Primary office, so existing consumers keep working.
+- Dispatch (`DispatchService`, `DispatchDocumentRequest`, `RoutingModal.vue`): new `primary_office_id`, which must be one
+  of `routed_to`; pre-selected from the AI suggestion marked Primary. The Primary gets a `primary` trail entry and the
+  others get `copy` entries. Phase 2's ADM/OCM routing reuses the same request.
+- Authorization (`DocumentPolicy::process` / `owns`): only the office holding the open `primary` entry may act. New
+  ability `receiveCopy` lets a copy office record receipt (`received_by`/`received_at`) without acting.
+- Inbox (`TransactionController` + `transactions/Index.vue`): a separate "Copies (view only)" list with a Receive
+  button; no Route/End. Bell (`IncomingDocumentService`): pings copy offices until they receive.
+- Completion (`TransactionService::process`): the document completes when the Primary office ends it; the copies are
+  closed with it or stay open, depending on the user's answer.
+- SLA: delinquency counts only the Primary office's open entry, which also resolves known issue #17.
+- Display: `holders` / Show.vue / documents list label each office Primary or Copy.
+- Tests: dispatch validation (primary must be a target), copy office cannot route/end, copy receive, completion, bell,
+  delinquency on the Primary only.
+
 **Design consequences:** category is a per-document field defaulted from the type (blank or "varies" types need
 Records/AI to choose; Supervisory can change it). Classification dropdown is filtered by the type (new pivot
 table). Rulebook values are seeded but editable in the Document Types registry, since several are still blank.
@@ -247,8 +280,9 @@ revocation). That needs a design before Phase 2.
    `formatUtcDateStr`). Changing `APP` timezone would require migrating existing rows and re-checking SLA math
    (`Document::getIsDelinquentAttribute`, DashboardController) — needs a decision before touching.
 16. `.env.example` defaults to SQLite while local dev uses MySQL; `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD` missing.
-17. SLA/delinquency (`Document::is_delinquent`, dashboard) evaluates only `department_id`; with multi-office copies
-   it reflects one holder. Per-copy SLA would need a per-trail calculation.
+17. ~~SLA/delinquency evaluates only `department_id`; with multi-office copies it reflects one holder.~~
+   **Resolved 2026-10-22:** only the Primary office acts and `department_id` is always the Primary, so delinquency
+   counting the Primary only is the intended rule.
 
 ## 7. Next steps (suggested, none started)
 
@@ -274,6 +308,31 @@ revocation). That needs a design before Phase 2.
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-22 — Multi-office routing: Primary office acts, others get view-only copies (Claude Code)
+- **Why:** user request; replaces the 2026-10-13 rule that every routed office gets an actionable copy.
+- Migration `2026_10_22_000000_add_copy_role_to_document_trails_table` (`copy_role` enum primary|copy, default
+  primary). **Not applied locally yet** (MySQL refused the connection); run `php artisan migrate`.
+- `DocumentWorkflow`: `openOffices($role)`, `primaryOffice()`, `closeCopies()` (no receiver recorded for unreceived
+  copies), `distribute()` (Primary + copies; a copy holder made Primary has its copy closed; confidential = one office
+  only; Primary must be a selected office); `receive()` takes the role; `release()` prefers the office's Primary entry.
+- `DispatchService` / `DispatchDocumentRequest`: optional `primary_office_id` (default first target).
+  `TransactionService::process` / `ProcessDocumentRequest`: only the Primary office acts; end completes the document
+  and closes copies; route accepts several offices + `primary_office_id` (a single id still works).
+  New `receiveCopy` and `changePrimary` (+ `ReceiveCopyRequest`, `ChangePrimaryOfficeRequest`, routes
+  `transactions.receive-copy`, `documents.primary-office`, Ziggy regenerated).
+- `DocumentPolicy`: `owns()` counts the Primary entry only; new `receiveCopy`, `changePrimary` (Records roles +
+  city_administrator, city_mayor, department_head). `Document::scopeHeldBy` = Primary only; new `scopeCopiedTo`;
+  `holders` carries `pivot.copy_role`, Primary first. Delinquency already used `department_id` (= Primary), which
+  resolves known issue #17.
+- Bell: copy offices are pinged until they receive; the link opens the inbox with that copy highlighted.
+- UI: RoutingModal marks one office Primary (radio; AI Primary pre-selected; confidential = one office); Office
+  Inbox has "Copies for your information (view only)" with Receive copy, and routing picks a next Primary plus
+  optional copies; document page shows Primary + copies and a "Change Primary office" control; documents list only
+  offers Route to the Primary office.
+- Tests: multi-office test rewritten for the new rule; new `tests/Feature/PrimaryCopyRoutingTest.php` (5 tests).
+  Pest 90 passed (967 assertions); Pint ✅ on new/changed files except pre-existing issues in `DocumentPolicy.php`,
+  `Document.php`, `DocumentTrail.php`; ESLint ✅; build ✅. Not checked in a browser.
 
 ### 2026-10-21 — FGD Phase 1: Records intake follows the rulebook (Claude Code)
 - Migration `2026_10_21_010000_add_confidential_and_route_mode_to_documents_table`: `documents.is_confidential`

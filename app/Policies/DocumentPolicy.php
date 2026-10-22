@@ -3,10 +3,16 @@
 namespace App\Policies;
 
 use App\Models\Document;
+use App\Models\DocumentTrail;
 use App\Models\User;
 
 class DocumentPolicy
 {
+    private const RECORDS_ROLES = ['records_manager', 'system_administrator'];
+
+    /** FGD access levels: City Administrator, City Mayor and Department Heads. */
+    private const SUPERVISORY_ROLES = ['city_administrator', 'city_mayor', 'department_head'];
+
     public function viewAny(User $user): bool
     {
         return $user->state === 1;
@@ -48,6 +54,24 @@ class DocumentPolicy
         return $user->state === 1 && $this->owns($user, $document)
             && ! in_array($document->requires_signature_from, Document::EXECUTIVE_STAGES, true)
             && $user->department()->where('state', 1)->exists();
+    }
+
+    /** A copy office records receipt of its view-only copy once; it can never act on the document. */
+    public function receiveCopy(User $user, Document $document): bool
+    {
+        return $user->state === 1 && $user->department_id !== null
+            && $user->department()->where('state', 1)->exists()
+            && $document->trails()->where('department_id', $user->department_id)->where('copy_role', DocumentTrail::COPY)
+                ->whereNull('released_at')->whereNull('received_by')->exists();
+    }
+
+    /** Records and the Supervisory Level may correct a wrong Primary office. */
+    public function changePrimary(User $user, Document $document): bool
+    {
+        return $user->state === 1
+            && in_array($user->role, [...self::RECORDS_ROLES, ...self::SUPERVISORY_ROLES], true)
+            && $user->department()->where('state', 1)->exists()
+            && $document->trails()->where('copy_role', DocumentTrail::PRIMARY)->whereNull('released_at')->exists();
     }
 
     public function viewReferrals(User $user): bool
@@ -117,15 +141,16 @@ class DocumentPolicy
     }
 
     /**
-     * Custody is held by every office with an open trail entry (a multi-office dispatch creates one per office).
-     * Documents without any open entry fall back to their recorded current office.
+     * Custody belongs to the office holding the open Primary entry; view-only copies never grant it.
+     * Documents without any open Primary entry fall back to their recorded current office.
      */
     private function owns(User $user, Document $document): bool
     {
         if ($user->department_id === null) {
             return false;
         }
-        $holders = $document->trails()->whereNull('released_at')->pluck('department_id')->map(fn ($id) => (int) $id);
+        $holders = $document->trails()->whereNull('released_at')->where('copy_role', DocumentTrail::PRIMARY)
+            ->pluck('department_id')->map(fn ($id) => (int) $id);
 
         return $holders->isNotEmpty()
             ? $holders->contains((int) $user->department_id)

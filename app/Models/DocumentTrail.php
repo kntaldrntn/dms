@@ -9,9 +9,16 @@ class DocumentTrail extends Model
 {
     use HasFactory;
 
+    /** The office that acts on the document. */
+    public const PRIMARY = 'primary';
+
+    /** A view-only copy: the office can receive and view the document but not act on it. */
+    public const COPY = 'copy';
+
     protected $fillable = [
         'document_id',
         'department_id',
+        'copy_role',
         'received_by',
         'received_at',
         'received_action',

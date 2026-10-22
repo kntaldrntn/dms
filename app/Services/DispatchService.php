@@ -9,18 +9,16 @@ class DispatchService
 {
     public function __construct(private DocumentWorkflow $workflow) {}
 
+    /** Records sends the document to one Primary office; every other target gets a view-only copy. */
     public function dispatch(Document $document, User $user, array $data): void
     {
         $this->workflow->mutate($document, $user, (int) $data['workflow_version'], 'dispatch', function (Document $document, User $user) use ($data) {
             $targets = $this->workflow->targets($data['routed_to'], $document->department_id, 'routed_to');
-            $this->workflow->release($document, $user, 'Dispatched to target office(s)', $targets[0], null, null, [
+            $primary = (int) ($data['primary_office_id'] ?? $targets[0]);
+            $this->workflow->release($document, $user, 'Dispatched to target office(s)', $primary, null, null, [
                 'released_to_offices' => $targets,
             ]);
-            foreach ($targets as $target) {
-                $this->workflow->receive($document, $target, 'Dispatched from Records');
-            }
-            $document->department_id = $targets[0];
-            $document->current_assignee_id = null;
+            $this->workflow->distribute($document, $user, $targets, $primary, 'Dispatched from Records', 'Copy from Records');
             // A referral is consumed once, including an explicit Records override.
             $document->approved_routing_slip = null;
         });

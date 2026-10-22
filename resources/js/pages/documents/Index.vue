@@ -48,7 +48,9 @@ type Holder = { id: number; code: string; name: string };
 const holdersOf = (doc: any): Holder[] => (doc.holders?.length ? doc.holders : doc.department ? [doc.department] : []);
 const holderCodes = (doc: any) => holdersOf(doc).map((office) => office.code || office.name).join(', ') || 'Exec.';
 const holderNames = (doc: any) => holdersOf(doc).map((office) => office.name).join(', ');
-const holdsCopy = (doc: any, officeId: number) => holdersOf(doc).some((office) => office.id === officeId);
+// Only the Primary office acts on a document; offices with a view-only copy cannot route it.
+const holdsCopy = (doc: any, officeId: number) =>
+    holdersOf(doc).some((office: any) => office.id === officeId && (office.pivot?.copy_role ?? 'primary') === 'primary');
 
 const searchTerm = ref(props.filters?.search || '');
 let searchTimeout: ReturnType<typeof setTimeout>;

@@ -51,6 +51,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         
         Route::get('/transactions/inbox', [TransactionController::class, 'index'])->name('transactions.inbox');
         Route::post('/transactions/{document}/process', [TransactionController::class, 'process'])->name('transactions.process');
+        Route::post('/transactions/{document}/receive-copy', [TransactionController::class, 'receiveCopy'])->name('transactions.receive-copy');
+        Route::post('/documents/{document}/primary-office', [TransactionController::class, 'changePrimary'])->name('documents.primary-office');
 
     });
 

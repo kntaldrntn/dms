@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import { ChevronsRight, ChevronsLeft, FastForward, X, ClipboardCheck, FileSignature, CheckSquare, Unlock, AlertTriangle } from 'lucide-vue-next';
 
@@ -16,11 +16,24 @@ const selectedOffices = ref<Array<any>>([]);
 const approvedTargets = ref<Array<any>>([]);
 const aiSuggestionsMap = ref<Record<number, { reason: string, priority: string }>>({});
 const isOverriding = ref(false); // NEW: Tracks if Records is modifying the Admin slip
+// Only the Primary office acts on the document; every other selected office gets a view-only copy.
+const primaryId = ref<number | null>(null);
+// Confidential documents go to the Primary office only, with no copies.
+const singleOffice = computed(() => Boolean(props.document?.is_confidential));
 
 const form = useForm({
     routed_to: [] as number[],
+    primary_office_id: null as number | null,
     workflow_version: 0,
 });
+
+function choosePrimary(ids: number[], suggestions: Record<number, { priority: string }>) {
+    primaryId.value = ids.find((id) => suggestions[id]?.priority === 'Primary') ?? ids[0] ?? null;
+}
+
+watch(selectedOffices, (offices) => {
+    if (!offices.some((office) => office.id === primaryId.value)) primaryId.value = offices[0]?.id ?? null;
+}, { deep: true });
 
 watch(() => props.show, (isOpen) => {
     if (isOpen && props.document) {
@@ -69,14 +82,17 @@ watch(() => props.show, (isOpen) => {
             });
         }
 
-        selectedOffices.value = initialSelected;
-        availableOffices.value = initialAvailable.sort((a, b) => (a.code || a.name).localeCompare(b.code || b.name));
+        selectedOffices.value = singleOffice.value ? initialSelected.slice(0, 1) : initialSelected;
+        availableOffices.value = [...initialAvailable, ...initialSelected.slice(selectedOffices.value.length)]
+            .sort((a, b) => (a.code || a.name).localeCompare(b.code || b.name));
+        choosePrimary(approvedTargets.value.length ? approvedTargets.value.map((dept) => dept.id) : selectedOffices.value.map((dept) => dept.id), suggestionsMap);
     }
 });
 
 const closeModal = () => emit('close');
 
 const addOffice = (dept: any) => {
+    if (singleOffice.value && selectedOffices.value.length) removeAll();
     selectedOffices.value.push(dept);
     availableOffices.value = availableOffices.value.filter(d => d.id !== dept.id);
 };
@@ -106,7 +122,8 @@ const submitRouting = () => {
         if (selectedOffices.value.length === 0) return;
         form.routed_to = selectedOffices.value.map(dept => dept.id);
     }
-    
+    form.primary_office_id = primaryId.value;
+
     form.post(route('documents.route', props.document.id), {
         preserveScroll: true,
         onSuccess: () => closeModal()
@@ -159,12 +176,17 @@ const submitRouting = () => {
                         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                             <div v-for="dept in approvedTargets" :key="dept.id" class="flex items-start gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-lg">
                                 <CheckSquare class="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
-                                <div class="flex flex-col">
+                                <div class="flex flex-col flex-1">
                                     <span class="text-sm font-bold text-slate-800 leading-tight">{{ dept.code || dept.name }}</span>
                                     <span class="text-[10px] text-slate-500 mt-0.5 line-clamp-1" :title="dept.name">{{ dept.name }}</span>
+                                    <label class="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold" :class="primaryId === dept.id ? 'text-indigo-700' : 'text-slate-500'">
+                                        <input v-model="primaryId" type="radio" name="slip_primary" :value="dept.id" class="h-3.5 w-3.5 text-indigo-600 focus:ring-indigo-500" />
+                                        {{ primaryId === dept.id ? 'Primary (acts on it)' : 'Copy (view only)' }}
+                                    </label>
                                 </div>
                             </div>
                         </div>
+                        <p class="mt-3 text-xs text-slate-500">Only the Primary office acts on the document. The other offices get a view-only copy.</p>
 
                         <!-- NEW: Override Button -->
                         <div class="mt-6 pt-4 border-t border-slate-100 flex justify-end">
@@ -187,12 +209,21 @@ const submitRouting = () => {
                         </div>
                     </div>
 
+                    <p class="mb-3 text-xs text-slate-600">
+                        {{ singleOffice
+                            ? 'Confidential document: it goes to one Primary office only, with no copies.'
+                            : 'Mark one office as Primary: only it acts on the document. The other offices get a view-only copy.' }}
+                    </p>
+                    <p v-if="form.errors.primary_office_id || form.errors.routed_to" role="alert" class="mb-3 text-xs font-medium text-red-600">
+                        {{ form.errors.primary_office_id || form.errors.routed_to }}
+                    </p>
+
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1 overflow-hidden">
                         <!-- Left Panel: Available -->
                         <div class="flex flex-col border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
                             <div class="flex items-center justify-between px-4 py-3 bg-slate-50/80 border-b border-slate-200">
                                 <h3 class="text-sm font-bold text-slate-700">Available Offices</h3>
-                                <button @click="routeToAll" class="text-xs flex items-center gap-1.5 text-slate-500 hover:text-indigo-600 transition font-medium">
+                                <button v-if="!singleOffice" @click="routeToAll" class="text-xs flex items-center gap-1.5 text-slate-500 hover:text-indigo-600 transition font-medium">
                                     Route to all <span class="bg-slate-700 text-white rounded-full p-0.5"><ChevronsRight class="w-3 h-3" /></span>
                                 </button>
                             </div>
@@ -219,6 +250,10 @@ const submitRouting = () => {
                                             <span class="font-bold text-sm w-16 shrink-0 text-slate-800">{{ dept.code || dept.id }}</span>
                                             <span class="text-sm font-medium text-slate-600 group-hover:text-rose-700">{{ dept.name }}</span>
                                         </div>
+                                        <label class="mt-1 ml-16 flex items-center gap-1.5 text-[11px] font-semibold" :class="primaryId === dept.id ? 'text-indigo-700' : 'text-slate-500'" @click.stop>
+                                            <input v-model="primaryId" type="radio" name="primary_office" :value="dept.id" class="h-3.5 w-3.5 text-indigo-600 focus:ring-indigo-500" />
+                                            {{ primaryId === dept.id ? 'Primary (acts on it)' : 'Copy (view only)' }}
+                                        </label>
                                     </div>
                                     <button class="opacity-0 group-hover:opacity-100 transition mt-0.5 text-slate-400 hover:text-rose-600"><X class="w-4 h-4" /></button>
                                 </div>

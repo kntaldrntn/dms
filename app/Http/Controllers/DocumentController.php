@@ -115,8 +115,10 @@ class DocumentController extends Controller
             'trails' => $document->trails,
             // Offices a pending referral slip will dispatch to, for the "Next" route step.
             'slipTargets' => Department::whereIn('id', $document->approved_routing_slip ?? [])->get(['id', 'code', 'name']),
-            // Every office holding an open copy (more than one after a multi-office dispatch).
+            // The Primary office first, then every office holding a view-only copy (pivot.copy_role).
             'holders' => $document->holders()->get(['departments.id', 'departments.code', 'departments.name']),
+            'canChangePrimary' => request()->user()->can('changePrimary', $document),
+            'offices' => fn () => Department::where('state', 1)->orderBy('code')->get(['id', 'code', 'name']),
         ]);
     }
 

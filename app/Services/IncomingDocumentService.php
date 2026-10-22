@@ -8,9 +8,10 @@ use App\Models\User;
 use Illuminate\Support\Str;
 
 /**
- * "Incoming" documents for the notification bell: copies that arrived at the user's office
- * (open trail entry) that nobody in the office has acted on yet (received_by is only set when
- * the office releases its copy). Pings for executive steps go only to the role that acts on them.
+ * "Incoming" documents for the notification bell: entries that arrived at the user's office
+ * (open trail entry) that nobody in the office has acted on yet. received_by is set when the
+ * Primary office releases its entry, or when a copy office receives its view-only copy.
+ * Pings for executive steps go only to the role that acts on them.
  */
 class IncomingDocumentService
 {
@@ -39,7 +40,9 @@ class IncomingDocumentService
                 'subject_matter' => Str::limit((string) $trail->document->subject_matter, 80),
                 'action' => $trail->received_action,
                 'received_at' => $trail->received_at,
-                'url' => $this->actionUrl($trail->document),
+                'url' => $trail->copy_role === DocumentTrail::COPY
+                    ? route('transactions.inbox', ['copy' => $trail->document_id])
+                    : $this->actionUrl($trail->document),
             ])->all();
 
         return ['count' => $query->count(), 'items' => $items];

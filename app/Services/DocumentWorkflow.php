@@ -86,23 +86,71 @@ class DocumentWorkflow
     }
 
     /**
-     * Offices currently holding an open copy (received, not yet released), locked for this transaction.
-     * A multi-office dispatch leaves one open copy per office; each office acts on its own copy.
+     * Offices currently holding an open entry (received, not yet released), locked for this transaction.
+     * A multi-office dispatch leaves one Primary entry and one view-only copy per other office.
      *
      * @return list<int>
      */
-    public function openOffices(Document $document): array
+    public function openOffices(Document $document, ?string $role = null): array
     {
         return DocumentTrail::where('document_id', $document->id)->whereNull('released_at')
+            ->when($role, fn ($trails) => $trails->where('copy_role', $role))
             ->lockForUpdate()->pluck('department_id')->map(fn ($id) => (int) $id)->unique()->values()->all();
+    }
+
+    /** The office holding the open Primary entry, the only office that may act on the document. */
+    public function primaryOffice(Document $document): ?int
+    {
+        return $this->openOffices($document, DocumentTrail::PRIMARY)[0] ?? null;
+    }
+
+    /**
+     * Close open view-only copies without recording a receiver: an office that never received its copy
+     * must not appear as having received it. Limit to $offices to close only some copies.
+     */
+    public function closeCopies(Document $document, User $user, string $action, ?array $offices = null): void
+    {
+        DocumentTrail::where('document_id', $document->id)->whereNull('released_at')->where('copy_role', DocumentTrail::COPY)
+            ->when($offices !== null, fn ($trails) => $trails->whereIn('department_id', $offices))
+            ->get()->each(fn (DocumentTrail $trail) => $trail->fill([
+                'released_by' => $user->id, 'released_at' => now('Asia/Manila'), 'released_action' => $action,
+            ])->save());
+    }
+
+    /**
+     * Send the document to a Primary office plus view-only copies to the other targets. A target that
+     * already holds a copy keeps it; a copy holder that becomes Primary has its copy closed first.
+     *
+     * @param  list<int>  $targets
+     */
+    public function distribute(Document $document, User $user, array $targets, int $primary, string $primaryAction, string $copyAction): void
+    {
+        if (! in_array($primary, $targets, true)) {
+            throw ValidationException::withMessages(['primary_office_id' => 'Choose the Primary office from the selected offices.']);
+        }
+        if ($document->is_confidential && count($targets) > 1) {
+            throw ValidationException::withMessages(['routed_to' => 'Confidential documents go to the Primary office only; no copies are sent.']);
+        }
+        $copyHolders = $this->openOffices($document, DocumentTrail::COPY);
+        if (in_array($primary, $copyHolders, true)) {
+            $this->closeCopies($document, $user, 'Copy closed: office made Primary', [$primary]);
+        }
+        $this->receive($document, $primary, $primaryAction);
+        foreach (array_diff($targets, [$primary], $copyHolders) as $office) {
+            $this->receive($document, (int) $office, $copyAction, DocumentTrail::COPY);
+        }
+        $document->department_id = $primary;
+        $document->current_assignee_id = null;
     }
 
     /** Close an office's custody entry (default: the document's current office) without changing its existing receiver. */
     public function release(Document $document, User $user, string $action, ?int $target, ?string $remarks = null, ?int $signer = null, array $metadata = [], ?int $office = null): void
     {
         $office ??= $document->department_id;
+        // Prefer the office's Primary entry; a copy entry is only released when nothing else is open there.
         $trail = DocumentTrail::where('document_id', $document->id)
-            ->where('department_id', $office)->whereNull('released_at')->latest('id')->first();
+            ->where('department_id', $office)->whereNull('released_at')
+            ->orderByRaw("case when copy_role = 'primary' then 0 else 1 end")->latest('id')->first();
         if (! $trail) {
             $trail = new DocumentTrail([
                 'document_id' => $document->id, 'department_id' => $office,
@@ -119,10 +167,10 @@ class DocumentWorkflow
         ])->save();
     }
 
-    public function receive(Document $document, int $department, string $action): void
+    public function receive(Document $document, int $department, string $action, string $role = DocumentTrail::PRIMARY): void
     {
         DocumentTrail::create([
-            'document_id' => $document->id, 'department_id' => $department,
+            'document_id' => $document->id, 'department_id' => $department, 'copy_role' => $role,
             'received_at' => now('Asia/Manila'), 'received_action' => $action,
         ]);
     }

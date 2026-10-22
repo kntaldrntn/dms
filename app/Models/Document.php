@@ -38,14 +38,15 @@ class Document extends Model
     public function currentAssignee() { return $this->belongsTo(User::class, 'current_assignee_id'); }
 
     /**
-     * Every office currently holding an open copy (trail received, not yet released).
-     * After a multi-office dispatch this returns all recipients, while `department_id`
-     * keeps only one primary office (the first target, or the latest office a copy moved to).
+     * Every office currently holding an open entry, Primary first. `pivot.copy_role` says whether the
+     * office is the Primary (acts on the document) or holds a view-only copy. `department_id` is the Primary.
      */
     public function holders()
     {
         return $this->belongsToMany(Department::class, 'document_trails', 'document_id', 'department_id')
+            ->withPivot('copy_role')
             ->wherePivotNull('released_at')
+            ->orderByPivot('copy_role', 'desc')
             ->distinct();
     }
 
@@ -68,10 +69,18 @@ class Document extends Model
         return $query->where('state', 1);
     }
 
-    /** Documents an office currently holds an open copy of (see DocumentWorkflow::openOffices()). */
+    /** Documents an office holds the open Primary entry of, i.e. the documents it must act on. */
     public function scopeHeldBy(Builder $query, int $departmentId): Builder
     {
-        return $query->whereHas('trails', fn (Builder $trails) => $trails->where('department_id', $departmentId)->whereNull('released_at'));
+        return $query->whereHas('trails', fn (Builder $trails) => $trails->where('department_id', $departmentId)
+            ->where('copy_role', DocumentTrail::PRIMARY)->whereNull('released_at'));
+    }
+
+    /** Documents an office holds an open view-only copy of. */
+    public function scopeCopiedTo(Builder $query, int $departmentId): Builder
+    {
+        return $query->whereHas('trails', fn (Builder $trails) => $trails->where('department_id', $departmentId)
+            ->where('copy_role', DocumentTrail::COPY)->whereNull('released_at'));
     }
 
     // =====================================================================
