@@ -36,6 +36,8 @@ class User extends Authenticatable
      */
     protected $hidden = [
         'password',
+        // Where the signer's .p12 is stored; set only by SigningCertificateService, never mass-assigned.
+        'certificate_path',
         'two_factor_secret',
         'two_factor_recovery_codes',
         'remember_token',
@@ -53,7 +55,16 @@ class User extends Authenticatable
             'password' => 'hashed',
             'two_factor_confirmed_at' => 'datetime',
             'state' => 'integer', // Cast to ensure strict 0/1 output
+            'certificate_valid_until' => 'datetime',
         ];
+    }
+
+    /** Roles that approve and sign documents with their own PNPKI certificate. */
+    public const SIGNER_ROLES = ['city_administrator', 'city_mayor', 'department_head', 'system_administrator'];
+
+    public function hasValidCertificate(): bool
+    {
+        return $this->certificate_path !== null && $this->certificate_valid_until?->isFuture() === true;
     }
 
     public function department()

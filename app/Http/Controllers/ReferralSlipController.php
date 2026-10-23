@@ -52,6 +52,7 @@ class ReferralSlipController extends Controller
         return Inertia::render('ocm-approvals/Index', [
             'documents' => $documents,
             'departments' => Department::where('state', 1)->where('code', '!=', 'OCM')->get(),
+            'hasCertificate' => $request->user()->hasValidCertificate(),
             'flash' => ['success' => session('success'), 'error' => session('error')],
         ]);
     }

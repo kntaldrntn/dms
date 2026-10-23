@@ -11,47 +11,49 @@ use setasign\Fpdi\Tcpdf\Fpdi;
 
 class PdfApprovalStampService
 {
-    /**
-     * Who signs. Only OCM has a PNPKI certificate configured (the City Mayor's); ADM gets a visible electronic
-     * signature from the signer's own uploaded image and no certificate until per-signer certificates (Phase 2c-2).
-     */
-    public const OCM = ['code' => 'ocm', 'title' => 'City Mayor', 'certificate' => true,
+    /** The office the signer approves for: the stamp's title and the PDF signature's location and reason. */
+    public const OCM = ['code' => 'ocm', 'title' => 'City Mayor',
         'location' => 'Office of the City Mayor, San Fernando, La Union', 'reason' => 'OCM approval/signature'];
 
-    public const ADM = ['code' => 'adm', 'title' => 'City Administrator', 'certificate' => false,
+    public const ADM = ['code' => 'adm', 'title' => 'City Administrator',
         'location' => 'Office of the City Administrator, San Fernando, La Union', 'reason' => 'City Administrator approval'];
 
-    /**
-     * @param  array{page:int,x:float,y:float,width:float,height:float}  $placement
-     * @param  array{code:string,title:string,certificate:bool,location:string,reason:string}  $office
-     */
-    public function stamp(Document $document, User $signer, array $placement, array $office = self::OCM): string
-    {
-        $sourcePath = $this->sourcePath($document);
-        $certificatePath = $office['certificate'] ? config('digital-certificate.certificate_path') : null;
-        $privateKeyPath = $office['certificate'] ? config('digital-certificate.private_key_path') : null;
-        $signatureImagePath = $office['certificate']
-            ? config('digital-certificate.signature_image_path')
-            : ($signer->signature_path ? Storage::disk('public')->path($signer->signature_path) : null);
+    public function __construct(private SigningCertificateService $certificates) {}
 
-        if (! $office['certificate'] && ! $signatureImagePath) {
+    /**
+     * Stamp the signer's e-signature on the PDF and sign it with the signer's own PNPKI certificate (FGD Phase 2c-2).
+     * The PIN opens the certificate in memory for this signing only.
+     *
+     * @param  array{page:int,x:float,y:float,width:float,height:float}  $placement
+     * @param  array{code:string,title:string,location:string,reason:string}  $office
+     */
+    public function stamp(Document $document, User $signer, array $placement, array $office, string $pin): string
+    {
+        if (! $signer->signature_path || ! Storage::disk('public')->exists($signer->signature_path)) {
             throw ValidationException::withMessages(['stamp_placement' => 'Your e-signature is not on file. Ask the System Administrator to upload it in User Management, then approve again.']);
         }
-        $required = $office['certificate'] ? [$sourcePath, $certificatePath, $privateKeyPath, $signatureImagePath] : [$sourcePath, $signatureImagePath];
-        foreach ($required as $path) {
-            if (! is_string($path) || ! is_file($path) || ! is_readable($path)) {
-                throw new RuntimeException('The source PDF, signature image or digital certificate files are unavailable.');
-            }
+        $credentials = $this->certificates->credentials($signer, $pin);
+        $sourcePath = $this->sourcePath($document);
+        if (! is_string($sourcePath) || ! is_file($sourcePath) || ! is_readable($sourcePath)) {
+            throw new RuntimeException('The source PDF to sign is unavailable.');
         }
 
-        $sourcePdf = tempnam(sys_get_temp_dir(), 'ocm-approval-');
+        $sourcePdf = tempnam(sys_get_temp_dir(), 'approval-');
         if ($sourcePdf === false || ! copy($sourcePath, $sourcePdf)) {
             throw new RuntimeException('Unable to prepare the uploaded PDF for signing.');
         }
 
         $cleanSignature = null;
+        // TCPDF reads intermediate certificates (the PNPKI chain) from a file, so it lives in a temp file briefly.
+        $chainFile = null;
         try {
-            $cleanSignature = $this->cleanSignatureImage($signatureImagePath);
+            $cleanSignature = $this->cleanSignatureImage(Storage::disk('public')->path($signer->signature_path));
+            if ($credentials['extracerts'] !== []) {
+                $chainFile = tempnam(sys_get_temp_dir(), 'chain-');
+                if ($chainFile === false || file_put_contents($chainFile, implode("\n", $credentials['extracerts'])) === false) {
+                    throw new RuntimeException('Unable to prepare the certificate chain for signing.');
+                }
+            }
             $this->configureTcpdfCache();
             $pdf = new Fpdi('P', 'mm', 'A4', true, 'UTF-8', false);
             $pdf->SetCreator(config('app.name'));
@@ -76,24 +78,15 @@ class PdfApprovalStampService
                     $y = $size['height'] * $placement['y'] / 1000;
                     $width = $size['width'] * $placement['width'] / 1000;
                     $height = $size['height'] * $placement['height'] / 1000;
-                    $name = $certificatePath ? $this->certificateName($certificatePath, $signer->name) : $signer->name;
-                    $this->drawVisibleStamp($pdf, $cleanSignature, $x, $y, $width, $height, $name, $office['title'], $certificatePath ? 'Digitally Signed' : 'Electronically Signed');
-                    if ($certificatePath) {
-                        $pdf->setSignatureAppearance($x, $y, $width, $height, $pageNumber, strtoupper($office['code']).' Digital Signature');
-                    }
+                    $this->drawVisibleStamp($pdf, $cleanSignature, $x, $y, $width, $height, $credentials['subject'], $office['title']);
+                    $pdf->setSignatureAppearance($x, $y, $width, $height, $pageNumber, strtoupper($office['code']).' Digital Signature');
                 }
             }
 
-            if ($certificatePath) {
-                $pdf->setSignature(
-                    'file://'.$certificatePath,
-                    'file://'.$privateKeyPath,
-                    (string) config('digital-certificate.private_key_password'),
-                    '',
-                    2,
-                    ['Name' => $signer->name, 'Location' => $office['location'], 'Reason' => $office['reason']],
-                );
-            }
+            // PEM strings, not files: the private key is never written to disk.
+            $pdf->setSignature($credentials['cert'], $credentials['pkey'], '', $chainFile ?? '', 2, [
+                'Name' => $signer->name, 'Location' => $office['location'], 'Reason' => $office['reason'],
+            ]);
 
             $path = "signed-documents/{$document->barcode}-{$office['code']}-approved-".now('Asia/Manila')->format('YmdHis').'.pdf';
             Storage::disk('local')->put($path, $pdf->Output(basename($path), 'S'));
@@ -103,6 +96,9 @@ class PdfApprovalStampService
             @unlink($sourcePdf);
             if ($cleanSignature) {
                 @unlink($cleanSignature);
+            }
+            if ($chainFile) {
+                @unlink($chainFile);
             }
         }
     }
@@ -123,7 +119,7 @@ class PdfApprovalStampService
         if (! function_exists('imagecreatefromstring') || ! function_exists('imagepng')) {
             throw new RuntimeException('GD is required to prepare the signature image.');
         }
-        // Uploaded e-signatures may be PNG or JPEG; the certificate's image is PNG.
+        // Uploaded e-signatures may be PNG or JPEG.
         $image = @imagecreatefromstring((string) file_get_contents($path));
         $temporaryPath = tempnam(sys_get_temp_dir(), 'ocm-signature-');
         if ($image === false || $temporaryPath === false) {
@@ -169,7 +165,7 @@ class PdfApprovalStampService
         return $temporaryPath;
     }
 
-    private function drawVisibleStamp(Fpdi $pdf, string $signaturePath, float $x, float $y, float $width, float $height, string $name, string $title, string $heading): void
+    private function drawVisibleStamp(Fpdi $pdf, string $signaturePath, float $x, float $y, float $width, float $height, string $name, string $title): void
     {
         $signatureWidth = $width * 0.48;
         $textX = $x + $signatureWidth + ($width * 0.03);
@@ -186,7 +182,7 @@ class PdfApprovalStampService
 
         // Shrink the text so the longest line (usually the certificate name) stays inside the stamp box
         // instead of running past the page edge.
-        $widest = max($pdf->GetStringWidth($heading, 'helvetica', 'B', 7.5), ...array_map(
+        $widest = max($pdf->GetStringWidth('Digitally Signed', 'helvetica', 'B', 7.5), ...array_map(
             fn (string $line) => $pdf->GetStringWidth($line, 'helvetica', '', 7.2),
             $lines,
         ));
@@ -196,20 +192,11 @@ class PdfApprovalStampService
         $pdf->Image($signaturePath, $x, $signatureY, $signatureWidth, $signatureHeight, 'PNG');
         $pdf->SetTextColor(0, 0, 0);
         $pdf->SetFont('helvetica', 'B', 7.5 * $scale);
-        $pdf->Text($textX, $textY, $heading);
+        $pdf->Text($textX, $textY, 'Digitally Signed');
         $pdf->SetFont('helvetica', '', 7.2 * $scale);
         foreach ($lines as $index => $line) {
             $pdf->Text($textX, $textY + ($lineHeight * ($index + 1)), $line);
         }
-    }
-
-    private function certificateName(string $certificatePath, string $fallback): string
-    {
-        $certificate = @openssl_x509_parse((string) file_get_contents($certificatePath));
-
-        return is_array($certificate) && ! empty($certificate['subject']['CN'])
-            ? (string) $certificate['subject']['CN']
-            : $fallback;
     }
 
     private function configureTcpdfCache(): void

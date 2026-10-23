@@ -344,6 +344,33 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 
 ## 9. Change log
 
+### 2026-10-23 — FGD Phase 2c-2: per-signer PNPKI certificates (Claude Code, uncommitted)
+- Migration `2026_10_23_020000_add_signing_certificate_to_users_table` (**not yet run locally**):
+  `users.certificate_path` (hidden from serialization, set only by the service), `certificate_subject`,
+  `certificate_valid_until`. New private disk `certificates` (root `storage/app/certificates`, `serve` false;
+  git-ignored by `storage/app/.gitignore`). `User::SIGNER_ROLES`, `hasValidCertificate()`.
+- `SigningCertificateService`: upload checks the `.p12` opens with its PIN, has a private key and is not expired,
+  then stores `users/{id}.p12`; `credentials()` opens it in memory for one signing; clear messages for a wrong
+  PIN, a non-certificate file and legacy encryption OpenSSL 3 cannot read. **The PIN is never stored**; it is in
+  `dontFlash` (`bootstrap/app.php`) and the pages clear it after every submit.
+- Settings → **Signing certificate** (`settings/certificate`, `SigningCertificateController`,
+  `SigningCertificateRequest`, page `settings/Certificate.vue`): self-service upload/replace/remove for approver
+  roles (City Administrator, City Mayor, Department Head, Sys Admin).
+- `PdfApprovalStampService::stamp($document, $signer, $placement, $office, $pin)`: always the **signer's own**
+  certificate (PEM strings in memory, chain via a short-lived temp file) + the signer's own e-signature image
+  (`users.signature_path`, uploaded in User Management). ADM paperless approvals are now digitally signed.
+- **Removed `config/digital-certificate.php`** (the single City Mayor certificate). The files in
+  `storage/app/certificates/` were left untouched; `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD` in `.env` is unused.
+  **The City Mayor must upload their own `.p12` in Settings and have an e-signature image in User Management
+  before OCM approvals work again.**
+- PIN prompts: ADM Approve & Route dialog (paperless) and a new PIN dialog on OCM Approvals; both pages warn
+  when the approver has no valid certificate.
+- Not verified: whether the real PNPKI `.p12` files open under OpenSSL 3 (the one on disk did not open with the
+  old private-key password, which is expected: its PIN differs). A legacy-encrypted file gets a clear message.
+- Checks: Pest 139 passed (1304 assertions; new `SigningCertificateTest` 6 cases; ADM paperless tests now sign
+  with a generated certificate and check `/ByteRange` + `/Type /Sig`; `testCertificate()` helper in
+  `tests/Pest.php`); Pint ✅; ESLint ✅; build ✅. **Not tested in the browser.**
+
 ### 2026-10-23 — FGD Phase 2c: ADM single approval (Claude Code, uncommitted)
 - New page **ADM Approvals** (`adm-approvals.index/receive/approve`, `AdmApprovalController`,
   `AdmApprovalService`, `ReceiveAdmDocumentRequest`, `ApproveAdmDocumentRequest`, page

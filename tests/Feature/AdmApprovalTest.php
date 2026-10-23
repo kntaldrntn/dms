@@ -6,6 +6,7 @@ use App\Models\DocumentTrail;
 use App\Models\DocumentType;
 use App\Models\TransactionType;
 use App\Models\User;
+use App\Services\SigningCertificateService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -139,33 +140,49 @@ test('invalid approvals change nothing and leave no files behind', function (Clo
     }, 'routed_to'],
 ]);
 
-test('a paperless approval stamps the City Administrator e-signature on the PDF without a certificate', function () {
+function paperlessAtAdm($test): void
+{
+    Storage::fake('certificates');
     $pdf = new TCPDF;
     $pdf->AddPage();
     $pdf->Write(0, 'Letter for approval');
     Storage::disk('public')->put('documents/scan.pdf', $pdf->Output('scan.pdf', 'S'));
-    $this->cityAdministrator->update(['signature_path' => UploadedFile::fake()->image('signature.png', 300, 120)->store('signatures', 'public')]);
-    $this->document->update(['route_mode' => 'paperless', 'attached_file' => 'documents/scan.pdf']);
-    receiveAtAdm($this);
+    $test->cityAdministrator->update(['signature_path' => UploadedFile::fake()->image('signature.png', 300, 120)->store('signatures', 'public')]);
+    app(SigningCertificateService::class)->store($test->cityAdministrator,
+        UploadedFile::fake()->createWithContent('ca.p12', testCertificate('2468', 'ATTY. TEST ADMINISTRATOR')), '2468');
+    $test->document->update(['route_mode' => 'paperless', 'attached_file' => 'documents/scan.pdf']);
+    receiveAtAdm($test);
+}
 
-    approveAtAdm($this, ['target' => 'ocm', 'stamp_placement' => ['page' => 1, 'x' => 600, 'y' => 800, 'width' => 300, 'height' => 105]])
-        ->assertRedirect()->assertSessionHasNoErrors();
+const STAMP = ['page' => 1, 'x' => 600, 'y' => 800, 'width' => 300, 'height' => 105];
+
+test('a paperless approval is signed with the City Administrator own certificate', function () {
+    paperlessAtAdm($this);
+
+    approveAtAdm($this, ['target' => 'ocm', 'stamp_placement' => STAMP, 'certificate_pin' => '2468'])
+        ->assertRedirect()->assertSessionHasNoErrors()->assertSessionMissing('_old_input.certificate_pin');
 
     $approval = DocumentTrail::where('document_id', $this->document->id)->where('released_action', 'Approved by City Administrator')->firstOrFail();
     expect($approval->signature_mode)->toBe('electronic')
+        ->and($approval->is_digitally_signed)->toBeTrue()
         ->and($approval->signed_file_path)->toStartWith('signed-documents/ADM-1-adm-approved-');
-    expect(Storage::disk('local')->get($approval->signed_file_path))->toStartWith('%PDF');
+    $signed = Storage::disk('local')->get($approval->signed_file_path);
+    // A PDF signature dictionary with a byte range means the file is cryptographically signed.
+    expect($signed)->toStartWith('%PDF')->toContain('/ByteRange')->toContain('/Type /Sig');
     // OCM will stamp (and measure placement on) this ADM-signed PDF, not the original scan.
     expect($this->document->fresh()->stampSourceUrl())->toBe(route('documents.ocm-approved-pdf', $this->document));
 });
 
-test('a paperless approval needs the City Administrator e-signature on file', function () {
-    $this->document->update(['route_mode' => 'paperless', 'attached_file' => 'documents/scan.pdf']);
-    Storage::disk('public')->put('documents/scan.pdf', '%PDF-1.4');
-    receiveAtAdm($this);
+test('a wrong PIN or a missing certificate or e-signature stops a paperless approval', function (Closure $setUp, array $data, string $error) {
+    paperlessAtAdm($this);
+    $setUp($this);
 
-    approveAtAdm($this, ['target' => 'ocm', 'stamp_placement' => ['page' => 1, 'x' => 600, 'y' => 800, 'width' => 300, 'height' => 105]])
-        ->assertSessionHasErrors('stamp_placement');
+    approveAtAdm($this, ['target' => 'ocm', 'stamp_placement' => STAMP, ...$data])->assertSessionHasErrors($error);
     expect($this->document->fresh()->stage)->toBe(DocumentTrail::STAGE_ADM_APPROVAL);
     expect(Storage::disk('local')->allFiles())->toBe([]);
-});
+})->with([
+    'wrong PIN' => [fn () => null, ['certificate_pin' => '0000'], 'certificate_pin'],
+    'no PIN' => [fn () => null, [], 'certificate_pin'],
+    'no certificate' => [fn ($test) => app(SigningCertificateService::class)->remove($test->cityAdministrator), ['certificate_pin' => '2468'], 'certificate_pin'],
+    'no e-signature image' => [fn ($test) => $test->cityAdministrator->update(['signature_path' => null]), ['certificate_pin' => '2468'], 'stamp_placement'],
+]);

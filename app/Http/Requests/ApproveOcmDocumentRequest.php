@@ -35,7 +35,8 @@ class ApproveOcmDocumentRequest extends DocumentMutationRequest
 
     public function rules(): array
     {
-        return parent::rules() + self::placementRules();
+        // The PIN opens the Mayor's own certificate for this signing; never stored or flashed.
+        return parent::rules() + self::placementRules() + ['certificate_pin' => ['required', 'string', 'max:100']];
     }
 
     public function after(): array

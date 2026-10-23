@@ -84,7 +84,7 @@ class ReferralService
                 }
 
                 $records = $this->workflow->office('REC');
-                $createdFile = $this->pdfStamps->stamp($document, $user, $data['stamp_placement']);
+                $createdFile = $this->pdfStamps->stamp($document, $user, $data['stamp_placement'], PdfApprovalStampService::OCM, $data['certificate_pin']);
                 $this->workflow->release($document, $user, 'OCM approved and digitally stamped', $records->id, null, $user->id, [
                     'signed_file_path' => $createdFile,
                 ]);

@@ -38,6 +38,16 @@ return [
             'report' => false,
         ],
 
+        // Signers' PNPKI certificates (.p12). Private: never served, never under public/.
+        'certificates' => [
+            'driver' => 'local',
+            'root' => storage_path('app/certificates'),
+            'visibility' => 'private',
+            'serve' => false,
+            'throw' => false,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

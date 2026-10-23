@@ -15,6 +15,10 @@ const sidebarNavItems: NavItem[] = [
         href: '/settings/password',
     },
     {
+        title: 'Signing certificate',
+        href: '/settings/certificate',
+    },
+    {
         title: 'Appearance',
         href: '/settings/appearance',
     },

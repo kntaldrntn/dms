@@ -14,6 +14,8 @@ type Office = { id: number; code: string; name: string };
 const props = defineProps<{
     documents: any;
     departments: Office[];
+    /** Whether the signed-in approver has a valid PNPKI certificate on file (needed for paperless). */
+    hasCertificate: boolean;
     flash?: { success?: string; error?: string };
 }>();
 
@@ -52,6 +54,7 @@ const form = useForm({
     remarks: '',
     signed_scan: null as File | null,
     stamp_placement: null as Record<string, number> | null,
+    certificate_pin: '',
 });
 const paperless = computed(() => approving.value?.route_mode === 'paperless');
 const suggestions = computed(() =>
@@ -100,13 +103,15 @@ async function submitApproval() {
     form.transform((data) => {
         const payload: Record<string, unknown> = { workflow_version: data.workflow_version, target: data.target, remarks: data.remarks };
         if (data.target === 'departments') Object.assign(payload, { routed_to: data.routed_to, primary_office_id: data.primary_office_id });
-        if (paperless.value) payload.stamp_placement = data.stamp_placement;
+        if (paperless.value) Object.assign(payload, { stamp_placement: data.stamp_placement, certificate_pin: data.certificate_pin });
         else payload.signed_scan = data.signed_scan;
         return payload;
     }).post(route('adm-approvals.approve', doc.id), {
         forceFormData: true,
         preserveScroll: true,
         onSuccess: () => (approving.value = null),
+        // The PIN never stays in the page after a submit.
+        onFinish: () => form.reset('certificate_pin'),
     });
 }
 
@@ -265,9 +270,27 @@ const buttonClass =
                             <InputError class="mt-1 text-xs" :message="form.errors.remarks" />
                         </div>
 
-                        <div v-if="paperless">
-                            <p class="text-sm text-slate-700">Paperless: your e-signature is stamped on a blank area of the PDF.</p>
-                            <InputError class="mt-1 text-xs" :message="form.errors.stamp_placement" />
+                        <div v-if="paperless" class="space-y-2">
+                            <p class="text-sm text-slate-700">
+                                Paperless: your e-signature is stamped on a blank area of the PDF and signed with your PNPKI certificate.
+                            </p>
+                            <p v-if="!hasCertificate" role="alert" class="text-sm text-amber-700">
+                                You have no valid signing certificate. Upload it in
+                                <Link :href="route('certificate.edit')" class="underline">Settings → Signing certificate</Link>.
+                            </p>
+                            <div>
+                                <label for="approve_certificate_pin" class="mb-1 block text-sm text-slate-700">Certificate PIN</label>
+                                <input
+                                    id="approve_certificate_pin"
+                                    v-model="form.certificate_pin"
+                                    type="password"
+                                    autocomplete="off"
+                                    required
+                                    :class="fieldClass"
+                                />
+                                <InputError class="mt-1 text-xs" :message="form.errors.certificate_pin" />
+                            </div>
+                            <InputError class="text-xs" :message="form.errors.stamp_placement" />
                         </div>
                         <div v-else>
                             <label for="approve_signed_scan" class="mb-1 block text-sm text-slate-700">Scan of the wet-signed document</label>

@@ -39,7 +39,7 @@ test('AI stamp placements that run past the page edge are rejected', function ()
 
 test('OCM approval refuses a stamp that does not fit inside the page', function () {
     $this->actingAs($this->mayor)->postJson(route('ocm-approvals.approve', $this->document), [
-        'workflow_version' => 0,
+        'workflow_version' => 0, 'certificate_pin' => '2468',
         'stamp_placement' => ['page' => 1, 'x' => 800, 'y' => 100, 'width' => 300, 'height' => 105],
     ])->assertUnprocessable()->assertJsonValidationErrors(['stamp_placement']);
 

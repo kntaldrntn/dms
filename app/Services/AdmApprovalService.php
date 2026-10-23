@@ -42,7 +42,7 @@ class AdmApprovalService
                     throw ValidationException::withMessages(['stamp_placement' => 'Paperless approval needs the uploaded PDF.']);
                 }
                 if ($paperless) {
-                    $signedFile = $this->pdfStamps->stamp($document, $user, $data['stamp_placement'], PdfApprovalStampService::ADM);
+                    $signedFile = $this->pdfStamps->stamp($document, $user, $data['stamp_placement'], PdfApprovalStampService::ADM, $data['certificate_pin']);
                 } else {
                     $signedFile = $data['signed_scan']->store('signed-documents', 'local');
                     if (! $signedFile) {

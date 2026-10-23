@@ -32,5 +32,6 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // A certificate PIN must never be flashed back into the session after a validation error.
+        $exceptions->dontFlash(['certificate_pin']);
     })->create();

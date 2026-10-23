@@ -24,6 +24,8 @@ class ApproveAdmDocumentRequest extends DocumentMutationRequest
             'primary_office_id' => ['exclude_unless:target,departments', 'required', 'integer', Rule::in((array) $this->input('routed_to', []))],
             'remarks' => ['nullable', 'string', 'max:1000'],
             'signed_scan' => $paperless ? ['prohibited'] : ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            // Opens the City Administrator's own certificate for this signing; never stored or flashed.
+            'certificate_pin' => $paperless ? ['required', 'string', 'max:100'] : ['prohibited'],
         ] + ($paperless ? ApproveOcmDocumentRequest::placementRules() : ['stamp_placement' => ['prohibited']]);
     }
 

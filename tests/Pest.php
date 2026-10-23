@@ -45,3 +45,20 @@ function something()
 {
     // ..
 }
+
+/**
+ * A throwaway self-signed .p12 (PKCS#12) protected by $pin, valid for $days (negative = already expired).
+ * PHP on Windows needs an explicit openssl.cnf to generate keys; OPENSSL_CONF or the XAMPP copy is used.
+ */
+function testCertificate(string $pin, string $commonName = 'TEST SIGNER', int $days = 30): string
+{
+    $configFile = getenv('OPENSSL_CONF') ?: 'C:/xampp/apache/conf/openssl.cnf';
+    $config = is_file($configFile) ? ['config' => $configFile] : [];
+    $key = openssl_pkey_new($config + ['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+    $request = openssl_csr_new(['commonName' => $commonName], $key, $config);
+    // openssl_csr_sign() cannot back-date, so an expired certificate is signed for 0 days and checked after expiry.
+    $certificate = openssl_csr_sign($request, null, $key, max(0, $days), $config);
+    openssl_pkcs12_export($certificate, $pkcs12, $key, $pin);
+
+    return $pkcs12;
+}
