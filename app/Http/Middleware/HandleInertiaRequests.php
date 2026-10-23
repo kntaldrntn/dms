@@ -48,6 +48,7 @@ class HandleInertiaRequests extends Middleware
                 'user' => $request->user(),
                 // Referral access depends on office (ADM Department Head), not role alone.
                 'canViewReferrals' => (bool) $request->user()?->can('viewReferrals', Document::class),
+                'canViewAdmApprovals' => (bool) $request->user()?->can('viewAdmApprovals', Document::class),
             ],
             // Lazy so the bell's polling can request it alone (`only: ['incoming']`).
             'incoming' => fn () => app(IncomingDocumentService::class)->forUser($request->user()),

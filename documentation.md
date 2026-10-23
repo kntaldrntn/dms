@@ -172,6 +172,17 @@ category; external clients see the latest status only.
    - 2c. ADM single approval: ADM staff receive (bell) → City Administrator **Approve & Route**: paperless =
      PNPKI stamp via `PdfApprovalStampService`, paper = upload of the wet-signed scan → routes to OCM (stage
      `ocm_approval`) or to departments (Primary + copies, AI suggestion pre-filled). Never back to Records.
+     **2c detail (2026-10-23, proposed):** new "ADM Approvals" page (sidebar; ADM users + Sys Admin) listing
+     `adm_approval` documents. (1) Any active ADM user clicks **Receive** → `received_by/at` on the ADM entry;
+     bell pings ADM users until received, then pings the City Administrator. (2) City Administrator **Approve &
+     Route** (only after receipt): target = OCM (opens `ocm_approval`) **or** departments (OfficePicker, AI
+     pre-ticked, Primary + copies); remarks optional. Paper route: upload of the wet-signed scan (PDF/JPG/PNG,
+     `local` disk `signed-documents/`, served by the existing authorized `previewSigned`). Paperless: PDF stamped
+     by `PdfApprovalStampService` (location/reason per office) with the placement logic moved from
+     `ocm-approvals/Index.vue` into `resources/js/lib/stampPlacement.ts`; `findStampPlacement` accepts ADM too.
+     Trail: release "Approved by City Administrator" (approval trail, `signed_file_path`), receive at targets.
+     Referral Slips page lists only legacy `adm_signature` documents until 2d. Still signs with the configured
+     certificate; **2c-2 (new step): per-signer PNPKI `.p12` + PIN** for ADM and OCM.
    - 2d. Retire referral slips: `ReferralService::generate/sign`, `department_head` stage, Referral Slips page,
      print/preview routes and template, `approved_routing_slip` use (old data is reset in 2e).
    - 2e. Reset command `php artisan dms:reset-documents` (documents, trails, uploaded/signed files; keeps offices,
@@ -332,6 +343,32 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-23 — FGD Phase 2c: ADM single approval (Claude Code, uncommitted)
+- New page **ADM Approvals** (`adm-approvals.index/receive/approve`, `AdmApprovalController`,
+  `AdmApprovalService`, `ReceiveAdmDocumentRequest`, `ApproveAdmDocumentRequest`, page
+  `resources/js/pages/adm-approvals/Index.vue`, sidebar item via shared `auth.canViewAdmApprovals`).
+- Policy: `viewAdmApprovals` (active ADM users + sys admin), `receiveAdm` (ADM entry not yet received),
+  `approveAdm` (City Administrator or sys admin, only after receipt).
+- Flow: any ADM user **Receive** → `received_by/at`, action "Received by ADM"; City Administrator **Approve &
+  Route** → release "Approved by City Administrator" (trail_type approval, `signed_by`, `signature_mode`
+  physical/electronic, `signed_file_path`, `released_to_offices`) → OCM (`ocm_approval` stage) or departments
+  (`distribute()`, Primary + copies). Never back to Records. Paper: wet-signed scan required (local disk
+  `signed-documents/`). Paperless: PDF stamped. Files written before a failure are deleted.
+- **Stamp service:** `PdfApprovalStampService::stamp(..., $office)` with `OCM` (unchanged: City Mayor's PNPKI
+  certificate) and `ADM` profiles. **ADM has no certificate yet:** it draws the City Administrator's own
+  uploaded e-signature with "Electronically Signed" and no cryptographic signature (the configured certificate
+  is the Mayor's, so using it for ADM would be wrong). Per-signer certificates = step 2c-2. The service now
+  stamps the newest signed PDF, so OCM after a paperless ADM approval keeps the ADM signature; signature images
+  may be PNG or JPEG. `Document::stampSourceUrl()` gives both pages the same PDF to measure placement on.
+- Stamp placement logic moved from `ocm-approvals/Index.vue` to `resources/js/lib/stampPlacement.ts`;
+  `findStampPlacement` accepts OCM (`refer`) and ADM (`approveAdm`).
+- Bell: an `adm_approval` entry pings every ADM user until received, then the City Administrator
+  ("Ready for City Administrator approval", links to ADM Approvals). Referral Slips page now lists only legacy
+  `adm_signature` documents (empty for the City Administrator).
+- Checks: Pest 130 passed (1239 assertions; new `AdmApprovalTest` 10 cases incl. a real PDF stamp; bell and
+  queue expectations updated in IncomingDocuments/ExecutiveStage/WorkflowReliability); Pint ✅ on new/changed
+  PHP; ESLint ✅; build ✅. **Not tested in the browser.**
 
 ### 2026-10-23 — FGD Phase 2b: intake "Direct to" Departments (Claude Code, uncommitted)
 - `SaveDocumentRequest` (create only): `routed_to[]` (active offices except REC/ADM/OCM) + `primary_office_id`

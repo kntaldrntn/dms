@@ -65,10 +65,12 @@ test('executive steps ping only the role that acts on them and stay out of the o
     ])->assertRedirect()->assertSessionHasNoErrors();
     $adm = Document::where('barcode', 'ADM-001')->firstOrFail();
 
-    $this->actingAs($this->administrator)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page
-        ->where('incoming.count', 1)
-        ->where('incoming.items.0.url', route('referral-slips.index')));
-    $this->actingAs($this->admHead)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page->where('incoming.count', 0));
+    // Until an ADM user receives it, every ADM user is pinged to receive it (FGD Phase 2c).
+    foreach ([$this->administrator, $this->admHead] as $admUser) {
+        $this->actingAs($admUser)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page
+            ->where('incoming.count', 1)
+            ->where('incoming.items.0.url', route('adm-approvals.index')));
+    }
 
     // The Office Inbox neither lists nor processes a document awaiting its referral slip.
     $this->actingAs($this->administrator)->get(route('transactions.inbox'))

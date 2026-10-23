@@ -58,12 +58,13 @@ test('the Primary office cannot be changed while an approval is pending', functi
 });
 
 test('the notification bell pings only the role that acts on a staged entry', function () {
-    $administrator = User::factory()->create(['role' => 'city_administrator', 'department_id' => $this->admin->id]);
-    $staff = User::factory()->create(['role' => 'staff', 'department_id' => $this->admin->id]);
+    $mayor = User::factory()->create(['role' => 'city_mayor', 'department_id' => $this->other->id]);
+    $otherStaff = User::factory()->create(['role' => 'staff', 'department_id' => $this->other->id]);
+    $this->entry->update(['department_id' => $this->other->id, 'stage' => DocumentTrail::STAGE_OCM_APPROVAL]);
 
-    $this->actingAs($administrator)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page
-        ->where('incoming.count', 1)->where('incoming.items.0.url', route('referral-slips.index')));
-    $this->actingAs($staff)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page->where('incoming.count', 0));
+    $this->actingAs($mayor)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page
+        ->where('incoming.count', 1)->where('incoming.items.0.url', route('ocm-approvals.index')));
+    $this->actingAs($otherStaff)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page->where('incoming.count', 0));
 });
 
 test('the migration backfills the stage from requires_signature_from', function () {

@@ -95,6 +95,20 @@ class Document extends Model
             ->whereNull('released_at')->latest('id')->value('stage');
     }
 
+    /**
+     * The PDF an approval stamps: the newest signed version, else the uploaded scan. Stamp placement is measured
+     * on this same file in the browser, so a second approval does not cover the first signature.
+     */
+    public function stampSourceUrl(): ?string
+    {
+        $signed = $this->trails()->getQuery()->reorder()->whereNotNull('signed_file_path')->latest('id')->value('signed_file_path');
+        if ($signed && str_ends_with(strtolower($signed), '.pdf')) {
+            return route('documents.ocm-approved-pdf', $this);
+        }
+
+        return $this->attached_file ? '/storage/'.$this->attached_file : null;
+    }
+
     public function inExecutiveStage(): bool
     {
         return in_array($this->stage, DocumentTrail::EXECUTIVE_STAGES, true);

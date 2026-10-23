@@ -42,6 +42,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // --- NEW: Referral Slip Generation ---
         Route::get('/referral-slips', [App\Http\Controllers\ReferralSlipController::class, 'index'])->name('referral-slips.index');
+        Route::get('/adm-approvals', [App\Http\Controllers\AdmApprovalController::class, 'index'])->name('adm-approvals.index');
+        Route::post('/adm-approvals/{document}/receive', [App\Http\Controllers\AdmApprovalController::class, 'receive'])->name('adm-approvals.receive');
+        Route::post('/adm-approvals/{document}/approve', [App\Http\Controllers\AdmApprovalController::class, 'approve'])->name('adm-approvals.approve');
         Route::get('/ocm-approvals', [App\Http\Controllers\ReferralSlipController::class, 'ocmIndex'])->name('ocm-approvals.index');
         Route::post('/ocm-approvals/{document}/approve', [App\Http\Controllers\ReferralSlipController::class, 'approveOcm'])->name('ocm-approvals.approve');
         Route::post('/referral-slips/{document}/generate', [App\Http\Controllers\ReferralSlipController::class, 'generate'])->name('referral-slips.generate');

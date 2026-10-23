@@ -55,6 +55,13 @@ const mainNavItems = computed<NavItem[]>(() => {
             icon: FileSignature,
             roles: page.props.auth.canViewReferrals ? [userRole.value] : [],
         },
+        // ADM Approvals: ADM users receive, the City Administrator approves (FGD Phase 2c).
+        {
+            title: 'ADM Approvals',
+            href: route('adm-approvals.index'),
+            icon: FileSignature,
+            roles: page.props.auth.canViewAdmApprovals ? [userRole.value] : [],
+        },
         {
             title: 'OCM Approvals',
             href: route('ocm-approvals.index'),

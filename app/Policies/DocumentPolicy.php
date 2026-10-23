@@ -82,6 +82,42 @@ class DocumentPolicy
             || $this->isAdmDepartmentHead($user);
     }
 
+    /** ADM Approvals queue: every active ADM user (they receive), plus system administrators. */
+    public function viewAdmApprovals(User $user): bool
+    {
+        return $user->state === 1 && ($user->role === 'system_administrator'
+            ? $user->department()->where('state', 1)->exists()
+            : $user->department()->where('code', 'ADM')->where('state', 1)->exists());
+    }
+
+    /** FGD Phase 2c step 1: an ADM user receives a document waiting on City Administrator approval. */
+    public function receiveAdm(User $user, Document $document): bool
+    {
+        $entry = $this->admApprovalEntry($document);
+
+        return $entry !== null && $entry->received_by === null && $this->viewAdmApprovals($user);
+    }
+
+    /** Step 2: only the City Administrator (or a system administrator) approves, and only after receipt. */
+    public function approveAdm(User $user, Document $document): bool
+    {
+        $entry = $this->admApprovalEntry($document);
+        $isApprover = $user->role === 'system_administrator'
+            || ($user->role === 'city_administrator' && $user->department()->where('code', 'ADM')->exists());
+
+        return $entry !== null && $entry->received_by !== null && $isApprover && $this->viewAdmApprovals($user);
+    }
+
+    private function admApprovalEntry(Document $document): ?DocumentTrail
+    {
+        if ($document->state !== 1 || $document->status === 'Completed') {
+            return null;
+        }
+
+        return DocumentTrail::where('document_id', $document->id)->where('copy_role', DocumentTrail::PRIMARY)
+            ->whereNull('released_at')->where('stage', DocumentTrail::STAGE_ADM_APPROVAL)->latest('id')->first();
+    }
+
     public function viewOcmApprovals(User $user): bool
     {
         return $user->state === 1 && in_array($user->role, ['city_mayor', 'system_administrator'], true)

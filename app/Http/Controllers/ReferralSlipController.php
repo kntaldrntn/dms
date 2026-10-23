@@ -22,13 +22,10 @@ class ReferralSlipController extends Controller
     {
         $this->authorize('viewReferrals', Document::class);
 
-        // City Administrator generates slips; the ADM Department Head signs them; admins see both stages.
-        $stages = match ($request->user()->role) {
-            'city_administrator' => [DocumentTrail::STAGE_ADM_APPROVAL],
-            'department_head' => [DocumentTrail::STAGE_ADM_SIGNATURE],
-            default => [DocumentTrail::STAGE_ADM_APPROVAL, DocumentTrail::STAGE_ADM_SIGNATURE],
-        };
-
+        // Legacy queue: only slips generated before FGD Phase 2c still wait for the ADM Department Head.
+        // New ADM documents go through the ADM Approvals page (single City Administrator approval).
+        // Only the ADM Department Head signs those slips, so the City Administrator's view stays empty.
+        $stages = $request->user()->role === 'city_administrator' ? [] : [DocumentTrail::STAGE_ADM_SIGNATURE];
         $documents = Document::with(['documentType', 'transactionType', 'primaryEntry'])
             ->inStage($stages)
             ->where('status', 'Pending')->where('state', 1)->latest()->paginate(10);
@@ -49,7 +46,8 @@ class ReferralSlipController extends Controller
 
         $documents = Document::with(['documentType', 'transactionType', 'primaryEntry'])
             ->inStage([DocumentTrail::STAGE_OCM_APPROVAL])
-            ->where('status', 'Pending')->where('state', 1)->latest()->paginate(10);
+            ->where('status', 'Pending')->where('state', 1)->latest()->paginate(10)
+            ->through(fn (Document $document) => $document->setAttribute('stamp_source_url', $document->stampSourceUrl()));
 
         return Inertia::render('ocm-approvals/Index', [
             'documents' => $documents,
@@ -81,8 +79,13 @@ class ReferralSlipController extends Controller
 
     public function findStampPlacement(Request $request, Document $document)
     {
-        $this->authorize('refer', $document);
-        abort_unless($document->stage === DocumentTrail::STAGE_OCM_APPROVAL, 422, 'Only OCM approval uses the certificate stamp.');
+        // The City Mayor (OCM) and the City Administrator (ADM, paperless) both stamp approved PDFs.
+        $ability = match ($document->stage) {
+            DocumentTrail::STAGE_OCM_APPROVAL => 'refer',
+            DocumentTrail::STAGE_ADM_APPROVAL => 'approveAdm',
+            default => abort(422, 'This document is not waiting on an approval stamp.'),
+        };
+        $this->authorize($ability, $document);
 
         $validated = $request->validate([
             'thumbnails' => ['required', 'array', 'min:1', 'max:5'],
@@ -94,7 +97,7 @@ class ReferralSlipController extends Controller
 
         $content = [[
             'type' => 'text',
-            'text' => 'Find one completely blank rectangle for a City Mayor digital-signature image on these numbered PDF page previews. Return JSON only: {"page":integer,"x":number,"y":number,"width":number,"height":number}. Coordinates are normalized 0-1000 from the top-left. The rectangle must be at least 250 wide and 70 high, entirely inside the page (x + width <= 1000 and y + height <= 1000), and must not overlap any text, handwriting, seal, barcode, table, footer, or existing signature. A large blank margin is acceptable even when it is not labelled as a signature field; prefer the lower half of a later page. Only return {"page":null} when every page has no blank rectangle of this size.',
+            'text' => 'Find one completely blank rectangle for an official\'s signature stamp on these numbered PDF page previews. Return JSON only: {"page":integer,"x":number,"y":number,"width":number,"height":number}. Coordinates are normalized 0-1000 from the top-left. The rectangle must be at least 250 wide and 70 high, entirely inside the page (x + width <= 1000 and y + height <= 1000), and must not overlap any text, handwriting, seal, barcode, table, footer, or existing signature. A large blank margin is acceptable even when it is not labelled as a signature field; prefer the lower half of a later page. Only return {"page":null} when every page has no blank rectangle of this size.',
         ]];
         foreach ($validated['thumbnails'] as $index => $thumbnail) {
             $content[] = ['type' => 'text', 'text' => 'PDF page '.$validated['pages'][$index]['page']];

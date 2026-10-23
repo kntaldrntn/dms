@@ -414,7 +414,7 @@ test('intake accepts an internal office id and hands the document to the City Ad
     expect($created->trails()->count())->toBe(2);
     expect($created->trails()->oldest('id')->first()->released_to)->toBe($this->adminOffice->id);
     expect($created->trails()->latest('id')->first()->received_action)->toBe('Awaiting referral slip');
-    $this->actingAs($this->administrator)->get(route('referral-slips.index'))
+    $this->actingAs($this->administrator)->get(route('adm-approvals.index'))
         ->assertOk()->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
     expect($created->due_date->toDateString())->toBe('2026-09-29');
 });
