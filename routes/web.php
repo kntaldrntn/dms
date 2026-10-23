@@ -40,18 +40,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
         // --- NEW: Workflow Endpoints ---
         Route::post('/documents/{document}/route', [DocumentController::class, 'routeDocument'])->name('documents.route');
 
-        // --- NEW: Referral Slip Generation ---
-        Route::get('/referral-slips', [App\Http\Controllers\ReferralSlipController::class, 'index'])->name('referral-slips.index');
+        // --- Executive approvals (FGD Phase 2): ADM single approval, OCM certificate approval ---
         Route::get('/adm-approvals', [App\Http\Controllers\AdmApprovalController::class, 'index'])->name('adm-approvals.index');
         Route::post('/adm-approvals/{document}/receive', [App\Http\Controllers\AdmApprovalController::class, 'receive'])->name('adm-approvals.receive');
         Route::post('/adm-approvals/{document}/approve', [App\Http\Controllers\AdmApprovalController::class, 'approve'])->name('adm-approvals.approve');
-        Route::get('/ocm-approvals', [App\Http\Controllers\ReferralSlipController::class, 'ocmIndex'])->name('ocm-approvals.index');
-        Route::post('/ocm-approvals/{document}/approve', [App\Http\Controllers\ReferralSlipController::class, 'approveOcm'])->name('ocm-approvals.approve');
-        Route::post('/referral-slips/{document}/generate', [App\Http\Controllers\ReferralSlipController::class, 'generate'])->name('referral-slips.generate');
-        Route::post('/referral-slips/{document}/sign', [App\Http\Controllers\ReferralSlipController::class, 'sign'])->name('referral-slips.sign');
-        Route::post('/referral-slips/{document}/stamp-placement', [App\Http\Controllers\ReferralSlipController::class, 'findStampPlacement'])->name('referral-slips.stamp-placement');
-    Route::get('/referral-slips/{document}/print', [App\Http\Controllers\ReferralSlipController::class, 'print'])->name('referral-slips.print');
-    Route::get('/referral-slips/{document}/preview', [App\Http\Controllers\ReferralSlipController::class, 'preview'])->name('referral-slips.preview');
+        Route::get('/ocm-approvals', [App\Http\Controllers\OcmApprovalController::class, 'index'])->name('ocm-approvals.index');
+        Route::post('/ocm-approvals/{document}/approve', [App\Http\Controllers\OcmApprovalController::class, 'approve'])->name('ocm-approvals.approve');
+        Route::post('/approvals/{document}/stamp-placement', [App\Http\Controllers\OcmApprovalController::class, 'findStampPlacement'])->name('approvals.stamp-placement');
         
         Route::get('/transactions/inbox', [TransactionController::class, 'index'])->name('transactions.inbox');
         Route::post('/transactions/{document}/process', [TransactionController::class, 'process'])->name('transactions.process');
@@ -63,7 +58,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // 2. READ-ONLY ROUTES (Must go LAST)
     Route::get('documents', [DocumentController::class, 'index'])->name('documents.index');
     Route::get('documents/{document}', [DocumentController::class, 'show'])->name('documents.show');
-    Route::get('documents/{document}/ocm-approved-pdf', [App\Http\Controllers\ReferralSlipController::class, 'previewSigned'])->name('documents.ocm-approved-pdf');
+    Route::get('documents/{document}/signed-pdf', [App\Http\Controllers\OcmApprovalController::class, 'previewSigned'])->name('documents.signed-pdf');
 
     // 3. DASHBOARD
     Route::get('dashboard', DashboardController::class)->name('dashboard');

@@ -75,13 +75,6 @@ class DocumentPolicy
             && ! $document->inExecutiveStage();
     }
 
-    public function viewReferrals(User $user): bool
-    {
-        return ($user->state === 1 && in_array($user->role, ['city_administrator', 'system_administrator'], true)
-            && $user->department()->where('state', 1)->exists())
-            || $this->isAdmDepartmentHead($user);
-    }
-
     /** ADM Approvals queue: every active ADM user (they receive), plus system administrators. */
     public function viewAdmApprovals(User $user): bool
     {
@@ -124,58 +117,11 @@ class DocumentPolicy
             && $user->department()->where('state', 1)->exists();
     }
 
-    public function refer(User $user, Document $document): bool
+    /** The City Mayor (or a system administrator) signs a document waiting on OCM approval. */
+    public function approveOcm(User $user, Document $document): bool
     {
-        // A generated slip waits for the ADM Department Head; it cannot be regenerated.
-        $stage = $document->stage;
-        if ($stage === DocumentTrail::STAGE_ADM_SIGNATURE) {
-            return false;
-        }
-
-        if ($user->role === 'system_administrator') {
-            return in_array($stage, [DocumentTrail::STAGE_ADM_APPROVAL, DocumentTrail::STAGE_OCM_APPROVAL], true)
-                || $document->department()->whereIn('code', ['ADM', 'OCM'])->where('state', 1)->exists();
-        }
-
-        if ($user->role === 'city_mayor') {
-            return $this->viewOcmApprovals($user)
-                && ($stage === DocumentTrail::STAGE_OCM_APPROVAL
-                    || $document->department()->where('code', 'OCM')->where('state', 1)->exists());
-        }
-
-        if ($user->role !== 'city_administrator' || ! $this->viewReferrals($user)) {
-            return false;
-        }
-
-        return $stage === DocumentTrail::STAGE_ADM_APPROVAL
-            || $document->department()->where('code', 'ADM')->where('state', 1)->exists();
-    }
-
-    /** Step 2 of the ADM referral: only the ADM Department Head (or a system administrator) signs. */
-    public function signReferral(User $user, Document $document): bool
-    {
-        return $document->stage === DocumentTrail::STAGE_ADM_SIGNATURE
-            && $document->department()->where('code', 'ADM')->where('state', 1)->exists()
-            && ($this->isAdmDepartmentHead($user)
-                || ($user->state === 1 && $user->role === 'system_administrator'));
-    }
-
-    private function isAdmDepartmentHead(User $user): bool
-    {
-        return $user->state === 1 && $user->role === 'department_head'
-            && $user->department()->where('code', 'ADM')->where('state', 1)->exists();
-    }
-
-    public function viewReferralSlip(User $user, Document $document): bool
-    {
-        if ($this->viewReferrals($user)) {
-            return true;
-        }
-
-        return $user->state === 1
-            && $user->role === 'records_manager'
-            && $this->owns($user, $document)
-            && !empty($document->approved_routing_slip);
+        return $this->viewOcmApprovals($user) && $document->state === 1 && $document->status !== 'Completed'
+            && $document->stage === DocumentTrail::STAGE_OCM_APPROVAL;
     }
 
     /**

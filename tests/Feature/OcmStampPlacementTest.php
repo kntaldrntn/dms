@@ -16,7 +16,7 @@ beforeEach(function () {
     $this->mayor = User::factory()->create(['role' => 'city_mayor', 'department_id' => $office->id]);
     $this->document = Document::create([
         'barcode' => 'OCM-STAMP', 'access_code' => 'ABC123', 'source_type' => 'External', 'source_name' => 'Client',
-        'subject_matter' => 'For signature', 'department_id' => $office->id, 'requires_signature_from' => 'city_mayor',
+        'subject_matter' => 'For signature', 'department_id' => $office->id,
         'document_type_id' => DocumentType::create(['document_code' => 'T', 'document_type' => 'Test', 'state' => 1])->id,
         'transaction_type_id' => TransactionType::create(['name' => 'Simple', 'processing_days' => 3, 'state' => 1])->id,
     ]);
@@ -31,7 +31,7 @@ test('AI stamp placements that run past the page edge are rejected', function ()
         'choices' => [['message' => ['role' => 'assistant', 'content' => '{"page":1,"x":900,"y":850,"width":260,"height":105}']]],
     ])]);
 
-    $this->actingAs($this->mayor)->post(route('referral-slips.stamp-placement', $this->document), [
+    $this->actingAs($this->mayor)->post(route('approvals.stamp-placement', $this->document), [
         'thumbnails' => [UploadedFile::fake()->image('page-1.jpg')],
         'pages' => [['page' => 1]],
     ], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonStructure(['error']);

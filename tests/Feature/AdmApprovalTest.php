@@ -88,8 +88,7 @@ test('a paper approval keeps the wet-signed scan and routes straight to the depa
 
     $document = $this->document->fresh();
     expect($document->department_id)->toBe($this->ict->id)
-        ->and($document->stage)->toBeNull()
-        ->and($document->requires_signature_from)->toBe('none');
+        ->and($document->stage)->toBeNull();
 
     $approval = DocumentTrail::where('document_id', $document->id)->where('released_action', 'Approved by City Administrator')->firstOrFail();
     expect($approval->signed_by)->toBe($this->cityAdministrator->id)
@@ -170,7 +169,7 @@ test('a paperless approval is signed with the City Administrator own certificate
     // A PDF signature dictionary with a byte range means the file is cryptographically signed.
     expect($signed)->toStartWith('%PDF')->toContain('/ByteRange')->toContain('/Type /Sig');
     // OCM will stamp (and measure placement on) this ADM-signed PDF, not the original scan.
-    expect($this->document->fresh()->stampSourceUrl())->toBe(route('documents.ocm-approved-pdf', $this->document));
+    expect($this->document->fresh()->stampSourceUrl())->toBe(route('documents.signed-pdf', $this->document));
 });
 
 test('a wrong PIN or a missing certificate or e-signature stops a paperless approval', function (Closure $setUp, array $data, string $error) {
@@ -186,3 +185,16 @@ test('a wrong PIN or a missing certificate or e-signature stops a paperless appr
     'no certificate' => [fn ($test) => app(SigningCertificateService::class)->remove($test->cityAdministrator), ['certificate_pin' => '2468'], 'certificate_pin'],
     'no e-signature image' => [fn ($test) => $test->cityAdministrator->update(['signature_path' => null]), ['certificate_pin' => '2468'], 'stamp_placement'],
 ]);
+
+test('the signed PDF preview shows the newest signed version', function () {
+    foreach (['older' => 'signed-documents/older.pdf', 'newer' => 'signed-documents/newer.pdf'] as $label => $path) {
+        Storage::disk('local')->put($path, "%PDF {$label}");
+        DocumentTrail::create([
+            'document_id' => $this->document->id, 'department_id' => $this->adm->id, 'signed_file_path' => $path,
+            'received_at' => now('Asia/Manila'), 'released_at' => now('Asia/Manila'), 'received_action' => "Signed {$label}",
+        ]);
+    }
+
+    expect($this->actingAs($this->cityAdministrator)->get(route('documents.signed-pdf', $this->document))->assertOk()->streamedContent())
+        ->toBe('%PDF newer');
+});

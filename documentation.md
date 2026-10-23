@@ -26,7 +26,7 @@ A dashboard reports SLA/delinquency metrics by month and transaction category.
 | Routing helper | Ziggy (`resources/js/ziggy.js` is generated) | `composer.json`, CI step `ziggy:generate` |
 | DB | MySQL (`DB_CONNECTION=mysql`, db `dms`) locally via XAMPP; SQLite `:memory:` for tests | `.env`, `phpunit.xml` |
 | Queue / cache / session | `database` drivers | `.env` |
-| AI | `openai-php/laravel` — `gpt-4o-mini` vision for intake extraction and OCM stamp placement | `DocumentAnalysisService`, `ReferralSlipController::findStampPlacement` |
+| AI | `openai-php/laravel` — intake extraction (`DocumentIntakeAnalyzer`, default `gpt-6-luna`) and `gpt-4o-mini` vision for approval stamp placement | `DocumentIntakeAnalyzer`, `OcmApprovalController::findStampPlacement` |
 | Client-side OCR/scan | tesseract.js, pdfjs-dist, @zxing (barcode) | `package.json` |
 | PDF | barryvdh/laravel-dompdf (referral slips); setasign/fpdi-tcpdf + tecnickcom/tcpdf (OCM signed PDFs); smalot/pdfparser | `composer.json` |
 | Tests | Pest 3 + pest-plugin-laravel; `RefreshDatabase` on Feature tests | `tests/Pest.php` |
@@ -49,16 +49,15 @@ FormRequest (authorize + rules) → service → `DocumentWorkflow` → models/tr
 | `app/Services/DocumentService.php` | Create/update/deactivate. On create, `ADM` target → custody moves REC → ADM with `requires_signature_from=city_administrator`; `OCM` target → custody moves to OCM with `requires_signature_from=city_mayor`; other targets → direct dispatch. Cleans up uploaded file on failure. |
 | `app/Services/DispatchService.php`, `TransactionService.php` | Records dispatch (records every target in `released_to_offices`) and per-office inbox processing: each holding office ends or routes its own copy; the document completes when no open copy remains. |
 | `app/Services/IncomingDocumentService.php` | Notification-bell data: open trail entries at the user's office with `received_by` null, filtered to the stages the user's role acts on. Shared lazily as `incoming`. |
-| `app/Services/ReferralService.php` | Two-step ADM referral: `generate()` (City Administrator, slip only → `requires_signature_from=department_head`) and `sign()` (ADM Department Head, `signature_mode` electronic/physical → back to REC). OCM approval `approveOcm()` uses `PdfApprovalStampService`. |
+| `app/Services/AdmApprovalService.php`, `OcmApprovalService.php` | FGD executive approvals: ADM receive → City Administrator single approval → OCM or departments; OCM approval (returns to Records until Phase 3). Both stamp via `PdfApprovalStampService` with the signer's own PNPKI certificate (`SigningCertificateService`). Referral slips were retired in Phase 2d. |
 | `app/Services/PdfApprovalStampService.php` | Stamps the uploaded PDF with a visible signature block and signs it with the certificate from `config/digital-certificate.php`; writes to `storage/app/private/signed-documents` (local disk). Original upload untouched. |
 | `app/Services/DocumentIntakeAnalyzer.php` | Live intake AI (called by `DocumentController::analyze()`): OCR text only (pages 1, 2, last) → strict JSON schema whose ids come from the registries + the type rulebook; answer re-checked server-side (allowed classification, default category, one Primary office, ADM/OCM excluded from routing). Model: `config('services.intake_ai.model')`. |
 | `app/Services/DocumentAnalysisService.php` | **Unused** older copy of the intake prompt (prompt reference: `basis.md`); not wired to any route. |
 | `app/Policies/DocumentPolicy.php` | All document abilities: `viewAny`, `view`, `create`, `update`, `delete`, `dispatch`, `process`, `viewReferrals`, `viewOcmApprovals`, `refer`, `signReferral`, `viewReferralSlip`. Ownership = user's department equals document's current department. |
-| `app/Http/Requests/*` | `SaveDocumentRequest`, `DispatchDocumentRequest`, `ProcessDocumentRequest`, `GenerateReferralRequest`, `SignReferralRequest`, `ApproveOcmDocumentRequest`, `AnalyzeDocumentRequest`, `DocumentMutationRequest` (base: requires `workflow_version`). |
+| `app/Http/Requests/*` | `SaveDocumentRequest`, `DispatchDocumentRequest`, `ProcessDocumentRequest`, `ReceiveAdmDocumentRequest`, `ApproveAdmDocumentRequest`, `ApproveOcmDocumentRequest`, `AnalyzeDocumentRequest`, `Settings/SigningCertificateRequest`, `DocumentMutationRequest` (base: requires `workflow_version`). |
 | `app/Http/Controllers/DashboardController.php` | Invokable; SLA/delinquency/to-do metrics and drill-down. Delinquency is all-departments for `ALL_DEPARTMENT_ROLES`, otherwise the user's held documents. |
 | `app/Http/Middleware` | `HandleRoles` (`role:` alias), `CheckWorkingHours`, `TrackUserActivity`, `HandleInertiaRequests` (shares `auth.user`, `auth.canViewReferrals`, lazy `incoming`). |
 | `app/Models` | `Document` (computed `is_delayed`, `is_delinquent`; `holders()` = offices with an open copy; `scopeHeldBy`; `EXECUTIVE_STAGES`), `DocumentTrail`, `Department`, `User`, registries (`DocumentType`, `TransactionType`, `DocumentClassification`, `DeliveryMethod`, `PerformanceStandard`), `AuditLog`, `LoginHistory`. Active/inactive uses integer `state` (1/0). |
-| `resources/views/referral-slips/print.blade.php` | Printable/PDF referral slip. |
 
 ### Roles (string column `users.role`)
 `system_administrator`, `records_manager`, `city_administrator`, `city_mayor`,
@@ -75,7 +74,7 @@ latest office a copy moved to). Inbox, `process`/`update` ownership, "Currently 
 
 ### Frontend
 `resources/js/app.ts` boots Inertia; pages resolve from `resources/js/pages/**`.
-Feature pages: `documents/{Index,Show,Edit}`, `transactions/Index`, `referral-slips/Index`,
+Feature pages: `documents/{Index,Show,Edit}`, `transactions/Index`, `adm-approvals/Index`, `ocm-approvals/Index`, `settings/Certificate`,
 `ocm-approvals/Index`, `Dashboard`, admin registries (`departments`, `users`,
 `document-types`, `transaction-types`, `document-classifications`, `delivery-methods`,
 `performance-standards`), `settings/*`, `auth/*`. Shared: `components/` (app shell,
@@ -186,7 +185,8 @@ category; external clients see the latest status only.
    - 2d. Retire referral slips: `ReferralService::generate/sign`, `department_head` stage, Referral Slips page,
      print/preview routes and template, `approved_routing_slip` use (old data is reset in 2e).
    - 2e. Reset command `php artisan dms:reset-documents` (documents, trails, uploaded/signed files; keeps offices,
-     users, registries, people). Written and tested, **run only after the user confirms**.
+     users, registries, people). Written and tested, **run only after the user confirms**. Then drop the unused
+     `documents.approved_routing_slip` column in a new migration.
    - PNPKI per signer (default to confirm): each signer uploads their own `.p12` once to
      `storage/app/certificates/users/{user_id}.p12` (local disk, never public); the PIN is typed at each
      signing and never stored. Replaces the single Mayor certificate in `config/digital-certificate.php`.
@@ -343,6 +343,27 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-23 — FGD Phase 2d: referral slips retired (Claude Code, uncommitted)
+- Migration `2026_10_23_030000_retire_referral_slips` (**not yet run locally**): open `adm_signature` entries move
+  to `adm_approval` (they are already at ADM and go through the single approval); closed entries keep their
+  history; **drops `documents.requires_signature_from`** (the trail stage is the only source). `approved_routing_slip`
+  is no longer read or written but the column stays until the 2e reset, so past slips' targets are not lost first.
+- Removed: `ReferralSlipController`, `ReferralService`, `GenerateReferralRequest`, `SignReferralRequest`, the
+  Referral Slips page and print/PDF template, routes `referral-slips.*`, policy `viewReferrals`/`signReferral`/
+  `viewReferralSlip`/`refer`, `DocumentTrail::STAGE_ADM_SIGNATURE`, shared prop `canViewReferrals` + sidebar item,
+  `RoutingModal`'s slip/override modes, the slip link and slip styling in `documents/Index.vue`, `slipTargets`
+  on `documents/Show.vue`. Trail columns used by old slips (`required_actions`, …) stay: trail history is kept.
+- New `OcmApprovalController` (index, approve, `findStampPlacement`, `previewSigned`) + `OcmApprovalService`;
+  policy ability `approveOcm` (stage-based). Routes renamed: `approvals.stamp-placement`
+  (`/approvals/{document}/stamp-placement`) and `documents.signed-pdf` (`/documents/{document}/signed-pdf`).
+- Fixed: the signed-PDF preview returned the **oldest** signed file (`trails()` sorts ascending; `latest('id')` was
+  appended after it); it now shows the newest (e.g. OCM after ADM).
+- Intake to ADM now records "Awaiting City Administrator approval"; documents list labels read "Pending City
+  Administrator Approval" / "Pending City Mayor Approval"; login page feature line updated.
+- Checks: Pest 134 passed (1213 assertions; 6 slip-only tests removed, the rollback test now covers ADM approval
+  incl. file cleanup, new tests for the 2d migration and the newest-signed preview); Pint ✅; ESLint ✅; build ✅.
+  **Not tested in the browser.**
 
 ### 2026-10-23 — FGD Phase 2c-2: per-signer PNPKI certificates (Claude Code, uncommitted)
 - Migration `2026_10_23_020000_add_signing_certificate_to_users_table` (**not yet run locally**):

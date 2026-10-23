@@ -103,7 +103,7 @@ class DocumentController extends Controller
         $document->trails->each(function ($trail) use ($releaseOffices) {
             $offices = collect($trail->released_to_offices ?? [])
                 ->map(fn ($id) => $releaseOffices->get((int) $id))->filter()->values();
-            // Single-office releases (route, referral, approvals) only store released_to.
+            // Single-office releases (route, approvals) only store released_to.
             if ($offices->isEmpty() && $trail->releasedToOffice) {
                 $offices = collect([$trail->releasedToOffice->only(['id', 'code', 'name'])]);
             }
@@ -113,8 +113,6 @@ class DocumentController extends Controller
         return Inertia::render('documents/Show', [
             'document' => $document,
             'trails' => $document->trails,
-            // Offices a pending referral slip will dispatch to, for the "Next" route step.
-            'slipTargets' => Department::whereIn('id', $document->approved_routing_slip ?? [])->get(['id', 'code', 'name']),
             // The Primary office first, then every office holding a view-only copy (pivot.copy_role).
             'holders' => $document->holders()->get(['departments.id', 'departments.code', 'departments.name']),
             'canChangePrimary' => request()->user()->can('changePrimary', $document),

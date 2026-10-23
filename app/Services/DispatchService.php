@@ -19,8 +19,6 @@ class DispatchService
                 'released_to_offices' => $targets,
             ]);
             $this->workflow->distribute($document, $user, $targets, $primary, 'Dispatched from Records', 'Copy from Records');
-            // A referral is consumed once, including an explicit Records override.
-            $document->approved_routing_slip = null;
         });
     }
 }

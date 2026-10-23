@@ -48,13 +48,6 @@ const mainNavItems = computed<NavItem[]>(() => {
             icon: Inbox,
             roles: ['system_administrator', 'records_manager', 'user', 'staff', 'department_head', 'city_administrator', 'city_mayor'],
         },
-        // Referral Slips: City Administrator generates, ADM Department Head signs (server decides via policy).
-        {
-            title: 'Referral Slips',
-            href: route('referral-slips.index'),
-            icon: FileSignature,
-            roles: page.props.auth.canViewReferrals ? [userRole.value] : [],
-        },
         // ADM Approvals: ADM users receive, the City Administrator approves (FGD Phase 2c).
         {
             title: 'ADM Approvals',

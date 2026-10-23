@@ -35,8 +35,7 @@ test('intake can send a document straight to a Primary office with view-only cop
 
     $document = Document::where('barcode', 'DEPT-1')->firstOrFail();
     expect($document->department_id)->toBe($this->ict->id)
-        ->and($document->stage)->toBeNull()
-        ->and($document->requires_signature_from)->toBe('none');
+        ->and($document->stage)->toBeNull();
 
     $open = DocumentTrail::where('document_id', $document->id)->whereNull('released_at')->get();
     expect($open->pluck('copy_role', 'department_id')->all())->toEqual([

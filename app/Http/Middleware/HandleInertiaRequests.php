@@ -46,8 +46,7 @@ class HandleInertiaRequests extends Middleware
             'quote' => ['message' => trim($message), 'author' => trim($author)],
             'auth' => [
                 'user' => $request->user(),
-                // Referral access depends on office (ADM Department Head), not role alone.
-                'canViewReferrals' => (bool) $request->user()?->can('viewReferrals', Document::class),
+                // ADM Approvals depends on the office (every ADM user receives), not role alone.
                 'canViewAdmApprovals' => (bool) $request->user()?->can('viewAdmApprovals', Document::class),
             ],
             // Lazy so the bell's polling can request it alone (`only: ['incoming']`).

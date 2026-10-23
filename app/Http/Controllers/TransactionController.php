@@ -22,7 +22,7 @@ class TransactionController extends Controller
         // STRICT FILTER: Only active documents the user's office holds an open copy of
         // (a document dispatched to several offices appears in each office's inbox).
         $this->authorize('viewAny', Document::class);
-        // Documents waiting on an executive step belong to the Referral Slips / OCM queues instead.
+        // Documents waiting on an executive step belong to the ADM / OCM Approvals queues instead.
         $inbox = fn () => Document::visibleTo($request->user())->with(['documentType', 'transactionType', 'primaryEntry'])
             ->heldBy((int) $request->user()->department_id)
             ->outsideExecutiveStages()

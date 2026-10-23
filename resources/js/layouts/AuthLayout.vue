@@ -10,7 +10,7 @@ defineProps<{
 const features = [
     { icon: ScanBarcode, text: 'Barcode intake with AI-assisted registration' },
     { icon: Route, text: 'Office-to-office routing with a complete custody trail' },
-    { icon: FileCheck2, text: 'Referral slips and digitally signed approvals' },
+    { icon: FileCheck2, text: 'Single-step executive approvals, digitally signed' },
 ];
 
 const year = new Date().getFullYear();

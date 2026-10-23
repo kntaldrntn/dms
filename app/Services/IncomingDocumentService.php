@@ -36,7 +36,7 @@ class IncomingDocumentService
             ->whereHas('document', fn ($documents) => $documents->where('state', 1)->where('status', '!=', 'Completed'));
 
         $items = (clone $query)
-            ->with('document:id,barcode,subject_matter,approved_routing_slip')
+            ->with('document:id,barcode,subject_matter')
             ->latest('received_at')->latest('id')->take(5)->get()
             ->map(fn (DocumentTrail $trail) => [
                 'id' => $trail->id,
@@ -61,12 +61,8 @@ class IncomingDocumentService
 
         return match ($trail->stage) {
             DocumentTrail::STAGE_ADM_APPROVAL => route('adm-approvals.index'),
-            DocumentTrail::STAGE_ADM_SIGNATURE => route('referral-slips.index'),
             DocumentTrail::STAGE_OCM_APPROVAL => route('ocm-approvals.index'),
-            // A signed slip back in Records is dispatched from the documents list.
-            default => $document->approved_routing_slip
-                ? route('documents.index', ['search' => $document->barcode])
-                : route('transactions.inbox', ['document' => $document->id]),
+            default => route('transactions.inbox', ['document' => $document->id]),
         };
     }
 
@@ -76,7 +72,6 @@ class IncomingDocumentService
         return match ($user->role) {
             // Any ADM user can receive a document waiting on City Administrator approval.
             'system_administrator' => DocumentTrail::EXECUTIVE_STAGES,
-            'department_head' => [DocumentTrail::STAGE_ADM_APPROVAL, DocumentTrail::STAGE_ADM_SIGNATURE],
             'city_mayor' => [DocumentTrail::STAGE_ADM_APPROVAL, DocumentTrail::STAGE_OCM_APPROVAL],
             default => [DocumentTrail::STAGE_ADM_APPROVAL],
         };

@@ -72,7 +72,7 @@ test('executive steps ping only the role that acts on them and stay out of the o
             ->where('incoming.items.0.url', route('adm-approvals.index')));
     }
 
-    // The Office Inbox neither lists nor processes a document awaiting its referral slip.
+    // The Office Inbox neither lists nor processes a document awaiting City Administrator approval.
     $this->actingAs($this->administrator)->get(route('transactions.inbox'))
         ->assertInertia(fn (Assert $page) => $page->has('documents.data', 0));
     $this->postJson(route('transactions.process', $adm), [

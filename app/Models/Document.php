@@ -15,7 +15,7 @@ class Document extends Model
     protected $fillable = [
         'barcode', 'access_code', 'transaction_type_id', 'document_type_id',
         'classification_id', 'is_confidential', 'route_mode', 'delivery_method_id', 'department_id',
-        'current_assignee_id', 'requires_signature_from', 'approved_routing_slip',
+        'current_assignee_id',
         'source_type', 'source_location', 'source_name', 'gender',
         'contact_no', 'email', 'subject_matter', 'linked_documents', 'attached_file',
         'state', 'status', 'due_date', 'completed_at', 'ai_routing_suggestions', 'workflow_version',
@@ -56,7 +56,6 @@ class Document extends Model
             'completed_at' => 'datetime',
             'ai_routing_suggestions' => 'array',
             'linked_documents' => 'array',
-            'approved_routing_slip' => 'array',
             'workflow_version' => 'integer',
         ];
     }
@@ -103,7 +102,7 @@ class Document extends Model
     {
         $signed = $this->trails()->getQuery()->reorder()->whereNotNull('signed_file_path')->latest('id')->value('signed_file_path');
         if ($signed && str_ends_with(strtolower($signed), '.pdf')) {
-            return route('documents.ocm-approved-pdf', $this);
+            return route('documents.signed-pdf', $this);
         }
 
         return $this->attached_file ? '/storage/'.$this->attached_file : null;

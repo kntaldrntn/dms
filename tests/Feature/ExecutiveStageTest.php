@@ -7,6 +7,7 @@ use App\Models\DocumentType;
 use App\Models\TransactionType;
 use App\Models\User;
 use App\Services\DocumentWorkflow;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -18,13 +19,13 @@ beforeEach(function () {
     $this->recordsManager = User::factory()->create(['role' => 'records_manager', 'department_id' => $this->records->id]);
     $this->document = Document::create([
         'barcode' => 'STAGE-1', 'access_code' => 'ABC123', 'source_type' => 'External', 'source_name' => 'Client',
-        'subject_matter' => 'Stage test', 'department_id' => $this->admin->id, 'requires_signature_from' => 'city_administrator',
+        'subject_matter' => 'Stage test', 'department_id' => $this->admin->id,
         'document_type_id' => DocumentType::create(['document_code' => 'T', 'document_type' => 'Test', 'state' => 1])->id,
         'transaction_type_id' => TransactionType::create(['name' => 'Simple', 'processing_days' => 3, 'state' => 1])->id,
     ]);
     $this->entry = DocumentTrail::create([
         'document_id' => $this->document->id, 'department_id' => $this->admin->id, 'stage' => DocumentTrail::STAGE_ADM_APPROVAL,
-        'received_at' => now('Asia/Manila'), 'received_action' => 'Awaiting referral slip',
+        'received_at' => now('Asia/Manila'), 'received_action' => 'Awaiting City Administrator approval',
     ]);
 });
 
@@ -67,11 +68,20 @@ test('the notification bell pings only the role that acts on a staged entry', fu
     $this->actingAs($otherStaff)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page->where('incoming.count', 0));
 });
 
-test('the migration backfills the stage from requires_signature_from', function () {
-    $migration = require database_path('migrations/2026_10_23_010000_add_stage_to_document_trails_table.php');
+test('retiring referral slips moves a slip waiting for a signature to the City Administrator approval', function () {
+    $migration = require database_path('migrations/2026_10_23_030000_retire_referral_slips.php');
     $migration->down();
+    $this->entry->update(['stage' => 'adm_signature']);
+    $closed = DocumentTrail::create([
+        'document_id' => $this->document->id, 'department_id' => $this->admin->id, 'stage' => 'adm_signature',
+        'received_at' => now('Asia/Manila'), 'released_at' => now('Asia/Manila'), 'received_action' => 'Old entry',
+    ]);
+
     $migration->up();
 
-    expect($this->entry->fresh()->stage)->toBe(DocumentTrail::STAGE_ADM_APPROVAL);
-    expect(Schema::hasColumn('document_trails', 'stage'))->toBeTrue();
+    expect($this->entry->fresh()->stage)->toBe(DocumentTrail::STAGE_ADM_APPROVAL)
+        // History is never rewritten: closed entries keep what they recorded.
+        ->and($closed->fresh()->stage)->toBe('adm_signature')
+        ->and(Schema::hasColumn('documents', 'requires_signature_from'))->toBeFalse();
+    expect(collect(Route::getRoutes()->getRoutesByName())->keys()->filter(fn ($name) => str_starts_with($name, 'referral-slips.')))->toBeEmpty();
 });

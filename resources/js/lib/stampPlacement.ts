@@ -92,7 +92,7 @@ export async function findStampPlacement(documentId: number, pdfUrl: string): Pr
 
     let aiError: unknown = null;
     try {
-        const placement = (await axios.post(route('referral-slips.stamp-placement', documentId), form)).data.placement as StampPlacement;
+        const placement = (await axios.post(route('approvals.stamp-placement', documentId), form)).data.placement as StampPlacement;
         if (isUsablePlacement(placement, previews)) return { placement, measured: false };
     } catch (error) {
         aiError = error;

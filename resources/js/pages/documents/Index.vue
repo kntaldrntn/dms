@@ -7,7 +7,7 @@ import InputError from '@/components/InputError.vue';
 import { useIntakeRulebook, type IntakeDocumentType } from '@/composables/useIntakeRulebook';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { Search, Pencil, Trash2, FastForward, AlertCircle, Clock, Loader2, Sparkles, FileUp, X, FileText } from 'lucide-vue-next';
+import { Search, Pencil, Trash2, FastForward, AlertCircle, Clock, Loader2, Sparkles, FileUp, X } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
@@ -36,9 +36,8 @@ const cityMayorId = departmentId('OCM');
 
 // Documents waiting on an executive step (their Primary entry's stage) cannot be routed by Records yet.
 const pendingApprovalLabels: Record<string, string> = {
-    adm_approval: 'Pending City Administrator Slip',
-    adm_signature: 'Pending Dept. Head Signature',
-    ocm_approval: 'Pending City Mayor Review',
+    adm_approval: 'Pending City Administrator Approval',
+    ocm_approval: 'Pending City Mayor Approval',
 };
 
 // A document dispatched to several offices is held by all of them (`holders`); department_id is only the primary one.
@@ -671,23 +670,6 @@ function submitDocument() {
                                     </td>
                                     <td class="px-4 py-2.5 whitespace-nowrap">
                                         <div class="flex items-center justify-center gap-1.5">
-                                            <!-- REFERRAL SLIP: authorized approvers and Records can reopen an approved slip -->
-                                            <a
-                                                v-if="
-                                                    doc.approved_routing_slip &&
-                                                    doc.stage !== 'adm_signature' &&
-                                                    ['records_manager', 'city_administrator', 'city_mayor', 'system_administrator'].includes($page.props.auth.user.role)
-                                                "
-                                                :href="route('referral-slips.preview', doc.id)"
-                                                target="_blank"
-                                                rel="noopener"
-                                                :class="iconButtonClass"
-                                                title="Open Referral Action Slip PDF preview"
-                                                aria-label="Open referral slip PDF"
-                                            >
-                                                <FileText class="h-4 w-4" aria-hidden="true" />
-                                            </a>
-
                                             <!-- ROUTING/STATUS: no Route button while an executive step is pending or another office is Primary -->
                                             <span
                                                 v-if="pendingApprovalLabels[doc.stage] || !holdsCopy(doc, $page.props.auth.user.department_id)"
@@ -699,9 +681,9 @@ function submitDocument() {
                                             <button
                                                 v-else
                                                 type="button"
-                                                :class="[iconButtonClass, doc.approved_routing_slip ? 'text-emerald-700' : '']"
-                                                :title="doc.approved_routing_slip ? 'Execute Referral Slip' : 'Route'"
-                                                :aria-label="doc.approved_routing_slip ? 'Execute referral slip' : 'Route document'"
+                                                :class="iconButtonClass"
+                                                title="Route"
+                                                aria-label="Route document"
                                                 @click="openRoutingModal(doc)"
                                             >
                                                 <FastForward class="h-4 w-4" aria-hidden="true" />

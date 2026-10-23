@@ -9,7 +9,6 @@ import { computed } from 'vue';
 const props = defineProps<{
     document: any;
     trails: any[];
-    slipTargets: Array<{ id: number; code: string; name: string }>;
     // Primary office first; the others hold view-only copies.
     holders: Array<{ id: number; code: string; name: string; pivot?: { copy_role: 'primary' | 'copy' } }>;
     canChangePrimary: boolean;
@@ -57,14 +56,9 @@ const nextStop = computed<{ offices: Office[]; action: string } | null>(() => {
     const records: Office = { code: 'REC', name: 'Records' };
     switch (props.document.stage) {
         case 'adm_approval':
-            return { offices: [{ code: 'ADM', name: 'Office of the City Administrator' }], action: 'Department Head signature' };
-        case 'adm_signature':
-            return { offices: [records], action: 'Return to Records for dispatch' };
+            return { offices: [{ code: 'ADM', name: 'Office of the City Administrator' }], action: 'City Administrator approval' };
         case 'ocm_approval':
             return { offices: [records], action: 'Return to Records after OCM approval' };
-    }
-    if (props.slipTargets.length) {
-        return { offices: props.slipTargets.map((target) => officeOf(target)), action: 'Dispatch per referral slip' };
     }
     return null;
 });
@@ -400,7 +394,7 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                                 </a>
                                 <a
                                     v-if="hasSignedOcmPdf"
-                                    :href="route('documents.ocm-approved-pdf', document.id)"
+                                    :href="route('documents.signed-pdf', document.id)"
                                     target="_blank"
                                     rel="noopener"
                                     class="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 shadow-sm transition hover:bg-violet-100"

@@ -6,7 +6,7 @@ use Illuminate\Validation\Validator;
 
 class ApproveOcmDocumentRequest extends DocumentMutationRequest
 {
-    protected string $ability = 'refer';
+    protected string $ability = 'approveOcm';
 
     /** Placement is normalized 0-1000 from the page's top-left corner. */
     public static function placementRules(): array

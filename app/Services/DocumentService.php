@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\Document;
-use App\Models\Department;
 use App\Models\DocumentTrail;
 use App\Models\TransactionType;
 use App\Models\User;
@@ -47,7 +46,6 @@ class DocumentService
                         $this->workflow->release($document, $user, 'Reassigned during registration update', $target);
                         $this->workflow->receive($document, $target, 'Registration reassigned', DocumentTrail::PRIMARY, $this->workflow->executiveStageFor($target));
                         $document->current_assignee_id = null;
-                        $document->approved_routing_slip = null;
                     }
                     if ((int) $document->transaction_type_id !== (int) $data['transaction_type_id']) {
                         $type = TransactionType::findOrFail($data['transaction_type_id']);
@@ -65,30 +63,24 @@ class DocumentService
                 unset($data['routed_to'], $data['primary_office_id']);
                 $target = empty($data['department_id']) ? (int) $user->department_id : (int) $data['department_id'];
                 $this->workflow->targets([$target], null, 'department_id');
-                $executiveOfficeCode = Department::whereKey($target)->where('state', 1)->value('code');
-                $requiredExecutiveApproval = match ($executiveOfficeCode) {
-                    'ADM' => 'city_administrator',
-                    'OCM' => 'city_mayor',
-                    default => null,
-                };
+                $executiveStage = $this->workflow->executiveStageFor($target);
                 $type = TransactionType::findOrFail($data['transaction_type_id']);
                 $document = Document::create([
                     ...$data, 'department_id' => $user->department_id, 'status' => 'Pending',
-                    'requires_signature_from' => $requiredExecutiveApproval ?? ($data['requires_signature_from'] ?? 'none'),
                     'due_date' => now('Asia/Manila')->addWeekdays($type->processing_days),
                 ]);
                 $document->trails()->create([
                     'department_id' => $user->department_id, 'received_by' => $user->id,
                     'received_at' => now('Asia/Manila'), 'received_action' => 'Document Scanned & Registered',
                 ]);
-                if ($requiredExecutiveApproval) {
+                if ($executiveStage) {
                     // Executive review is an actual hand-off: custody and the trail both
                     // move to ADM/OCM so the document's path is visible office to office.
-                    [$releaseAction, $receiveAction] = $requiredExecutiveApproval === 'city_mayor'
+                    [$releaseAction, $receiveAction] = $executiveStage === DocumentTrail::STAGE_OCM_APPROVAL
                         ? ['Submitted for City Mayor approval', 'Awaiting City Mayor approval']
-                        : ['Forwarded to City Administrator', 'Awaiting referral slip'];
+                        : ['Forwarded to City Administrator', 'Awaiting City Administrator approval'];
                     $this->workflow->release($document, $user, $releaseAction, $target);
-                    $this->workflow->receive($document, $target, $receiveAction, DocumentTrail::PRIMARY, $this->workflow->executiveStageFor($target));
+                    $this->workflow->receive($document, $target, $receiveAction, DocumentTrail::PRIMARY, $executiveStage);
                     $document->department_id = $target;
                     $document->save();
                 } elseif ($departments !== []) {

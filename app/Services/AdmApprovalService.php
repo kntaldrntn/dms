@@ -63,12 +63,10 @@ class AdmApprovalService
 
                 if ($mayor) {
                     $this->workflow->receive($document, $mayor, 'Awaiting City Mayor approval', DocumentTrail::PRIMARY, DocumentTrail::STAGE_OCM_APPROVAL);
-                    $document->fill(['department_id' => $mayor, 'current_assignee_id' => null, 'requires_signature_from' => 'city_mayor']);
+                    $document->fill(['department_id' => $mayor, 'current_assignee_id' => null]);
                 } else {
                     $this->workflow->distribute($document, $user, $targets, $primary, 'Routed from ADM', 'Copy from ADM');
-                    $document->requires_signature_from = 'none';
                 }
-                $document->approved_routing_slip = null;
             });
         } catch (Throwable $exception) {
             if ($signedFile) {
