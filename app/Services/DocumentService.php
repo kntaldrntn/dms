@@ -60,6 +60,9 @@ class DocumentService
             return DB::transaction(function () use ($user, $data) {
                 $user = User::query()->lockForUpdate()->findOrFail($user->id);
                 Gate::forUser($user)->authorize('create', Document::class);
+                $departments = array_values($data['routed_to'] ?? []);
+                $primary = isset($data['primary_office_id']) ? (int) $data['primary_office_id'] : null;
+                unset($data['routed_to'], $data['primary_office_id']);
                 $target = empty($data['department_id']) ? (int) $user->department_id : (int) $data['department_id'];
                 $this->workflow->targets([$target], null, 'department_id');
                 $executiveOfficeCode = Department::whereKey($target)->where('state', 1)->value('code');
@@ -87,6 +90,14 @@ class DocumentService
                     $this->workflow->release($document, $user, $releaseAction, $target);
                     $this->workflow->receive($document, $target, $receiveAction, DocumentTrail::PRIMARY, $this->workflow->executiveStageFor($target));
                     $document->department_id = $target;
+                    $document->save();
+                } elseif ($departments !== []) {
+                    // Straight to departments (FGD): one Primary office acts, the others get view-only copies.
+                    $targets = $this->workflow->targets($departments, (int) $user->department_id, 'routed_to');
+                    $this->workflow->release($document, $user, 'Dispatched to target office(s)', $primary, null, null, [
+                        'released_to_offices' => $targets,
+                    ]);
+                    $this->workflow->distribute($document, $user, $targets, $primary ?? $targets[0], 'Dispatched from Records', 'Copy from Records');
                     $document->save();
                 } elseif ($target !== (int) $user->department_id) {
                     $this->workflow->release($document, $user, 'Direct Dispatch', $target);

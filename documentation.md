@@ -333,6 +333,21 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 
 ## 9. Change log
 
+### 2026-10-23 — FGD Phase 2b: intake "Direct to" Departments (Claude Code, uncommitted)
+- `SaveDocumentRequest` (create only): `routed_to[]` (active offices except REC/ADM/OCM) + `primary_office_id`
+  (required with `routed_to`, must be one of them); `department_id` prohibits `routed_to` (ADM/OCM **or**
+  departments); both prohibited on update.
+- `DocumentService::save` create: with `routed_to`, Records registers, releases ("Dispatched to target office(s)",
+  `released_to_offices`) and `DocumentWorkflow::distribute()` gives the Primary entry + view-only copies (no
+  stage); confidential + more than one office is refused by `distribute()` and nothing is saved.
+- New `resources/js/components/OfficePicker.vue` (two panels, Primary radio, AI reasons, single-office mode for
+  confidential); `RoutingModal.vue` now uses it instead of its own panels.
+- `documents/Index.vue`: Direct to = City Administrator / City Mayor / **Departments**; Departments shows the
+  chosen codes (Primary marked) and opens the picker in a dialog. AI: OCM/ADM targets pick those; no executive
+  target with suggested offices → Departments with them pre-ticked and the AI's Primary pre-selected.
+- Checks: Pest 120 passed (1114 assertions; new `IntakeToDepartmentsTest`, 8 cases); ESLint ✅ on the 3 files;
+  build ✅; Pint ✅ on changed PHP. **Not tested in the browser** (in-app browser cannot load the LAN Vite server).
+
 ### 2026-10-23 — FGD Phase 2a: explicit stage on the open Primary entry (Claude Code, uncommitted)
 - Migration `2026_10_23_010000_add_stage_to_document_trails_table` (**not yet run locally — the app needs it,
   since `Document` now appends `stage`**): nullable indexed `document_trails.stage`; backfills the newest open

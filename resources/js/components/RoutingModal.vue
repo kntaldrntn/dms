@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useForm } from '@inertiajs/vue3';
-import { ChevronsRight, ChevronsLeft, FastForward, X, ClipboardCheck, FileSignature, CheckSquare, Unlock, AlertTriangle } from 'lucide-vue-next';
+import { FastForward, X, ClipboardCheck, FileSignature, CheckSquare, Unlock, AlertTriangle } from 'lucide-vue-next';
+import OfficePicker from '@/components/OfficePicker.vue';
 
 const props = defineProps<{
     show: boolean;
@@ -11,8 +12,7 @@ const props = defineProps<{
 
 const emit = defineEmits(['close']);
 
-const availableOffices = ref<Array<any>>([]);
-const selectedOffices = ref<Array<any>>([]);
+const selectedIds = ref<number[]>([]);
 const approvedTargets = ref<Array<any>>([]);
 const aiSuggestionsMap = ref<Record<number, { reason: string, priority: string }>>({});
 const isOverriding = ref(false); // NEW: Tracks if Records is modifying the Admin slip
@@ -30,10 +30,6 @@ const form = useForm({
 function choosePrimary(ids: number[], suggestions: Record<number, { priority: string }>) {
     primaryId.value = ids.find((id) => suggestions[id]?.priority === 'Primary') ?? ids[0] ?? null;
 }
-
-watch(selectedOffices, (offices) => {
-    if (!offices.some((office) => office.id === primaryId.value)) primaryId.value = offices[0]?.id ?? null;
-}, { deep: true });
 
 watch(() => props.show, (isOpen) => {
     if (isOpen && props.document) {
@@ -59,68 +55,31 @@ watch(() => props.show, (isOpen) => {
         });
         aiSuggestionsMap.value = suggestionsMap;
 
-        // 3. Populate Panels
-        const initialSelected: any[] = [];
-        const initialAvailable: any[] = [];
-
+        // 3. Pre-select the slip's offices (kept for an Override) or else the AI's suggestions
+        let initialSelected: number[];
         if (rawSlip && rawSlip.length > 0) {
             approvedTargets.value = props.departments.filter(d => rawSlip.includes(d.id));
             form.routed_to = rawSlip.map((id: string | number) => Number(id)); // Lock default targets
-
-            // Pre-load the dual panels with the Admin's choices just in case they click Override
-            props.departments.forEach(dept => {
-                if (rawSlip.includes(dept.id)) initialSelected.push(dept);
-                else initialAvailable.push(dept);
-            });
+            initialSelected = approvedTargets.value.map((dept) => dept.id);
         } else {
             approvedTargets.value = [];
-
-            // Standard dual-panel population via AI
-            props.departments.forEach(dept => {
-                if (suggestionsMap[Number(dept.id)]) initialSelected.push(dept);
-                else initialAvailable.push(dept);
-            });
+            initialSelected = props.departments.filter((dept) => suggestionsMap[Number(dept.id)]).map((dept) => dept.id);
         }
 
-        selectedOffices.value = singleOffice.value ? initialSelected.slice(0, 1) : initialSelected;
-        availableOffices.value = [...initialAvailable, ...initialSelected.slice(selectedOffices.value.length)]
-            .sort((a, b) => (a.code || a.name).localeCompare(b.code || b.name));
-        choosePrimary(approvedTargets.value.length ? approvedTargets.value.map((dept) => dept.id) : selectedOffices.value.map((dept) => dept.id), suggestionsMap);
+        selectedIds.value = singleOffice.value ? initialSelected.slice(0, 1) : initialSelected;
+        choosePrimary(approvedTargets.value.length ? initialSelected : selectedIds.value, suggestionsMap);
     }
 });
 
 const closeModal = () => emit('close');
 
-const addOffice = (dept: any) => {
-    if (singleOffice.value && selectedOffices.value.length) removeAll();
-    selectedOffices.value.push(dept);
-    availableOffices.value = availableOffices.value.filter(d => d.id !== dept.id);
-};
-
-const removeOffice = (dept: any) => {
-    availableOffices.value.push(dept);
-    selectedOffices.value = selectedOffices.value.filter(d => d.id !== dept.id);
-    availableOffices.value.sort((a, b) => (a.code || a.name).localeCompare(b.code || b.name));
-};
-
-const routeToAll = () => {
-    selectedOffices.value = [...selectedOffices.value, ...availableOffices.value];
-    availableOffices.value = [];
-};
-
-const removeAll = () => {
-    availableOffices.value = [...availableOffices.value, ...selectedOffices.value];
-    selectedOffices.value = [];
-    availableOffices.value.sort((a, b) => (a.code || a.name).localeCompare(b.code || b.name));
-};
-
 const submitRouting = () => {
     if (!props.document) return;
-    
-    // If no slip exists OR if the Records Manager clicked Override, use the dual-panel selection
+
+    // If no slip exists OR if the Records Manager clicked Override, use the picker selection
     if (approvedTargets.value.length === 0 || isOverriding.value) {
-        if (selectedOffices.value.length === 0) return;
-        form.routed_to = selectedOffices.value.map(dept => dept.id);
+        if (selectedIds.value.length === 0) return;
+        form.routed_to = [...selectedIds.value];
     }
     form.primary_office_id = primaryId.value;
 
@@ -209,61 +168,11 @@ const submitRouting = () => {
                         </div>
                     </div>
 
-                    <p class="mb-3 text-xs text-slate-600">
-                        {{ singleOffice
-                            ? 'Confidential document: it goes to one Primary office only, with no copies.'
-                            : 'Mark one office as Primary: only it acts on the document. The other offices get a view-only copy.' }}
-                    </p>
                     <p v-if="form.errors.primary_office_id || form.errors.routed_to" role="alert" class="mb-3 text-xs font-medium text-red-600">
                         {{ form.errors.primary_office_id || form.errors.routed_to }}
                     </p>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1 overflow-hidden">
-                        <!-- Left Panel: Available -->
-                        <div class="flex flex-col border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                            <div class="flex items-center justify-between px-4 py-3 bg-slate-50/80 border-b border-slate-200">
-                                <h3 class="text-sm font-bold text-slate-700">Available Offices</h3>
-                                <button v-if="!singleOffice" @click="routeToAll" class="text-xs flex items-center gap-1.5 text-slate-500 hover:text-indigo-600 transition font-medium">
-                                    Route to all <span class="bg-slate-700 text-white rounded-full p-0.5"><ChevronsRight class="w-3 h-3" /></span>
-                                </button>
-                            </div>
-                            <div class="flex-1 overflow-y-auto p-2">
-                                <div v-for="dept in availableOffices" :key="dept.id" @click="addOffice(dept)" class="flex items-center px-3 py-2.5 rounded-lg hover:bg-slate-50 cursor-pointer transition group">
-                                    <span class="font-bold text-sm text-slate-800 w-16 shrink-0">{{ dept.code || dept.id }}</span>
-                                    <span class="text-sm font-medium text-slate-600 group-hover:text-slate-900">{{ dept.name }}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Right Panel: Selected -->
-                        <div class="flex flex-col border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm" :class="isOverriding ? 'ring-2 ring-amber-400 border-amber-400' : ''">
-                            <div class="flex items-center justify-between px-4 py-3 bg-slate-50/80 border-b border-slate-200">
-                                <h3 class="text-sm font-bold text-slate-700" :class="isOverriding ? 'text-amber-800' : ''">Route To</h3>
-                                <button @click="removeAll" class="text-xs flex items-center gap-1.5 text-slate-500 hover:text-rose-600 transition font-medium">
-                                    Remove all <span class="bg-slate-700 text-white rounded-full p-0.5"><ChevronsLeft class="w-3 h-3" /></span>
-                                </button>
-                            </div>
-                            <div class="flex-1 overflow-y-auto p-2">
-                                <div v-for="dept in selectedOffices" :key="dept.id" @click="removeOffice(dept)" class="flex items-start px-3 py-2.5 rounded-xl cursor-pointer transition group border mb-1.5 bg-white border-transparent hover:bg-rose-50 hover:border-rose-100">
-                                    <div class="flex flex-col flex-1">
-                                        <div class="flex items-center gap-2">
-                                            <span class="font-bold text-sm w-16 shrink-0 text-slate-800">{{ dept.code || dept.id }}</span>
-                                            <span class="text-sm font-medium text-slate-600 group-hover:text-rose-700">{{ dept.name }}</span>
-                                        </div>
-                                        <label class="mt-1 ml-16 flex items-center gap-1.5 text-[11px] font-semibold" :class="primaryId === dept.id ? 'text-indigo-700' : 'text-slate-500'" @click.stop>
-                                            <input v-model="primaryId" type="radio" name="primary_office" :value="dept.id" class="h-3.5 w-3.5 text-indigo-600 focus:ring-indigo-500" />
-                                            {{ primaryId === dept.id ? 'Primary (acts on it)' : 'Copy (view only)' }}
-                                        </label>
-                                    </div>
-                                    <button class="opacity-0 group-hover:opacity-100 transition mt-0.5 text-slate-400 hover:text-rose-600"><X class="w-4 h-4" /></button>
-                                </div>
-                                <div v-if="selectedOffices.length === 0" class="flex flex-col items-center justify-center h-full text-center p-6 opacity-60">
-                                    <ChevronsRight class="w-8 h-8 text-slate-300 mb-2" />
-                                    <p class="text-sm font-bold text-slate-400">No offices selected</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <OfficePicker v-model="selectedIds" v-model:primary="primaryId" :offices="departments" :suggestions="aiSuggestionsMap" :single="singleOffice" />
                 </div>
 
                 <!-- Footer Actions -->
@@ -273,7 +182,7 @@ const submitRouting = () => {
                     </button>
                     <button 
                         @click="submitRouting" 
-                        :disabled="(approvedTargets.length === 0 && selectedOffices.length === 0) || form.processing" 
+                        :disabled="(approvedTargets.length === 0 && selectedIds.length === 0) || form.processing" 
                         class="rounded-xl px-6 py-2.5 text-sm font-bold text-white shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
                         :class="isOverriding ? 'bg-amber-600 hover:bg-amber-700' : (approvedTargets.length > 0 ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700')"
                     >

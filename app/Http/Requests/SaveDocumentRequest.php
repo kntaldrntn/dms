@@ -53,7 +53,11 @@ class SaveDocumentRequest extends FormRequest
             'classification_id' => ['nullable', 'integer', Rule::exists('document_classifications', 'id')->where('state', 1)],
             'is_confidential' => ['required', 'boolean'],
             'route_mode' => ['required', Rule::in(['paperless', 'paper'])],
-            'department_id' => ['nullable', 'integer', Rule::exists('departments', 'id')->where('state', 1)],
+            // Intake goes either to ADM/OCM (department_id, opens their approval stage) or straight to departments.
+            'department_id' => ['nullable', 'integer', Rule::exists('departments', 'id')->where('state', 1), 'prohibits:routed_to'],
+            'routed_to' => $document ? ['prohibited'] : ['nullable', 'array', 'max:100'],
+            'routed_to.*' => ['integer', 'distinct', Rule::exists('departments', 'id')->where('state', 1)->whereNotIn('code', ['REC', 'ADM', 'OCM'])],
+            'primary_office_id' => $document ? ['prohibited'] : ['nullable', 'integer', Rule::in((array) $this->input('routed_to', [])), 'required_with:routed_to'],
             'access_code' => ['required', 'string', 'max:20'],
             'ai_routing_suggestions' => ['nullable', 'array', 'max:10'],
             'ai_routing_suggestions.*.department_id' => ['required', 'integer'],
@@ -61,6 +65,16 @@ class SaveDocumentRequest extends FormRequest
             'ai_routing_suggestions.*.reason' => ['nullable', 'string', 'max:1000'],
             'linked_documents' => ['nullable', 'string'],
             'attached_file' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'department_id.prohibits' => 'Send the document either to an executive office or to departments, not both.',
+            'routed_to.*.exists' => 'Choose active departments. The City Administrator and City Mayor are chosen in Direct to.',
+            'primary_office_id.in' => 'Choose the Primary office from the selected offices.',
+            'primary_office_id.required_with' => 'Choose the Primary office.',
         ];
     }
 

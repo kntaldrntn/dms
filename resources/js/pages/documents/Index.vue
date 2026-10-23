@@ -2,12 +2,13 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import DeleteConfirmationModal from '@/components/DeleteConfirmationModal.vue';
 import RoutingModal from '@/components/RoutingModal.vue';
+import OfficePicker from '@/components/OfficePicker.vue';
 import InputError from '@/components/InputError.vue';
 import { useIntakeRulebook, type IntakeDocumentType } from '@/composables/useIntakeRulebook';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { Search, Pencil, Trash2, FastForward, AlertCircle, Clock, Loader2, Sparkles, FileUp, X, FileText } from 'lucide-vue-next';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
 import axios from 'axios';
@@ -115,7 +116,10 @@ const form = useForm({
     linked_documents: '', 
     attached_file: null as File | null, 
 
-    department_id: cityAdministratorId,
+    department_id: cityAdministratorId as number | null,
+    // Used when the document goes straight to departments instead of ADM/OCM.
+    routed_to: [] as number[],
+    primary_office_id: null as number | null,
     access_code: props.generatedAccessCode,
     ai_routing_suggestions: [] as any[],
 });
@@ -127,6 +131,7 @@ watch(() => form.is_confidential, (isConfidential) => {
     if (!isConfidential) return;
     form.attached_file = null;
     form.ai_routing_suggestions = [];
+    form.routed_to = form.routed_to.slice(0, 1);
     executiveSuggestion.value = null;
     analysisError.value = '';
 });
@@ -235,17 +240,30 @@ const handleFileUpload = async (event: Event) => {
         
         // Resolve executive destinations from their configured department codes,
         // never from seed-only numeric IDs.
-        if (Number(data.department_id) === cityMayorId) {
-            form.department_id = cityMayorId;
-            executiveSuggestion.value = { route: 'City Mayor', reason: data.approval_reason || 'Requires explicit Mayoral approval.' };
-        } else {
-            form.department_id = cityAdministratorId;
-            executiveSuggestion.value = { route: 'City Administrator', reason: 'Requires standard referral slip processing.' };
-        }
-        
-        // Silently capture all recommendations for the Admin's Referral Slip module later
+        // Kept for the next office's routing screen, and used below when it goes straight to departments.
         if (data.routing_suggestions && Array.isArray(data.routing_suggestions)) {
-            form.ai_routing_suggestions = data.routing_suggestions; 
+            form.ai_routing_suggestions = data.routing_suggestions;
+        }
+
+        // Resolve executive destinations from their configured department codes,
+        // never from seed-only numeric IDs. No executive target: straight to the suggested departments.
+        if (Number(data.department_id) === cityMayorId) {
+            directTo.value = 'OCM';
+            executiveSuggestion.value = { route: 'City Mayor', reason: data.approval_reason || 'Requires explicit Mayoral approval.' };
+        } else if (Number(data.department_id) === cityAdministratorId) {
+            directTo.value = 'ADM';
+            executiveSuggestion.value = { route: 'City Administrator', reason: data.approval_reason || 'Requires City Administrator approval.' };
+        } else {
+            const suggested = form.ai_routing_suggestions
+                .filter((suggestion: any) => intakeOffices.value.some((office) => office.id === Number(suggestion.department_id)))
+                .map((suggestion: any) => Number(suggestion.department_id));
+            if (suggested.length) {
+                directTo.value = 'departments';
+                form.routed_to = form.is_confidential ? suggested.slice(0, 1) : suggested;
+                form.primary_office_id =
+                    Number(form.ai_routing_suggestions.find((suggestion: any) => suggestion.priority === 'Primary')?.department_id) || suggested[0];
+                executiveSuggestion.value = { route: 'the departments', reason: 'No executive approval needed.' };
+            }
         }
 
         if (data.meta) {
@@ -266,6 +284,22 @@ const handleFileUpload = async (event: Event) => {
     }
 };
 
+// --- DIRECT TO: City Administrator, City Mayor, or straight to departments ---
+const directTo = ref<'ADM' | 'OCM' | 'departments'>('ADM');
+watch(directTo, (target) => {
+    form.department_id = target === 'ADM' ? cityAdministratorId : target === 'OCM' ? cityMayorId : null;
+    if (target === 'departments' && !form.routed_to.length) showOfficePicker.value = true;
+});
+// ADM and OCM are chosen in Direct to (they open an approval stage); Records does not route to itself.
+const intakeOffices = computed(() => props.departments.filter((office) => !['REC', 'ADM', 'OCM'].includes(office.code)));
+const showOfficePicker = ref(false);
+const pickerSuggestions = computed(() =>
+    Object.fromEntries(
+        form.ai_routing_suggestions.map((suggestion: any) => [Number(suggestion.department_id), { reason: suggestion.reason, priority: suggestion.priority }]),
+    ),
+);
+const officeCode = (id: number) => props.departments.find((office) => office.id === id)?.code ?? id;
+
 // Plain, compact fields in the style of the previous DTS intake form.
 const labelClass = 'mb-1 block text-sm text-slate-700';
 const fieldClass = (error?: string) => [
@@ -275,10 +309,13 @@ const fieldClass = (error?: string) => [
 const iconButtonClass = 'rounded-md border border-slate-200 p-1.5 text-slate-600 transition hover:bg-slate-100';
 
 function submitDocument() {
-    form.post(route('documents.store'), {
+    form.transform((data) =>
+        directTo.value === 'departments' ? { ...data, department_id: null } : { ...data, routed_to: [], primary_office_id: null },
+    ).post(route('documents.store'), {
         preserveScroll: true,
         onSuccess: () => {
             form.reset();
+            directTo.value = 'ADM';
             form.access_code = Math.random().toString(36).substring(2, 8).toUpperCase();
             executiveSuggestion.value = null;
             aiMetrics.value = null;
@@ -533,12 +570,13 @@ function submitDocument() {
                                     <label for="intake_direct_to" class="mb-1 block text-xs text-slate-500">Direct to</label>
                                     <select
                                         id="intake_direct_to"
-                                        v-model="form.department_id"
+                                        v-model="directTo"
                                         aria-describedby="intake_direct_to_hint"
                                         :class="fieldClass(form.errors.department_id)"
                                     >
-                                        <option :value="cityAdministratorId">City Administrator</option>
-                                        <option :value="cityMayorId">City Mayor</option>
+                                        <option value="ADM">City Administrator</option>
+                                        <option value="OCM">City Mayor</option>
+                                        <option value="departments">Departments</option>
                                     </select>
                                 </div>
                                 <button
@@ -555,6 +593,21 @@ function submitDocument() {
                             AI suggests {{ executiveSuggestion.route }}: {{ executiveSuggestion.reason }}
                         </p>
                         <InputError class="text-right text-xs" :message="form.errors.department_id" />
+
+                        <div v-if="directTo === 'departments'" class="flex flex-wrap items-center justify-end gap-2 text-sm">
+                            <span v-if="form.routed_to.length" class="text-slate-700">
+                                <template v-for="(id, index) in form.routed_to" :key="id">
+                                    <span :class="id === form.primary_office_id ? 'font-semibold' : ''">{{ officeCode(id) }}</span
+                                    ><span v-if="id === form.primary_office_id" class="text-xs text-emerald-700"> (Primary)</span
+                                    >{{ index < form.routed_to.length - 1 ? ', ' : '' }}
+                                </template>
+                            </span>
+                            <span v-else class="text-slate-500">No departments chosen</span>
+                            <button type="button" class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="showOfficePicker = true">
+                                {{ form.routed_to.length ? 'Change offices' : 'Choose offices' }}
+                            </button>
+                        </div>
+                        <InputError class="text-right text-xs" :message="form.errors.routed_to || form.errors['routed_to.0'] || form.errors.primary_office_id" />
                     </form>
                 </section>
 
@@ -703,6 +756,32 @@ function submitDocument() {
                 :item-name="itemToDeleteName"
                 title="Deactivate Document"
             />
+            <!-- Intake straight to departments: Primary office + view-only copies -->
+            <div v-if="showOfficePicker" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" @keydown.esc="showOfficePicker = false">
+                <div class="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-lg border border-slate-200 bg-white" role="dialog" aria-modal="true" aria-labelledby="office-picker-title">
+                    <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                        <h2 id="office-picker-title" class="text-base font-semibold text-slate-800">Send to departments</h2>
+                        <button type="button" class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Close" @click="showOfficePicker = false">
+                            <X class="h-5 w-5" aria-hidden="true" />
+                        </button>
+                    </div>
+                    <div class="flex min-h-0 flex-1 flex-col p-4">
+                        <OfficePicker
+                            v-model="form.routed_to"
+                            v-model:primary="form.primary_office_id"
+                            :offices="intakeOffices"
+                            :suggestions="pickerSuggestions"
+                            :single="form.is_confidential"
+                        />
+                    </div>
+                    <div class="flex justify-end border-t border-slate-200 px-4 py-3">
+                        <button type="button" class="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700" @click="showOfficePicker = false">
+                            Done
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <RoutingModal :show="showRoutingModal" :document="documentToRoute" :departments="departments" @close="showRoutingModal = false" />
         </div>
     </AppLayout>
