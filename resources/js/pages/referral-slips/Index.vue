@@ -39,7 +39,7 @@ const selectedDoc = ref<any>(null);
 const aiSuggestionsMap = ref<Record<number, { reason: string; priority: string }>>({});
 
 // Stage 1 (City Administrator) generates the slip; stage 2 (ADM Department Head) signs it.
-const isSigningStage = computed(() => selectedDoc.value?.requires_signature_from === 'department_head');
+const isSigningStage = computed(() => selectedDoc.value?.stage === 'adm_signature');
 
 const generateForm = useForm({
     targets: [] as number[],
@@ -63,7 +63,7 @@ const slipTargets = computed(() => {
 function openModal(doc: any) {
     selectedDoc.value = doc;
 
-    if (doc.requires_signature_from === 'department_head') {
+    if (doc.stage === 'adm_signature') {
         signForm.reset();
         signForm.clearErrors();
         signForm.workflow_version = doc.workflow_version;
@@ -145,7 +145,7 @@ function submitSignature() {
                             </td>
                             <td class="whitespace-nowrap px-4 py-3">
                                 <span
-                                    v-if="doc.requires_signature_from === 'department_head'"
+                                    v-if="doc.stage === 'adm_signature'"
                                     class="inline-flex items-center rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700"
                                 >
                                     Awaiting Signature
@@ -159,11 +159,11 @@ function submitSignature() {
                                     type="button"
                                     @click="openModal(doc)"
                                     class="rounded-lg border px-4 py-1.5 font-bold transition"
-                                    :class="doc.requires_signature_from === 'department_head'
+                                    :class="doc.stage === 'adm_signature'
                                         ? 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
                                         : 'border-indigo-100 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'"
                                 >
-                                    {{ doc.requires_signature_from === 'department_head' ? 'Review & Sign' : 'Generate Slip' }}
+                                    {{ doc.stage === 'adm_signature' ? 'Review & Sign' : 'Generate Slip' }}
                                 </button>
                             </td>
                         </tr>

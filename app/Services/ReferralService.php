@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Document;
+use App\Models\DocumentTrail;
 use App\Models\User;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -23,7 +24,7 @@ class ReferralService
     public function generate(Document $document, User $user, array $data): void
     {
         $this->workflow->mutate($document, $user, (int) $data['workflow_version'], 'refer', function (Document $document, User $user) use ($data) {
-            if ($document->requires_signature_from === 'city_mayor') {
+            if ($document->stage === DocumentTrail::STAGE_OCM_APPROVAL) {
                 throw ValidationException::withMessages(['document' => 'OCM documents are approved from the OCM Approvals queue.']);
             }
             $admin = $this->workflow->office('ADM');
@@ -36,7 +37,7 @@ class ReferralService
                 'other_action' => $data['other_action'] ?? null,
                 'concerned_personnel' => $data['concerned_personnel'] ?? null,
             ]);
-            $this->workflow->receive($document, $admin->id, 'Awaiting Department Head signature');
+            $this->workflow->receive($document, $admin->id, 'Awaiting Department Head signature', DocumentTrail::PRIMARY, DocumentTrail::STAGE_ADM_SIGNATURE);
             $document->fill([
                 'approved_routing_slip' => $targets, 'department_id' => $admin->id,
                 'requires_signature_from' => 'department_head', 'current_assignee_id' => null,
@@ -75,7 +76,7 @@ class ReferralService
         $createdFile = null;
         try {
             $this->workflow->mutate($document, $user, (int) $data['workflow_version'], 'refer', function (Document $document, User $user) use ($data, &$createdFile) {
-                if ($document->requires_signature_from !== 'city_mayor') {
+                if ($document->stage !== DocumentTrail::STAGE_OCM_APPROVAL) {
                     throw ValidationException::withMessages(['document' => 'This document is not awaiting OCM approval.']);
                 }
                 if (! $document->attached_file || strtolower(pathinfo($document->attached_file, PATHINFO_EXTENSION)) !== 'pdf') {

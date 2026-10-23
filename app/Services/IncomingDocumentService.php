@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\Document;
 use App\Models\DocumentTrail;
 use App\Models\User;
 use Illuminate\Support\Str;
@@ -22,17 +21,17 @@ class IncomingDocumentService
             return ['count' => 0, 'items' => []];
         }
 
+        // An entry's own stage says who acts on it: normal entries ping the whole office, staged ones only that role.
         $stages = $this->stagesFor($user);
         $query = DocumentTrail::query()
             ->where('department_id', $user->department_id)
             ->whereNull('released_at')
             ->whereNull('received_by')
-            ->whereHas('document', fn ($documents) => $documents->where('state', 1)
-                ->where('status', '!=', 'Completed')
-                ->whereIn('requires_signature_from', $stages));
+            ->where(fn ($trails) => $trails->whereNull('stage')->orWhereIn('stage', $stages))
+            ->whereHas('document', fn ($documents) => $documents->where('state', 1)->where('status', '!=', 'Completed'));
 
         $items = (clone $query)
-            ->with('document:id,barcode,subject_matter,requires_signature_from,approved_routing_slip')
+            ->with('document:id,barcode,subject_matter,approved_routing_slip')
             ->latest('received_at')->latest('id')->take(5)->get()
             ->map(fn (DocumentTrail $trail) => [
                 'id' => $trail->id,
@@ -42,18 +41,20 @@ class IncomingDocumentService
                 'received_at' => $trail->received_at,
                 'url' => $trail->copy_role === DocumentTrail::COPY
                     ? route('transactions.inbox', ['copy' => $trail->document_id])
-                    : $this->actionUrl($trail->document),
+                    : $this->actionUrl($trail),
             ])->all();
 
         return ['count' => $query->count(), 'items' => $items];
     }
 
     /** The page where the receiving office acts on this document. */
-    private function actionUrl(Document $document): string
+    private function actionUrl(DocumentTrail $trail): string
     {
-        return match ($document->requires_signature_from) {
-            'city_administrator', 'department_head' => route('referral-slips.index'),
-            'city_mayor' => route('ocm-approvals.index'),
+        $document = $trail->document;
+
+        return match ($trail->stage) {
+            DocumentTrail::STAGE_ADM_APPROVAL, DocumentTrail::STAGE_ADM_SIGNATURE => route('referral-slips.index'),
+            DocumentTrail::STAGE_OCM_APPROVAL => route('ocm-approvals.index'),
             // A signed slip back in Records is dispatched from the documents list.
             default => $document->approved_routing_slip
                 ? route('documents.index', ['search' => $document->barcode])
@@ -65,11 +66,11 @@ class IncomingDocumentService
     private function stagesFor(User $user): array
     {
         return match ($user->role) {
-            'system_administrator' => ['none', ...Document::EXECUTIVE_STAGES],
-            'city_administrator' => ['none', 'city_administrator'],
-            'department_head' => ['none', 'department_head'],
-            'city_mayor' => ['none', 'city_mayor'],
-            default => ['none'],
+            'system_administrator' => DocumentTrail::EXECUTIVE_STAGES,
+            'city_administrator' => [DocumentTrail::STAGE_ADM_APPROVAL],
+            'department_head' => [DocumentTrail::STAGE_ADM_SIGNATURE],
+            'city_mayor' => [DocumentTrail::STAGE_OCM_APPROVAL],
+            default => [],
         };
     }
 }

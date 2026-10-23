@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Document;
 use App\Models\Department;
+use App\Models\DocumentTrail;
 use App\Http\Requests\GenerateReferralRequest;
 use App\Http\Requests\ApproveOcmDocumentRequest;
 use App\Http\Requests\SignReferralRequest;
@@ -23,13 +24,13 @@ class ReferralSlipController extends Controller
 
         // City Administrator generates slips; the ADM Department Head signs them; admins see both stages.
         $stages = match ($request->user()->role) {
-            'city_administrator' => ['city_administrator'],
-            'department_head' => ['department_head'],
-            default => ['city_administrator', 'department_head'],
+            'city_administrator' => [DocumentTrail::STAGE_ADM_APPROVAL],
+            'department_head' => [DocumentTrail::STAGE_ADM_SIGNATURE],
+            default => [DocumentTrail::STAGE_ADM_APPROVAL, DocumentTrail::STAGE_ADM_SIGNATURE],
         };
 
-        $documents = Document::with(['documentType', 'transactionType'])
-            ->whereIn('requires_signature_from', $stages)
+        $documents = Document::with(['documentType', 'transactionType', 'primaryEntry'])
+            ->inStage($stages)
             ->where('status', 'Pending')->where('state', 1)->latest()->paginate(10);
 
         return Inertia::render('referral-slips/Index', [
@@ -46,8 +47,8 @@ class ReferralSlipController extends Controller
     {
         $this->authorize('viewOcmApprovals', Document::class);
 
-        $documents = Document::with(['documentType', 'transactionType'])
-            ->where('requires_signature_from', 'city_mayor')
+        $documents = Document::with(['documentType', 'transactionType', 'primaryEntry'])
+            ->inStage([DocumentTrail::STAGE_OCM_APPROVAL])
             ->where('status', 'Pending')->where('state', 1)->latest()->paginate(10);
 
         return Inertia::render('ocm-approvals/Index', [
@@ -81,7 +82,7 @@ class ReferralSlipController extends Controller
     public function findStampPlacement(Request $request, Document $document)
     {
         $this->authorize('refer', $document);
-        abort_unless($document->requires_signature_from === 'city_mayor', 422, 'Only OCM approval uses the certificate stamp.');
+        abort_unless($document->stage === DocumentTrail::STAGE_OCM_APPROVAL, 422, 'Only OCM approval uses the certificate stamp.');
 
         $validated = $request->validate([
             'thumbnails' => ['required', 'array', 'min:1', 'max:5'],

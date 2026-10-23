@@ -43,8 +43,7 @@ class DocumentPolicy
 
     public function dispatch(User $user, Document $document): bool
     {
-        return $this->update($user, $document)
-            && ! in_array($document->requires_signature_from, ['city_administrator', 'department_head', 'city_mayor'], true);
+        return $this->update($user, $document) && ! $document->inExecutiveStage();
     }
 
     public function process(User $user, Document $document): bool
@@ -52,7 +51,7 @@ class DocumentPolicy
         // Documents waiting on a slip, Department Head signature, or OCM approval are acted on
         // from their executive queues, never routed or ended from the Office Inbox.
         return $user->state === 1 && $this->owns($user, $document)
-            && ! in_array($document->requires_signature_from, Document::EXECUTIVE_STAGES, true)
+            && ! $document->inExecutiveStage()
             && $user->department()->where('state', 1)->exists();
     }
 
@@ -71,7 +70,9 @@ class DocumentPolicy
         return $user->state === 1
             && in_array($user->role, [...self::RECORDS_ROLES, ...self::SUPERVISORY_ROLES], true)
             && $user->department()->where('state', 1)->exists()
-            && $document->trails()->where('copy_role', DocumentTrail::PRIMARY)->whereNull('released_at')->exists();
+            && $document->trails()->where('copy_role', DocumentTrail::PRIMARY)->whereNull('released_at')->exists()
+            // Moving the Primary office would drop a pending approval without anyone approving it.
+            && ! $document->inExecutiveStage();
     }
 
     public function viewReferrals(User $user): bool
@@ -90,18 +91,19 @@ class DocumentPolicy
     public function refer(User $user, Document $document): bool
     {
         // A generated slip waits for the ADM Department Head; it cannot be regenerated.
-        if ($document->requires_signature_from === 'department_head') {
+        $stage = $document->stage;
+        if ($stage === DocumentTrail::STAGE_ADM_SIGNATURE) {
             return false;
         }
 
         if ($user->role === 'system_administrator') {
-            return in_array($document->requires_signature_from, ['city_administrator', 'city_mayor'], true)
+            return in_array($stage, [DocumentTrail::STAGE_ADM_APPROVAL, DocumentTrail::STAGE_OCM_APPROVAL], true)
                 || $document->department()->whereIn('code', ['ADM', 'OCM'])->where('state', 1)->exists();
         }
 
         if ($user->role === 'city_mayor') {
             return $this->viewOcmApprovals($user)
-                && ($document->requires_signature_from === 'city_mayor'
+                && ($stage === DocumentTrail::STAGE_OCM_APPROVAL
                     || $document->department()->where('code', 'OCM')->where('state', 1)->exists());
         }
 
@@ -109,14 +111,14 @@ class DocumentPolicy
             return false;
         }
 
-        return $document->requires_signature_from === 'city_administrator'
+        return $stage === DocumentTrail::STAGE_ADM_APPROVAL
             || $document->department()->where('code', 'ADM')->where('state', 1)->exists();
     }
 
     /** Step 2 of the ADM referral: only the ADM Department Head (or a system administrator) signs. */
     public function signReferral(User $user, Document $document): bool
     {
-        return $document->requires_signature_from === 'department_head'
+        return $document->stage === DocumentTrail::STAGE_ADM_SIGNATURE
             && $document->department()->where('code', 'ADM')->where('state', 1)->exists()
             && ($this->isAdmDepartmentHead($user)
                 || ($user->state === 1 && $user->role === 'system_administrator'));

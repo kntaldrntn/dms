@@ -129,6 +129,7 @@ test('referrals resolve office codes rather than fixed ids and accept omitted re
     $document = $this->document->fresh();
     expect($document->department_id)->toBe($this->adminOffice->id);
     expect($document->requires_signature_from)->toBe('department_head');
+    expect($document->stage)->toBe(DocumentTrail::STAGE_ADM_SIGNATURE);
     expect($document->approved_routing_slip)->toBe([$this->target->id]);
     expect($document->workflow_version)->toBe(1);
     $approvalTrail = DocumentTrail::where('document_id', $document->id)->where('released_action', 'Referral Slip Generated')->firstOrFail();
@@ -148,6 +149,7 @@ test('referrals resolve office codes rather than fixed ids and accept omitted re
     $document = $this->document->fresh();
     expect($document->department_id)->toBe($this->recordsOffice->id);
     expect($document->requires_signature_from)->toBe('none');
+    expect($document->stage)->toBeNull();
     $this->actingAs($this->records)->get(route('referral-slips.print', $document))
         ->assertOk()->assertSee('REFERRAL / ACTION SLIP');
 });
@@ -408,6 +410,7 @@ test('intake accepts an internal office id and hands the document to the City Ad
     expect($created->source_location)->toBe((string) $this->target->id);
     expect($created->department_id)->toBe($this->adminOffice->id);
     expect($created->requires_signature_from)->toBe('city_administrator');
+    expect($created->stage)->toBe(DocumentTrail::STAGE_ADM_APPROVAL);
     expect($created->trails()->count())->toBe(2);
     expect($created->trails()->oldest('id')->first()->released_to)->toBe($this->adminOffice->id);
     expect($created->trails()->latest('id')->first()->received_action)->toBe('Awaiting referral slip');
@@ -427,6 +430,7 @@ test('intake transfers an OCM approval document to the City Mayor office and que
 
     expect($created->department_id)->toBe($this->mayorOffice->id)
         ->and($created->requires_signature_from)->toBe('city_mayor')
+        ->and($created->stage)->toBe(DocumentTrail::STAGE_OCM_APPROVAL)
         ->and($created->trails()->count())->toBe(2);
     expect($created->trails()->oldest('id')->first()->released_to)->toBe($this->mayorOffice->id)
         ->and($created->trails()->oldest('id')->first()->released_action)->toBe('Submitted for City Mayor approval');
@@ -442,7 +446,7 @@ test('intake transfers an OCM approval document to the City Mayor office and que
 });
 
 test('Records cannot dispatch a document while City Administrator review is pending', function () {
-    $this->document->update(['requires_signature_from' => 'city_administrator']);
+    DocumentTrail::where('document_id', $this->document->id)->update(['stage' => DocumentTrail::STAGE_ADM_APPROVAL]);
 
     $this->actingAs($this->records)->postJson(route('documents.route', $this->document), [
         'workflow_version' => 0,

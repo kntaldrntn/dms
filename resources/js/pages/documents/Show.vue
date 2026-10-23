@@ -55,12 +55,12 @@ const isCompleted = computed(() => props.document.status === 'Completed');
 const nextStop = computed<{ offices: Office[]; action: string } | null>(() => {
     if (isCompleted.value) return null;
     const records: Office = { code: 'REC', name: 'Records' };
-    switch (props.document.requires_signature_from) {
-        case 'city_administrator':
+    switch (props.document.stage) {
+        case 'adm_approval':
             return { offices: [{ code: 'ADM', name: 'Office of the City Administrator' }], action: 'Department Head signature' };
-        case 'department_head':
+        case 'adm_signature':
             return { offices: [records], action: 'Return to Records for dispatch' };
-        case 'city_mayor':
+        case 'ocm_approval':
             return { offices: [records], action: 'Return to Records after OCM approval' };
     }
     if (props.slipTargets.length) {

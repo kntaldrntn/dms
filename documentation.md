@@ -163,7 +163,23 @@ category; external clients see the latest status only.
 1. ✅ **Done 2026-10-21** — document `is_confidential` + `route_mode`; rulebook enforced server-side and mirrored
    on the intake/edit forms (see change log). Intake routing (ADM/OCM/direct) and the fresh-data reset were left for
    Phase 2, because Phase 2 rewrites those flows and the old documents still work under Phase 1.
-2. Reset document data (fresh start, user-approved 2026-10-21; confirm before running). Intake target choice:
+2. **Plan (2026-10-23, awaiting user approval of the defaults below), one tested commit per step:**
+   - 2a. Explicit stage: migration adds `document_trails.stage` (null = normal processing, `adm_approval`,
+     `ocm_approval`) on the open Primary entry; queues, policy, inbox and bell read it instead of
+     `documents.requires_signature_from` (kept read-only until 2d, then dropped in a new migration).
+   - 2b. Intake "Direct to": City Administrator, City Mayor, or Departments (Primary + copies picker reused from
+     `RoutingModal`, AI suggestions pre-ticked). ADM/OCM targets open the matching approval stage.
+   - 2c. ADM single approval: ADM staff receive (bell) → City Administrator **Approve & Route**: paperless =
+     PNPKI stamp via `PdfApprovalStampService`, paper = upload of the wet-signed scan → routes to OCM (stage
+     `ocm_approval`) or to departments (Primary + copies, AI suggestion pre-filled). Never back to Records.
+   - 2d. Retire referral slips: `ReferralService::generate/sign`, `department_head` stage, Referral Slips page,
+     print/preview routes and template, `approved_routing_slip` use (old data is reset in 2e).
+   - 2e. Reset command `php artisan dms:reset-documents` (documents, trails, uploaded/signed files; keeps offices,
+     users, registries, people). Written and tested, **run only after the user confirms**.
+   - PNPKI per signer (default to confirm): each signer uploads their own `.p12` once to
+     `storage/app/certificates/users/{user_id}.p12` (local disk, never public); the PIN is typed at each
+     signing and never stored. Replaces the single Mayor certificate in `config/digital-certificate.php`.
+   Original scope note: Reset document data (fresh start, user-approved 2026-10-21; confirm before running). Intake target choice:
    ADM, OCM or departments directly. Replace the overloaded `requires_signature_from` with an explicit stage per
    open copy. ADM: ADM staff
    receive (notified) → City Administrator approves (paperless: PNPKI stamp via
@@ -316,6 +332,26 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-23 — FGD Phase 2a: explicit stage on the open Primary entry (Claude Code, uncommitted)
+- Migration `2026_10_23_010000_add_stage_to_document_trails_table` (**not yet run locally — the app needs it,
+  since `Document` now appends `stage`**): nullable indexed `document_trails.stage`; backfills the newest open
+  Primary entry of active documents from `requires_signature_from` (city_administrator → `adm_approval`,
+  department_head → `adm_signature`, city_mayor → `ocm_approval`).
+- `DocumentTrail::STAGE_*` + `EXECUTIVE_STAGES` (replaces `Document::EXECUTIVE_STAGES`). `Document`:
+  `primaryEntry()` (latest open Primary), `stage` accessor (uses the eager-loaded entry, else reads fresh),
+  `inExecutiveStage()`, scopes `inStage()` / `outsideExecutiveStages()`.
+- Writes: `DocumentWorkflow::receive(..., $stage)` (copies never get a stage), `executiveStageFor()` (ADM/OCM by
+  code); intake, registration reassign and slip generation set it. `requires_signature_from` is still written
+  everywhere (transitional) but **no longer read**; drop it in 2d.
+- Reads switched: `DocumentPolicy` (dispatch, process, refer, signReferral), `TransactionController` inbox,
+  `ReferralSlipController` queues and stamp check, `ReferralService`, `IncomingDocumentService` (bell filters on
+  the entry's own stage), pages `documents/Index.vue`, `documents/Show.vue`, `referral-slips/Index.vue`.
+- Behaviour change: **changePrimary is refused while an approval stage is pending** (moving the Primary office
+  would have skipped the approval).
+- Checks: Pest 112 passed (1054 assertions; new `ExecutiveStageTest` 5 cases incl. the backfill; stage asserts
+  added to WorkflowReliability; OcmStampPlacement fixture now sets the trail stage); ESLint ✅ on the 3 pages;
+  build ✅; Pint: no new violations (the touched legacy files keep their pre-existing style debt).
 
 ### 2026-10-23 — Intake page: leaner layout in the old DTS style (Claude Code, uncommitted)
 - **Why (user request):** keep the current form but make it plain like the previous DTS ("remove the blue").

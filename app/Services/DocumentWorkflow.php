@@ -167,12 +167,24 @@ class DocumentWorkflow
         ])->save();
     }
 
-    public function receive(Document $document, int $department, string $action, string $role = DocumentTrail::PRIMARY): void
+    /** A copy never carries a stage: only the Primary office waits on (and acts on) an executive step. */
+    public function receive(Document $document, int $department, string $action, string $role = DocumentTrail::PRIMARY, ?string $stage = null): void
     {
         DocumentTrail::create([
             'document_id' => $document->id, 'department_id' => $department, 'copy_role' => $role,
+            'stage' => $role === DocumentTrail::PRIMARY ? $stage : null,
             'received_at' => now('Asia/Manila'), 'received_action' => $action,
         ]);
+    }
+
+    /** The approval stage a document opens when it is sent to ADM or OCM; null for any other office. */
+    public function executiveStageFor(int $department): ?string
+    {
+        return match (Department::whereKey($department)->value('code')) {
+            'ADM' => DocumentTrail::STAGE_ADM_APPROVAL,
+            'OCM' => DocumentTrail::STAGE_OCM_APPROVAL,
+            default => null,
+        };
     }
 
     public function signer(User $user, bool $requested, bool $allowDepartmentHead = false): ?int

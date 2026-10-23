@@ -15,10 +15,21 @@ class DocumentTrail extends Model
     /** A view-only copy: the office can receive and view the document but not act on it. */
     public const COPY = 'copy';
 
+    /** Executive steps an open Primary entry can wait on; null means normal office processing. */
+    public const STAGE_ADM_APPROVAL = 'adm_approval';
+
+    /** Referral slip waiting for the ADM Department Head's signature (retired in FGD Phase 2d). */
+    public const STAGE_ADM_SIGNATURE = 'adm_signature';
+
+    public const STAGE_OCM_APPROVAL = 'ocm_approval';
+
+    public const EXECUTIVE_STAGES = [self::STAGE_ADM_APPROVAL, self::STAGE_ADM_SIGNATURE, self::STAGE_OCM_APPROVAL];
+
     protected $fillable = [
         'document_id',
         'department_id',
         'copy_role',
+        'stage',
         'received_by',
         'received_at',
         'received_action',

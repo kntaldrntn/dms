@@ -21,10 +21,7 @@ class Document extends Model
         'state', 'status', 'due_date', 'completed_at', 'ai_routing_suggestions', 'workflow_version',
     ];
 
-    protected $appends = ['is_delayed', 'is_delinquent'];
-
-    /** requires_signature_from values that mean the document waits on an executive queue (slip, signature, OCM). */
-    public const EXECUTIVE_STAGES = ['city_administrator', 'department_head', 'city_mayor'];
+    protected $appends = ['is_delayed', 'is_delinquent', 'stage'];
 
     // --- Relationships ---
     public function transactionType() { return $this->belongsTo(TransactionType::class); }
@@ -74,6 +71,47 @@ class Document extends Model
     {
         return $query->whereHas('trails', fn (Builder $trails) => $trails->where('department_id', $departmentId)
             ->where('copy_role', DocumentTrail::PRIMARY)->whereNull('released_at'));
+    }
+
+    /** The open Primary entry: where the document is acted on, and the executive stage it waits on. */
+    public function primaryEntry()
+    {
+        return $this->hasOne(DocumentTrail::class)->ofMany(['id' => 'max'], fn (Builder $trails) => $trails
+            ->where('copy_role', DocumentTrail::PRIMARY)->whereNull('released_at'));
+    }
+
+    /**
+     * The executive step the document waits on (DocumentTrail::STAGE_*), or null for normal processing.
+     * Uses an eager-loaded primaryEntry when present; otherwise reads it fresh, so a policy check after
+     * a hand-off never sees a stale cached entry.
+     */
+    public function getStageAttribute(): ?string
+    {
+        if ($this->relationLoaded('primaryEntry')) {
+            return $this->primaryEntry?->stage;
+        }
+
+        return $this->trails()->getQuery()->reorder()->where('copy_role', DocumentTrail::PRIMARY)
+            ->whereNull('released_at')->latest('id')->value('stage');
+    }
+
+    public function inExecutiveStage(): bool
+    {
+        return in_array($this->stage, DocumentTrail::EXECUTIVE_STAGES, true);
+    }
+
+    /** @param  list<string>  $stages  DocumentTrail::STAGE_* values */
+    public function scopeInStage(Builder $query, array $stages): Builder
+    {
+        return $query->whereHas('trails', fn (Builder $trails) => $trails->where('copy_role', DocumentTrail::PRIMARY)
+            ->whereNull('released_at')->whereIn('stage', $stages));
+    }
+
+    /** Documents not waiting on any executive step: the ones offices process from their inbox. */
+    public function scopeOutsideExecutiveStages(Builder $query): Builder
+    {
+        return $query->whereDoesntHave('trails', fn (Builder $trails) => $trails->where('copy_role', DocumentTrail::PRIMARY)
+            ->whereNull('released_at')->whereIn('stage', DocumentTrail::EXECUTIVE_STAGES));
     }
 
     /** Documents an office holds an open view-only copy of. */

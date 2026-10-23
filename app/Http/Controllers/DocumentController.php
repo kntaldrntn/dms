@@ -25,7 +25,7 @@ class DocumentController extends Controller
     public function index(Request $request)
     {
         $this->authorize('viewAny', Document::class);
-        $query = Document::visibleTo($request->user())->with(['documentType', 'department', 'transactionType', 'holders:id,code,name']);
+        $query = Document::visibleTo($request->user())->with(['documentType', 'department', 'transactionType', 'holders:id,code,name', 'primaryEntry']);
 
         if ($request->filled('search')) {
             $searchTerm = $request->search;

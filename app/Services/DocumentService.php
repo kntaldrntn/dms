@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Document;
 use App\Models\Department;
+use App\Models\DocumentTrail;
 use App\Models\TransactionType;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
@@ -44,7 +45,7 @@ class DocumentService
                     if ($target !== (int) $document->department_id) {
                         $this->workflow->targets([$target], $document->department_id, 'department_id');
                         $this->workflow->release($document, $user, 'Reassigned during registration update', $target);
-                        $this->workflow->receive($document, $target, 'Registration reassigned');
+                        $this->workflow->receive($document, $target, 'Registration reassigned', DocumentTrail::PRIMARY, $this->workflow->executiveStageFor($target));
                         $document->current_assignee_id = null;
                         $document->approved_routing_slip = null;
                     }
@@ -84,7 +85,7 @@ class DocumentService
                         ? ['Submitted for City Mayor approval', 'Awaiting City Mayor approval']
                         : ['Forwarded to City Administrator', 'Awaiting referral slip'];
                     $this->workflow->release($document, $user, $releaseAction, $target);
-                    $this->workflow->receive($document, $target, $receiveAction);
+                    $this->workflow->receive($document, $target, $receiveAction, DocumentTrail::PRIMARY, $this->workflow->executiveStageFor($target));
                     $document->department_id = $target;
                     $document->save();
                 } elseif ($target !== (int) $user->department_id) {

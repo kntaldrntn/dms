@@ -23,9 +23,9 @@ class TransactionController extends Controller
         // (a document dispatched to several offices appears in each office's inbox).
         $this->authorize('viewAny', Document::class);
         // Documents waiting on an executive step belong to the Referral Slips / OCM queues instead.
-        $inbox = fn () => Document::visibleTo($request->user())->with(['documentType', 'transactionType'])
+        $inbox = fn () => Document::visibleTo($request->user())->with(['documentType', 'transactionType', 'primaryEntry'])
             ->heldBy((int) $request->user()->department_id)
-            ->whereNotIn('requires_signature_from', Document::EXECUTIVE_STAGES)
+            ->outsideExecutiveStages()
             ->where('status', '!=', 'Completed')
             ->where('state', 1);
         $query = $inbox();

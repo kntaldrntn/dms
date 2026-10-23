@@ -2,6 +2,7 @@
 
 use App\Models\Department;
 use App\Models\Document;
+use App\Models\DocumentTrail;
 use App\Models\DocumentType;
 use App\Models\TransactionType;
 use App\Models\User;
@@ -18,6 +19,10 @@ beforeEach(function () {
         'subject_matter' => 'For signature', 'department_id' => $office->id, 'requires_signature_from' => 'city_mayor',
         'document_type_id' => DocumentType::create(['document_code' => 'T', 'document_type' => 'Test', 'state' => 1])->id,
         'transaction_type_id' => TransactionType::create(['name' => 'Simple', 'processing_days' => 3, 'state' => 1])->id,
+    ]);
+    DocumentTrail::create([
+        'document_id' => $this->document->id, 'department_id' => $office->id, 'stage' => DocumentTrail::STAGE_OCM_APPROVAL,
+        'received_at' => now('Asia/Manila'), 'received_action' => 'Awaiting City Mayor approval',
     ]);
 });
 
@@ -38,5 +43,5 @@ test('OCM approval refuses a stamp that does not fit inside the page', function 
         'stamp_placement' => ['page' => 1, 'x' => 800, 'y' => 100, 'width' => 300, 'height' => 105],
     ])->assertUnprocessable()->assertJsonValidationErrors(['stamp_placement']);
 
-    expect($this->document->fresh()->requires_signature_from)->toBe('city_mayor');
+    expect($this->document->fresh()->stage)->toBe(DocumentTrail::STAGE_OCM_APPROVAL);
 });

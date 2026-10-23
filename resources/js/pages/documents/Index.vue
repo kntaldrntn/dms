@@ -33,11 +33,11 @@ const departmentId = (code: string) => Number(props.departments.find(department 
 const cityAdministratorId = departmentId('ADM');
 const cityMayorId = departmentId('OCM');
 
-// Documents waiting on an executive step cannot be routed by Records yet.
+// Documents waiting on an executive step (their Primary entry's stage) cannot be routed by Records yet.
 const pendingApprovalLabels: Record<string, string> = {
-    city_administrator: 'Pending City Administrator Slip',
-    department_head: 'Pending Dept. Head Signature',
-    city_mayor: 'Pending City Mayor Review',
+    adm_approval: 'Pending City Administrator Slip',
+    adm_signature: 'Pending Dept. Head Signature',
+    ocm_approval: 'Pending City Mayor Review',
 };
 
 // A document dispatched to several offices is held by all of them (`holders`); department_id is only the primary one.
@@ -622,7 +622,7 @@ function submitDocument() {
                                             <a
                                                 v-if="
                                                     doc.approved_routing_slip &&
-                                                    doc.requires_signature_from !== 'department_head' &&
+                                                    doc.stage !== 'adm_signature' &&
                                                     ['records_manager', 'city_administrator', 'city_mayor', 'system_administrator'].includes($page.props.auth.user.role)
                                                 "
                                                 :href="route('referral-slips.preview', doc.id)"
@@ -637,11 +637,11 @@ function submitDocument() {
 
                                             <!-- ROUTING/STATUS: no Route button while an executive step is pending or another office is Primary -->
                                             <span
-                                                v-if="pendingApprovalLabels[doc.requires_signature_from] || !holdsCopy(doc, $page.props.auth.user.department_id)"
+                                                v-if="pendingApprovalLabels[doc.stage] || !holdsCopy(doc, $page.props.auth.user.department_id)"
                                                 class="px-1 text-xs text-slate-500"
                                                 :title="holderNames(doc)"
                                             >
-                                                {{ pendingApprovalLabels[doc.requires_signature_from] || `With ${holderCodes(doc)}` }}
+                                                {{ pendingApprovalLabels[doc.stage] || `With ${holderCodes(doc)}` }}
                                             </span>
                                             <button
                                                 v-else
