@@ -15,44 +15,53 @@ const breadcrumbs: BreadcrumbItem[] = [
 const props = defineProps<{
     selectedMonth: string;
     months: string[];
+    selectedYear: number;
+    years: number[];
+    transactionCategories: string[];
+    processingCategory: string;
     summaryCards: Array<any>;
     delinquent: any;
     pipeline: Array<any>;
     processingTimes: Array<any>;
-    selectedCategory?: string | null;
-    selectedPipeline?: string | null;
-    drillDownDocuments?: any | null;
-    reportTitle?: string | null;
-    reportDescription?: string | null;
 }>();
 
 const currentMonth = ref(props.selectedMonth);
+const currentYear = ref(props.selectedYear);
 
 // Refetches data from the controller when they click generate
 function generateReport() {
-    router.get(route('dashboard'), { month: currentMonth.value }, { preserveState: true });
+    router.get(route('dashboard'), { month: currentMonth.value, year: currentYear.value, processing_category: props.processingCategory }, { preserveState: true });
+}
+
+// Card reports open in their own tab (they can run to thousands of rows), for the generated month and year.
+function reportUrl(filters: Record<string, string>) {
+    return route('dashboard.report', { month: props.selectedMonth, year: props.selectedYear, ...filters });
 }
 
 function categoryReportUrl(row: any) {
-    return `/dashboard?month=${encodeURIComponent(props.selectedMonth)}&transaction_category=${encodeURIComponent(row.label)}&pipeline_status=${encodeURIComponent(row.pipeline)}`;
+    return reportUrl({ transaction_category: row.label, pipeline_status: row.pipeline });
 }
 
-function dashboardUrl() {
-    return `/dashboard?month=${encodeURIComponent(props.selectedMonth)}`;
+function changeProcessingCategory(event: Event) {
+    router.get(
+        route('dashboard', { month: props.selectedMonth, year: props.selectedYear, processing_category: (event.target as HTMLSelectElement).value }),
+        {},
+        { preserveScroll: true },
+    );
 }
 
-function delinquentReportUrl() {
-    return `/dashboard?month=${encodeURIComponent(props.selectedMonth)}&delinquent=1`;
-}
-
-const delinquentScopeText = props.delinquent.scope === 'all' ? 'across all departments' : 'held by your office';
-
-function formatDate(value: string | null) {
-    if (!value) return '—';
-    return new Intl.DateTimeFormat('en-PH', {
-        month: 'short', day: '2-digit', year: 'numeric',
-    }).format(new Date(value));
-}
+const scopeLabel = props.delinquent.scope === 'all' ? 'All departments' : 'Your office';
+const scopeText = props.delinquent.scope === 'all' ? 'across all departments' : 'held by your office';
+const alertCards = [
+    { report: 'delinquent', title: 'Delinquent', badge: 'Action Req', value: props.delinquent.value, suffix: props.delinquent.label, empty: 'No delinquent documents', tone: 'red' },
+    { report: 'due_tomorrow', title: 'For Due', badge: 'Tomorrow', value: props.delinquent.dueTomorrow, suffix: 'Documents', empty: 'Nothing is due tomorrow', tone: 'orange' },
+    { report: 'todo', title: 'To-Do List', badge: 'Open', value: props.delinquent.todo, suffix: 'Documents', empty: 'Nothing to do', tone: 'emerald' },
+];
+const alertTone: Record<string, { value: string; badge: string; hover: string }> = {
+    red: { value: 'text-red-600', badge: 'bg-red-50 text-red-600', hover: 'hover:border-red-200 hover:bg-red-50/30' },
+    orange: { value: 'text-orange-600', badge: 'bg-orange-50 text-orange-600', hover: 'hover:border-orange-200 hover:bg-orange-50/30' },
+    emerald: { value: 'text-slate-800', badge: 'bg-emerald-50 text-emerald-600', hover: 'hover:border-emerald-200 hover:bg-emerald-50/30' },
+};
 
 // Static class strings (not interpolated) so Tailwind's JIT scanner can detect them
 const toneClass: Record<string, string> = {
@@ -73,26 +82,25 @@ const toneClass: Record<string, string> = {
             
             <!-- Header & Filters -->
             <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-                <div>
-                    <h1 class="text-2xl font-bold tracking-tight text-slate-800">Document Tracking Status</h1>
-                    <p class="mt-1 text-sm text-slate-500">Segmented indicators calculated from this month's activity.</p>
-                </div>
                 <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
                     <span class="pl-3 text-sm font-medium text-slate-500">Dashboard Report:</span>
                     
                     <!-- Dynamic Month Dropdown -->
-                    <select v-model="currentMonth" class="cursor-pointer rounded-lg border-none bg-slate-50 py-1.5 pl-3 pr-8 text-sm font-semibold focus:ring-0">
+                    <select v-model="currentMonth" aria-label="Report month" class="cursor-pointer rounded-lg border-none bg-slate-50 py-1.5 pl-3 pr-8 text-sm font-semibold focus:ring-0">
                         <option v-for="month in months" :key="month" :value="month">{{ month }}</option>
                     </select>
-                    
-                    <button @click="generateReport" :disabled="currentMonth === selectedMonth" class="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50">
+                    <select v-model="currentYear" aria-label="Report year" class="cursor-pointer rounded-lg border-none bg-slate-50 py-1.5 pl-3 pr-8 text-sm font-semibold focus:ring-0">
+                        <option v-for="year in years" :key="year" :value="year">{{ year }}</option>
+                    </select>
+
+                    <button @click="generateReport" :disabled="currentMonth === selectedMonth && currentYear === selectedYear" class="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50">
                         Generate
                     </button>
                 </div>
             </div>
 
             <!-- Top Summary Cards -->
-            <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
                 <div
                     v-for="card in summaryCards"
                     :key="card.label"
@@ -108,24 +116,28 @@ const toneClass: Record<string, string> = {
                     </div>
                 </div>
 
-                <!-- Delinquent / Alerts: all departments for oversight roles, otherwise the user's office -->
-                <component :is="delinquent.value > 0 ? Link : 'div'" :href="delinquentReportUrl()" class="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)] transition" :class="delinquent.value > 0 ? 'hover:border-red-200 hover:bg-red-50/30' : 'cursor-default opacity-75'" :title="delinquent.value > 0 ? `View delinquent documents ${delinquentScopeText}` : `No delinquent documents ${delinquentScopeText}`">
+                <!-- Alert cards: all departments for oversight roles, otherwise the user's office -->
+                <component
+                    :is="card.value > 0 ? 'a' : 'div'"
+                    v-for="card in alertCards"
+                    :key="card.report"
+                    :href="card.value > 0 ? reportUrl({ report: card.report }) : undefined"
+                    :target="card.value > 0 ? '_blank' : undefined"
+                    :rel="card.value > 0 ? 'noopener' : undefined"
+                    class="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)] transition"
+                    :class="card.value > 0 ? alertTone[card.tone].hover : 'cursor-default opacity-75'"
+                    :title="card.value > 0 ? `Open the ${card.title} report ${scopeText} in a new tab` : `${card.empty} ${scopeText}`"
+                >
                     <div class="flex items-start justify-between">
                         <span class="text-sm font-semibold text-slate-500">
-                            Delinquent
-                            <span class="block text-[11px] font-medium text-slate-400">{{ delinquent.scope === 'all' ? 'All departments' : 'Your office' }}</span>
+                            {{ card.title }}
+                            <span class="block text-[11px] font-medium text-slate-400">{{ scopeLabel }}</span>
                         </span>
-                        <span class="rounded-md bg-red-50 px-2 py-1 text-xs font-bold text-red-600">Action Req</span>
+                        <span class="rounded-md px-2 py-1 text-xs font-bold" :class="alertTone[card.tone].badge">{{ card.badge }}</span>
                     </div>
-                    <div class="mt-4 flex items-end justify-between">
-                        <div>
-                            <span class="text-3xl font-bold text-red-600">{{ delinquent.value }}</span>
-                            <span class="ml-2 text-xs text-slate-400">{{ delinquent.label }}</span>
-                        </div>
-                        <div class="text-right">
-                            <span class="block text-xs font-medium text-slate-500">To-Do: <strong class="text-slate-800">{{ delinquent.todo }}</strong></span>
-                            <span class="block text-xs font-medium text-slate-500">Due Tmrw: <strong class="text-slate-800">{{ delinquent.dueTomorrow }}</strong></span>
-                        </div>
+                    <div class="mt-4">
+                        <span class="text-3xl font-bold" :class="alertTone[card.tone].value">{{ card.value }}</span>
+                        <span class="ml-2 text-xs text-slate-400">{{ card.suffix }}</span>
                     </div>
                 </component>
             </div>
@@ -163,13 +175,15 @@ const toneClass: Record<string, string> = {
                     </div>
                     <div class="space-y-4">
                         <component
-                            :is="row.value > 0 ? Link : 'div'"
+                            :is="row.value > 0 ? 'a' : 'div'"
                             v-for="(row, idx) in stage.rows"
                             :key="row.label"
-                            :href="categoryReportUrl(row)"
+                            :href="row.value > 0 ? categoryReportUrl(row) : undefined"
+                            :target="row.value > 0 ? '_blank' : undefined"
+                            :rel="row.value > 0 ? 'noopener' : undefined"
                             class="flex items-end justify-between rounded-md transition"
                             :class="[idx !== stage.rows.length - 1 ? 'border-b border-slate-100 pb-2' : '', row.value > 0 ? 'hover:bg-slate-50 hover:px-2' : 'cursor-default opacity-60']"
-                            :title="row.value > 0 ? `View ${stage.title} ${row.label} documents for ${selectedMonth}` : `No ${stage.title} ${row.label} documents`"
+                            :title="row.value > 0 ? `Open the ${stage.title} ${row.label} report for ${selectedMonth} ${selectedYear} in a new tab` : `No ${stage.title} ${row.label} documents`"
                         >
                             <span class="text-sm text-slate-500">{{ row.label }}</span>
                             <span class="text-xl font-bold text-slate-800">{{ row.value }}</span>
@@ -177,55 +191,6 @@ const toneClass: Record<string, string> = {
                     </div>
                 </div>
             </div>
-
-            <!-- DTS-style report drill-down, kept on the dashboard -->
-            <section v-if="reportTitle && drillDownDocuments" class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div class="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                        <h2 class="text-lg font-bold text-slate-800">{{ reportTitle }}</h2>
-                        <p class="text-xs text-slate-500">{{ reportDescription }} · {{ drillDownDocuments.total }} result{{ drillDownDocuments.total === 1 ? '' : 's' }}</p>
-                    </div>
-                    <Link :href="dashboardUrl()" class="text-sm font-semibold text-indigo-600 transition hover:text-indigo-800">Close report</Link>
-                </div>
-
-                <div class="overflow-x-auto">
-                    <table class="min-w-full text-left text-sm text-slate-700">
-                        <thead class="border-b border-slate-200 bg-slate-100 text-xs font-bold uppercase tracking-wider text-slate-600">
-                            <tr>
-                                <th class="px-4 py-3">Date</th>
-                                <th class="px-4 py-3">Barcode</th>
-                                <th class="px-4 py-3">Document Type</th>
-                                <th class="px-4 py-3">Source</th>
-                                <th class="px-4 py-3">Subject Matter</th>
-                                <th class="px-4 py-3">Dept.</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-200">
-                            <tr v-for="document in drillDownDocuments.data" :key="document.id" class="transition hover:bg-slate-50">
-                                <td class="whitespace-nowrap px-4 py-3">{{ formatDate(document.created_at) }}</td>
-                                <td class="whitespace-nowrap px-4 py-3 font-mono font-semibold">
-                                    <Link :href="route('documents.show', document.id)" class="text-indigo-600 hover:underline">{{ document.barcode }}</Link>
-                                </td>
-                                <td class="px-4 py-3">{{ document.document_type?.document_type || '—' }}</td>
-                                <td class="px-4 py-3">{{ document.source_name || '—' }}</td>
-                                <td class="max-w-md px-4 py-3">{{ document.subject_matter || '—' }}</td>
-                                <td class="px-4 py-3">{{ document.department?.code || '—' }}</td>
-                            </tr>
-                            <tr v-if="drillDownDocuments.data.length === 0">
-                                <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-500">No documents match this SLA report.</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <div v-if="drillDownDocuments.last_page > 1" class="flex items-center justify-between border-t border-slate-200 px-5 py-3 text-sm">
-                    <Link v-if="drillDownDocuments.prev_page_url" :href="drillDownDocuments.prev_page_url" class="font-semibold text-indigo-600 hover:underline">← Previous</Link>
-                    <span v-else></span>
-                    <span class="text-slate-500">Page {{ drillDownDocuments.current_page }} of {{ drillDownDocuments.last_page }}</span>
-                    <Link v-if="drillDownDocuments.next_page_url" :href="drillDownDocuments.next_page_url" class="font-semibold text-indigo-600 hover:underline">Next →</Link>
-                    <span v-else></span>
-                </div>
-            </section>
 
             <!-- Bottom Section (Average Processing Times) -->
             <div class="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)]">
@@ -237,6 +202,14 @@ const toneClass: Record<string, string> = {
                             </svg>
                         </div>
                         <h3 class="text-lg font-bold text-slate-800">Average Processing Times (Completed)</h3>
+                        <select
+                            :value="processingCategory"
+                            aria-label="Transaction category for processing times"
+                            class="cursor-pointer rounded-lg border border-slate-200 bg-slate-50 py-1 pl-3 pr-8 text-sm font-semibold focus:ring-0"
+                            @change="changeProcessingCategory"
+                        >
+                            <option v-for="category in transactionCategories" :key="category" :value="category">{{ category }}</option>
+                        </select>
                     </div>
                     <Link :href="route('documents.index')" class="cursor-pointer text-xs font-medium text-slate-400 hover:text-slate-600 transition">View Full Registry &rarr;</Link>
                 </div>
@@ -245,7 +218,7 @@ const toneClass: Record<string, string> = {
                     <div v-for="item in processingTimes" :key="item.label">
                         <span class="mb-1 block truncate text-xs font-semibold uppercase tracking-wider text-slate-400" :title="item.label">{{ item.label }}</span>
                         <div class="flex items-baseline gap-1">
-                            <span class="text-2xl font-bold text-slate-800">{{ item.value }}</span>
+                            <span class="text-2xl font-bold text-slate-800">{{ Number(item.value).toFixed(2) }}</span>
                             <span class="text-xs text-slate-400">days</span>
                         </div>
                         <div class="mt-2 h-1.5 w-full rounded-full bg-slate-100">
@@ -255,8 +228,8 @@ const toneClass: Record<string, string> = {
                 </div>
                 
                 <div v-else class="text-center py-10">
-                    <p class="text-sm font-semibold text-slate-600">No documents completed in {{ selectedMonth }}.</p>
-                    <p class="text-xs text-slate-400 mt-1">Check back once files finish their routing life cycle.</p>
+                    <p class="text-sm font-semibold text-slate-600">No {{ processingCategory }} document types are registered.</p>
+                    <p class="text-xs text-slate-400 mt-1">Add document types in the Document Type registry.</p>
                 </div>
             </div>
         </div>

@@ -62,6 +62,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // 3. DASHBOARD
     Route::get('dashboard', DashboardController::class)->name('dashboard');
+    Route::get('dashboard/report', App\Http\Controllers\DashboardReportController::class)->name('dashboard.report');
 });
 
 // User management: System Administrator only (FGD access matrix, slide 9).
