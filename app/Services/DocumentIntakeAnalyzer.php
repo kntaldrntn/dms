@@ -193,6 +193,10 @@ class DocumentIntakeAnalyzer
         }
 
         $officeIdsByCode = $offices->pluck('id', 'code');
+        $mayorId = $officeIdsByCode['OCM'] ?? null;
+        if (! in_array($result['department_id'] ?? null, array_filter([$administratorId, $mayorId]), true)) {
+            $result['department_id'] = null;
+        }
         $suggestions = collect(is_array($result['routing_suggestions'] ?? null) ? $result['routing_suggestions'] : [])
             ->map(fn ($suggestion) => is_array($suggestion)
                 ? [...$suggestion, 'department_id' => $officeIdsByCode[Str::before((string) ($suggestion['office'] ?? ''), ' ')] ?? null]
@@ -201,7 +205,11 @@ class DocumentIntakeAnalyzer
         $result['routing_suggestions'] = $this->routingSuggestions(
             $suggestions,
             $offices->pluck('id')->all(),
-            array_filter([$administratorId, $result['department_id'] ?? null, $result['source_location'] ?? null]),
+            // Records never routes to itself, and OCM is reached only through Direct to (or after ADM approval).
+            array_filter([
+                $administratorId, $officeIdsByCode['REC'] ?? null, $result['source_location'] ?? null,
+                $administratorId !== null && $result['department_id'] === $administratorId ? null : $mayorId,
+            ]),
         );
 
         return $result;

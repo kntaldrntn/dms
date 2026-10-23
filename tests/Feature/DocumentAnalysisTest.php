@@ -146,6 +146,48 @@ test('routing suggestions keep only offices a referral slip can target', functio
         ]);
 });
 
+test('straight-to-department routing never suggests Records or the Mayor, and the Primary is a kept office', function () {
+    Department::create(['code' => 'OCM', 'name' => 'Office of the City Mayor', 'state' => 1]);
+    $health = Department::create(['code' => 'CHO', 'name' => 'Health', 'state' => 1]);
+    $budget = Department::create(['code' => 'CBO', 'name' => 'Budget', 'state' => 1]);
+    fakeAnalysis([
+        'department_id' => null,
+        'routing_suggestions' => [
+            ['office' => 'OCM Office of the City Mayor', 'priority' => 'Primary', 'reason' => 'Mentions the Mayor'],
+            ['office' => 'REC Records', 'priority' => 'Secondary', 'reason' => 'Filing'],
+            ['office' => 'CBO Budget', 'priority' => 'FYI', 'reason' => 'Budget copy'],
+            ['office' => 'CHO Health', 'priority' => 'Secondary', 'reason' => 'Health request'],
+        ],
+    ]);
+
+    $this->actingAs($this->records)->postJson(route('documents.analyze'), ['extracted_text' => 'Request to the Health Office'])
+        ->assertOk()->assertJsonPath('routing_suggestions', [
+            ['department_id' => $budget->id, 'priority' => 'Primary', 'reason' => 'Budget copy'],
+            ['department_id' => $health->id, 'priority' => 'Secondary', 'reason' => 'Health request'],
+        ]);
+});
+
+test('a document for the City Administrator may still suggest the Mayor for after approval', function () {
+    $administrator = Department::create(['code' => 'ADM', 'name' => 'Administrator', 'state' => 1]);
+    $mayor = Department::create(['code' => 'OCM', 'name' => 'Office of the City Mayor', 'state' => 1]);
+    fakeAnalysis([
+        'department_id' => $administrator->id,
+        'routing_suggestions' => [['office' => 'OCM Office of the City Mayor', 'priority' => 'Primary', 'reason' => 'Final approval']],
+    ]);
+
+    $this->actingAs($this->records)->postJson(route('documents.analyze'), ['extracted_text' => 'Request to the City Administrator'])
+        ->assertOk()->assertJsonPath('department_id', $administrator->id)
+        ->assertJsonPath('routing_suggestions', [['department_id' => $mayor->id, 'priority' => 'Primary', 'reason' => 'Final approval']]);
+});
+
+test('an intake target other than the City Administrator or the Mayor is discarded', function () {
+    $health = Department::create(['code' => 'CHO', 'name' => 'Health', 'state' => 1]);
+    fakeAnalysis(['department_id' => $health->id]);
+
+    $this->actingAs($this->records)->postJson(route('documents.analyze'), ['extracted_text' => 'Request'])
+        ->assertOk()->assertJsonPath('department_id', null);
+});
+
 test('routing suggestions always carry exactly one Primary office', function (array $priorities, array $expected) {
     $offices = collect(['CHO', 'CBO', 'CTO'])->map(fn ($code) => Department::create(['code' => $code, 'name' => $code, 'state' => 1]));
     fakeAnalysis(['routing_suggestions' => $offices->map(fn ($office, $index) => [

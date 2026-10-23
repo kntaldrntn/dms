@@ -253,14 +253,15 @@ const handleFileUpload = async (event: Event) => {
             directTo.value = 'ADM';
             executiveSuggestion.value = { route: 'City Administrator', reason: data.approval_reason || 'Requires City Administrator approval.' };
         } else {
-            const suggested = form.ai_routing_suggestions
-                .filter((suggestion: any) => intakeOffices.value.some((office) => office.id === Number(suggestion.department_id)))
-                .map((suggestion: any) => Number(suggestion.department_id));
+            const suggested = form.ai_routing_suggestions.filter((suggestion: any) =>
+                intakeOffices.value.some((office) => office.id === Number(suggestion.department_id)),
+            );
             if (suggested.length) {
+                // The Primary comes from the offices that survived the filter, so it is always one of the routed offices.
+                const primaryId = Number((suggested.find((suggestion: any) => suggestion.priority === 'Primary') ?? suggested[0]).department_id);
                 directTo.value = 'departments';
-                form.routed_to = form.is_confidential ? suggested.slice(0, 1) : suggested;
-                form.primary_office_id =
-                    Number(form.ai_routing_suggestions.find((suggestion: any) => suggestion.priority === 'Primary')?.department_id) || suggested[0];
+                form.routed_to = form.is_confidential ? [primaryId] : suggested.map((suggestion: any) => Number(suggestion.department_id));
+                form.primary_office_id = primaryId;
                 executiveSuggestion.value = { route: 'the departments', reason: 'No executive approval needed.' };
             }
         }
