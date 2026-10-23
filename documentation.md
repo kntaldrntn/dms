@@ -344,6 +344,21 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 
 ## 9. Change log
 
+### 2026-10-23 — FGD Phase 2e: fresh-data reset command (Claude Code, uncommitted, **not run**)
+- New `app/Console/Commands/ResetDocuments.php` → `php artisan dms:reset-documents [--dry-run] [--force]`.
+  Deletes all `documents` + `document_trails` rows (one transaction; MySQL auto-increments reset to 1 afterwards)
+  and then every file under `storage/app/public/documents/` (intake scans) and
+  `storage/app/private/signed-documents/` (approval scans and stamped PDFs). Keeps offices, users, registries,
+  People Directory, e-signatures (`public/signatures`), certificates, login history and audit logs (user changes
+  only). Safeguards: prints counts first, `--dry-run` changes nothing, typed `RESET` confirmation unless `--force`,
+  Laravel's production prompt (`ConfirmableTrait`), files deleted only after the rows, run logged with counts and
+  any file it could not delete. This is the only code that deletes trail history (user-approved fresh start).
+- Migration `2026_10_23_040000_drop_approved_routing_slip_from_documents_table` (**pending; run after the reset**).
+- To do the reset: `php artisan dms:reset-documents --dry-run`, then `php artisan dms:reset-documents`, then
+  `php artisan migrate`.
+- Checks: Pest 139 passed (1261 assertions; new `ResetDocumentsTest` 5 cases on faked disks); Pint ✅. The command
+  was not run against the local database.
+
 ### 2026-10-23 — FGD Phase 2d: referral slips retired (Claude Code, uncommitted)
 - Migration `2026_10_23_030000_retire_referral_slips` (**not yet run locally**): open `adm_signature` entries move
   to `adm_approval` (they are already at ADM and go through the single approval); closed entries keep their
