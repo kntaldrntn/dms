@@ -4,7 +4,7 @@
 > handoff, and before `/compact`. Mark facts as **verified** only with evidence.
 > Feature-level health is tracked separately by the user in `status.md`.
 
-Last updated: 2026-10-21 (FGD transition plan + Phase 0 rulebook; earlier: per-office seed accounts, referral slip AI pre-fill fix)
+Last updated: 2026-10-22 (intake AI accuracy/token rework; Primary/copy routing; Phase 2 decisions)
 
 ---
 
@@ -51,7 +51,7 @@ FormRequest (authorize + rules) → service → `DocumentWorkflow` → models/tr
 | `app/Services/IncomingDocumentService.php` | Notification-bell data: open trail entries at the user's office with `received_by` null, filtered to the stages the user's role acts on. Shared lazily as `incoming`. |
 | `app/Services/ReferralService.php` | Two-step ADM referral: `generate()` (City Administrator, slip only → `requires_signature_from=department_head`) and `sign()` (ADM Department Head, `signature_mode` electronic/physical → back to REC). OCM approval `approveOcm()` uses `PdfApprovalStampService`. |
 | `app/Services/PdfApprovalStampService.php` | Stamps the uploaded PDF with a visible signature block and signs it with the certificate from `config/digital-certificate.php`; writes to `storage/app/private/signed-documents` (local disk). Original upload untouched. |
-| `app/Http/Controllers/DocumentController.php` `analyze()` | Live intake AI: OCR text + thumbnail → OpenAI JSON; ADM/OCM ids resolved by code; `routingSuggestions()` validates the routing suggestions. |
+| `app/Services/DocumentIntakeAnalyzer.php` | Live intake AI (called by `DocumentController::analyze()`): OCR text only (pages 1, 2, last) → strict JSON schema whose ids come from the registries + the type rulebook; answer re-checked server-side (allowed classification, default category, one Primary office, ADM/OCM excluded from routing). Model: `config('services.intake_ai.model')`. |
 | `app/Services/DocumentAnalysisService.php` | **Unused** older copy of the intake prompt (prompt reference: `basis.md`); not wired to any route. |
 | `app/Policies/DocumentPolicy.php` | All document abilities: `viewAny`, `view`, `create`, `update`, `delete`, `dispatch`, `process`, `viewReferrals`, `viewOcmApprovals`, `refer`, `signReferral`, `viewReferralSlip`. Ownership = user's department equals document's current department. |
 | `app/Http/Requests/*` | `SaveDocumentRequest`, `DispatchDocumentRequest`, `ProcessDocumentRequest`, `GenerateReferralRequest`, `SignReferralRequest`, `ApproveOcmDocumentRequest`, `AnalyzeDocumentRequest`, `DocumentMutationRequest` (base: requires `workflow_version`). |
@@ -135,7 +135,7 @@ Pint on changed test/request OK.
   per office, password `password`. Run `php artisan db:seed` locally to get them (not run yet). Note: re-seeding also
   resets the four executive/admin accounts' passwords to `password` and their office (existing seeder behaviour).
 
-### FGD process transition (started 2026-10-21; Phases 0–1 committed and pushed to `origin/main` at `79f08d8`; next: Phase 2)
+### FGD process transition (started 2026-10-21; Phases 0–1 pushed at `79f08d8`; Primary/copy routing pushed at `e7e0768` on 2026-10-22; next: Phase 2)
 
 Source: Google Slides "Document Management Focus Group Discussion" (presentationId
 `1re2mVrRkyyvndW1gAm3F6DvMXTyrgjYDKDS0AzLelno`), slides 5–9 (workflows, RBAC) and 13–16 (FGD answers).
@@ -212,8 +212,8 @@ category; external clients see the latest status only.
 - **Performance tracking (slide 13):** city-level records and reports for the Supervisory Level, Records and the
   System Administrator only; every other department sees and reports on its own department's data only.
 
-**Built 2026-10-22 (uncommitted; migration not yet applied locally because MySQL was not running):
-Primary office + view-only copies.** User accepted all eight defaults: Records picks the Primary (AI Primary
+**Built 2026-10-22 (committed and pushed as `e7e0768`; migration applied locally, verified 2026-10-22 with
+`migrate:status`): Primary office + view-only copies.** User accepted all eight defaults: Records picks the Primary (AI Primary
 pre-selected); Records or the Supervisory Level can change it (old Primary keeps a copy, logged as new trail entries);
 copy offices only receive (name + time) and view; copies close when the Primary ends the transaction; routing on makes
 the target Primary (with optional copies); delinquency counts the Primary only; confidential documents get no copies;
@@ -243,11 +243,19 @@ Draft design (pending the user's answers, see the chat of 2026-10-22):
 Records/AI to choose; Supervisory can change it). Classification dropdown is filtered by the type (new pivot
 table). Rulebook values are seeded but editable in the Document Types registry, since several are still blank.
 
-**Still open:** (a) Does "Confidential = Yes" on a type mean *always* confidential or *may be* confidential
-(ticked per document)? As written, every type is Paper today. (b) Confirm the role mapping above.
-**Risk:** the stamp service signs with one certificate from `config/digital-certificate.php`, but PNPKI for the
-City Administrator, Mayor and every Department Head needs a certificate per signer (storage, passwords,
-revocation). That needs a design before Phase 2.
+**Decided (user, 2026-10-22):** (a) Confidential = Yes on a type means *may be* confidential: Records ticks it per
+document (the Phase 1 behaviour stays). (b) The role mapping above is confirmed. (c) The fresh-data reset runs at the
+start of Phase 2. (d) PNPKI uses **per-signer certificates** (City Administrator, Mayor, Department Heads each hold
+their own), designed at the start of Phase 2; the single certificate in `config/digital-certificate.php` is replaced.
+(e) The **System Administrator** uploads each signer's `.p12` (User Management), not the signer. (f) The referral slip is
+**removed entirely** in Phase 2 (pages, routes, print template, ADM Dept Head signing step).
+**Still open:** whether the certificate password is typed at every signing or stored encrypted — the user wants to
+finish pending **Phase 1 changes** before deciding; Phase 2 does not start until then.
+Facts found 2026-10-22: the local DB already has 0 documents / 0 trails, but `storage/app/public/documents` (10 files)
+and `storage/app/private/signed-documents` (4 files) still hold old files, so the Phase 2 reset should be an artisan
+command that also clears these (needed for other environments too). `storage/app/certificates/` already holds one
+person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to the shared `certificate.pem` +
+`private.key`; it can become the first per-signer certificate.
 
 ## 6. Known issues, risks & technical debt
 
@@ -296,8 +304,8 @@ revocation). That needs a design before Phase 2.
 5. Decide on authorization for attachment downloads and for `visibleTo` scoping (security #3, #4).
 6. Decide on the timestamp convention (#15) and per-copy SLA (#17) before further date/SLA work.
 7. Transactions page never receives `flash` from `TransactionController` (success toast after processing does not show).
-8. Remove dead code (#6–#8, and the unused `DocumentAnalysisService`, whose prompt duplicates the one in
-   `DocumentController::analyze`) in a small cleanup change with tests.
+8. Remove dead code (#6–#8, and the unused `DocumentAnalysisService`, an old copy of the intake prompt now
+   replaced by `DocumentIntakeAnalyzer`) in a small cleanup change with tests.
 
 ## 8. Decisions & assumptions
 
@@ -309,10 +317,102 @@ revocation). That needs a design before Phase 2.
 
 ## 9. Change log
 
+### 2026-10-23 — Intake page: leaner layout in the old DTS style (Claude Code, uncommitted)
+- **Why (user request):** keep the current form but make it plain like the previous DTS ("remove the blue").
+- `resources/js/pages/documents/Index.vue` template only (script logic unchanged apart from three style helpers
+  `labelClass`, `fieldClass()`, `iconButtonClass` and the unused `LinkIcon` import removed): square-ish fields,
+  no shadows or tinted panels, the indigo "Route to …" select is now a plain **Direct to** select, the indigo AI
+  box is now a one-line "AI suggests …" hint under it, Classification gets its own wider field, confidential is
+  a plain checkbox row, table status chips became plain text (Delayed/Delinquent stay coloured), action buttons
+  are neutral (Delete stays red). Accessibility: every label is now tied to its field, errors use `InputError`
+  with the real message, icon buttons have `aria-label`, the barcode suggestions are buttons.
+- Checks: ESLint ✅ on the page; build ✅; Pest 107 passed. **Not viewed in the browser** (the in-app browser
+  blocks the LAN Vite server and needs a sign-in).
+
+### 2026-10-23 — People Directory: complete sender names hidden under signatures (Claude Code, uncommitted)
+- **Why (user report after browser test):** the OT memo still gave "Atty. R. L. Caloza"; "GILBERT" sits under the
+  handwritten signature and is not in the OCR text, so no model can read it. Everything else on both scans was
+  correct; the Junalyn sender is "almost all correct" (what is still off was not stated yet).
+- New table `people` (migration `2026_10_23_000000_create_people_table`, **not yet run locally**): title,
+  first_name, middle_initial, last_name, suffix, position, department_id, state. Model `Person` (`full_name`
+  accessor, e.g. "Atty. Gilbert L. Caloza"), `PersonController` + `SavePersonRequest`, route resource `people`
+  (registry group: System Administrator + Records), page `resources/js/pages/people/Index.vue`, sidebar
+  Settings → People Directory.
+- `DocumentIntakeAnalyzer::directoryMatch()`: after the surname repair, active entries with the same surname
+  are scored: a readable word (3+ letters) must be one of the person's first names, short tokens count as
+  initials, and a name whose initials all disagree is rejected. Exactly one best match → its full name, and its
+  office sets source_type Internal + source_location (so that office is also excluded from routing). Ties or no
+  match → name left as read.
+- Directory errors no longer fail the autofill: a `QueryException` in the lookup is logged ("People directory
+  lookup failed during intake analysis.") and the name is left as read. Found in the browser test: the
+  migration was still pending, so every upload returned "AI Analysis failed". Pest 107 passed after this.
+- Not done: routing from the directory (e.g. "Attn: Engr. Germie O. Deang" → his office as Primary); gpt-6-luna
+  already routes the Q-DRIVE sample to CICTO.
+- Checks: Pest 106 passed (1012 assertions; new `PeopleDirectoryTest`, 6 cases); Pint ✅; ESLint ✅ and
+  Prettier ✅ on the new page; build ✅. Not checked in the browser (migration pending).
+
+### 2026-10-23 — Intake AI: referral-slip signer, split surnames, subject names the invitee (Claude Code, uncommitted)
+- **Why (user report, Q-DRIVE panel invitation):** sender came out "Atty. RT L. Caloza" (the City Administrator,
+  who signs the attached referral slip) or "Junalyn F. Ayan" (surname split by OCR under the signature); the subject
+  named only the Mayor although the invitation is for Mr. Kenneth Jay D. Bruno.
+- `DocumentIntakeAnalyzer`: pages matching "Referral/Action/Routing Slip" now reach the model as their From/Subject
+  lines only (`withoutReferralSlips()`, before the length cut). New `sourceName()` post-check: repairs a surname
+  from a longer spelling on a line with the same first name (e.g. the slip's "From: JUNALYN PANGAYAN"), and drops a
+  name whose surname is not in the text the model saw. Prompt: the subject summary names the person the request is
+  really for (Attn / "and/or Mr. X"). Routing suggestions are answered as `"CODE Name"` strings (reason first) and
+  mapped back to ids server-side; bare ids made gpt-4o-mini pick the lowest ids (ABEO, CHO).
+- Live check (3 runs each on text I typed from the user's screenshot; slip page and signature block are my
+  approximations): sender "Junalyn F. Pangayan" 3/3, subject names Kenneth Jay D. Bruno 3/3, intake target OCM 3/3.
+  **Still wrong:** Primary office (CDO/CSD/CHO instead of CICTO) on gpt-4o-mini; `gpt-4.1-mini` picked CICTO 2/2 but
+  returned no sender once. A people directory (name → office) is the reliable fix. Prompt ~2,970 tokens/call (+300).
+- Checks: Pest 98 passed (985 assertions; 4 new DocumentAnalysisTest cases); Pint on changed files ✅. Not tested
+  with a real scan in the browser.
+- **Model upgrade (same day, user request):** default intake model is now `gpt-6-luna` with
+  `reasoning_effort` `none` (`config/services.php`; env `DMS_INTAKE_AI_MODEL`, new `DMS_INTAKE_AI_REASONING_EFFORT`
+  in `.env.example`). `DocumentIntakeAnalyzer::modelParameters()` sends `temperature: 0` to older models and
+  `reasoning_effort` (no temperature) to gpt-5+/o-series, which reject temperature. Comparison on the same
+  Q-DRIVE sample, 7 checks (sender, External, subject, OCM, type, classification, Primary CICTO), 2–3 runs each:
+  gpt-6-luna 7/7 every run at effort none (~2,775 in / ~175 out tokens, 2–4 s), low and medium also 7/7 but 2–5×
+  the output; gpt-4o-mini 6/7 (Primary CSD); gpt-5.6-luna 6/7; gpt-5.4-mini/nano 6/7 (sender format);
+  gpt-5-mini/nano 2–5/7 and slower. `minimal` effort is rejected by gpt-6-luna. Price per third-party trackers
+  (not confirmed on openai.com): $0.10 in / $0.50 out per 1M → ~$0.00036 per scan vs ~$0.00053 for gpt-4o-mini.
+  **Caveat:** one sample only, typed from a screenshot; re-check with real uploads (the OT memo sample too).
+- Checks after upgrade: Pest 100 passed (989 assertions; new model-parameter test); Pint ✅.
+
+### 2026-10-22 — Intake AI autofill: more accurate, half the tokens (Claude Code, uncommitted)
+- **Why (user report):** autofill gave the wrong sender name, left fields empty, ignored the rulebook, and gave
+  different results on laptop vs PC. Causes found with two real scans: only page 1 was OCR'd (both signatures are on
+  page 2; one page 1 was the attached referral slip); a low-detail image cost ~2.8k tokens for no gain; the prompt had
+  no rulebook (type → category/classifications); free-form JSON allowed invented ids; OCR misread the barcode.
+- New `app/Services/DocumentIntakeAnalyzer.php` (see §3). `DocumentController::analyze()` now only calls it (old
+  inline prompt, image handling and private `routingSuggestions()` removed). `AnalyzeDocumentRequest`: `ai_thumbnail`
+  removed. `config/services.php` `intake_ai.model` (env `DMS_INTAKE_AI_MODEL`, empty = `gpt-4o-mini`) and
+  `intake_ai.max_text_characters` (9000); `.env.example` key added.
+- Frontend: new `resources/js/lib/intakeScan.ts` OCRs pages 1, 2 and last with one tesseract worker ("--- Page N ---"
+  markers) and decodes the Code128/39 sticker with `@zxing/browser` (already installed). `documents/Index.vue` sends
+  JSON `{extracted_text}` only; the decoded sticker beats the AI barcode; a barcode already typed is never overwritten.
+- **Scores** (scratchpad harness, 2 samples × 3 runs × 9 fields; expected answers are my assumptions, to be confirmed
+  by the user): old code 57% at ~6,200 tokens/call (7–13 s) → new 70% at ~2,970 tokens/call (2–4 s). `gpt-4.1-mini`
+  scored the same 70%; `gpt-4.1-nano` 61%, so `gpt-4o-mini` stays the default.
+- Remaining misses: a first name hidden under a handwritten signature ("GILBERT" Caloza) cannot be read from OCR text;
+  a garbled surname ("Ayan" vs "Pangayan") is only sometimes repaired; one sample's Primary office (CHO vs CICTO)
+  and the executive target of an ADM-authored memo vary. A directory of office heads' real names would fix the first.
+- Device differences: tesseract.js picks its WASM core per CPU, so OCR can still differ between machines (not pinned).
+- Checks: Pest 94 passed (976 assertions; `DocumentAnalysisTest` rewritten, 12 cases); Pint on changed PHP ✅ (the
+  controller keeps its pre-existing style debt); ESLint ✅; Prettier: `Index.vue` already failed at HEAD; build ✅.
+  **Not tested in the browser** (upload → autofill end to end).
+- **Paused 2026-10-22, resume next session:** the user says some expected answers are wrong; corrections not yet
+  given. Assumed answers — s1 (`…202609021128234.pdf`, OT memo): C003192314, Internal, ADM, "Gilbert … Caloza",
+  Communications, Request for OT, no executive target, Primary CHO, subject has "OT-402-2026" + "overtime".
+  s2 (`…2026101208464122.pdf`, panel invitation): C003196677, External, "Junalyn F. Pangayan", Communications,
+  Invitation, executive OCM or ADM, Primary CICTO, subject has "panel" + "Q-DRIVE". Next: get corrections → update
+  the harness answers → re-score → tune the prompt → browser-test an upload. Harness (render.py, ocr.mjs,
+  analyze.php, score.py, samples.json) is in this session's temp scratchpad and may need rebuilding.
+
 ### 2026-10-22 — Multi-office routing: Primary office acts, others get view-only copies (Claude Code)
 - **Why:** user request; replaces the 2026-10-13 rule that every routed office gets an actionable copy.
 - Migration `2026_10_22_000000_add_copy_role_to_document_trails_table` (`copy_role` enum primary|copy, default
-  primary). **Not applied locally yet** (MySQL refused the connection); run `php artisan migrate`.
+  primary). Applied locally (confirmed later on 2026-10-22 with `php artisan migrate:status`).
 - `DocumentWorkflow`: `openOffices($role)`, `primaryOffice()`, `closeCopies()` (no receiver recorded for unreceived
   copies), `distribute()` (Primary + copies; a copy holder made Primary has its copy closed; confidential = one office
   only; Primary must be a selected office); `receive()` takes the role; `release()` prefers the office's Primary entry.

@@ -35,4 +35,13 @@ return [
         ],
     ],
 
+    'intake_ai' => [
+        // gpt-6-luna scored best and cost least per scan in the 2026-10-23 comparison (documentation.md).
+        'model' => env('DMS_INTAKE_AI_MODEL') ?: 'gpt-6-luna',
+        // Reasoning models only (gpt-5 and later). "none" was as accurate as "medium" at a fifth of the output tokens.
+        'reasoning_effort' => env('DMS_INTAKE_AI_REASONING_EFFORT') ?: 'none',
+        // OCR text sent to the model is capped to keep each intake call cheap.
+        'max_text_characters' => 9000,
+    ],
+
 ];

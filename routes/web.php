@@ -5,6 +5,7 @@ use App\Http\Controllers\DeliveryMethodController;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DocumentTypeController;
+use App\Http\Controllers\PersonController;
 use App\Http\Controllers\TransactionTypeController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\TransactionController;
@@ -76,6 +77,7 @@ Route::middleware(['auth', 'role:system_administrator,records_manager'])->group(
     Route::resource('document-classifications', DocumentClassificationController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::resource('document-types', DocumentTypeController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::resource('delivery-methods', DeliveryMethodController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::resource('people', PersonController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::resource('performance-standards', PerformanceStandardController::class)->only(['index', 'store']);
     Route::resource('transaction-types', TransactionTypeController::class)->only(['index', 'store', 'update', 'destroy']);
 });

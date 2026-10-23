@@ -15,7 +15,6 @@ class AnalyzeDocumentRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'ai_thumbnail' => ['required', 'file', 'mimes:jpg,jpeg', 'max:5120'],
             'extracted_text' => ['required', 'string', 'max:100000'],
         ];
     }

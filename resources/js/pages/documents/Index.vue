@@ -6,15 +6,12 @@ import InputError from '@/components/InputError.vue';
 import { useIntakeRulebook, type IntakeDocumentType } from '@/composables/useIntakeRulebook';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { Search, Pencil, Trash2, FastForward, AlertCircle, Clock, Loader2, Sparkles, Link as LinkIcon, FileUp, X, FileText } from 'lucide-vue-next';
+import { Search, Pencil, Trash2, FastForward, AlertCircle, Clock, Loader2, Sparkles, FileUp, X, FileText } from 'lucide-vue-next';
 import { ref, watch } from 'vue';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
 import axios from 'axios';
-import * as pdfjsLib from 'pdfjs-dist';
-import Tesseract from 'tesseract.js';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+import { scanIntakeFile } from '@/lib/intakeScan';
 
 const props = defineProps<{
     documents: any;
@@ -182,16 +179,6 @@ watch(() => form.source_type, (newType) => {
     else if (newType === 'Internal') form.source_location = ''; 
 });
 
-/** Downscale a rendered page or image to an 800px-wide JPEG for the vision model. */
-function jpegThumbnail(source: CanvasImageSource, width: number, height: number): Promise<Blob> {
-    const canvas = document.createElement('canvas');
-    canvas.width = 800;
-    canvas.height = Math.round(height * (800 / width));
-    canvas.getContext('2d')?.drawImage(source, 0, 0, canvas.width, canvas.height);
-
-    return new Promise((resolve, reject) => canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Unable to prepare the page image.'))), 'image/jpeg', 0.6));
-}
-
 /** Tell Records why autofill failed instead of one generic message. */
 function analysisFailureReason(err: any): string {
     const status = err?.response?.status;
@@ -217,56 +204,21 @@ const handleFileUpload = async (event: Event) => {
     aiMetrics.value = null;
     form.clearErrors(); 
 
-    const payload = new FormData();
-    payload.append('file', file);
-
     try {
-        let extractedText = "";
-        let aiThumbnailBlob = null;
-
-        if (file.type === 'application/pdf') {
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-            const page = await pdf.getPage(1);
-            const viewport = page.getViewport({ scale: 2.0 }); 
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = viewport.width;
-            tempCanvas.height = viewport.height;
-            await page.render({ canvasContext: tempCanvas.getContext('2d'), viewport }).promise;
-            
-            const worker = await Tesseract.createWorker('eng');
-            const ret = await worker.recognize(tempCanvas);
-            extractedText = ret.data.text;
-            await worker.terminate();
-
-            aiThumbnailBlob = await jpegThumbnail(tempCanvas, viewport.width, viewport.height);
-        } else {
-            const worker = await Tesseract.createWorker('eng');
-            const ret = await worker.recognize(file);
-            extractedText = ret.data.text;
-            await worker.terminate();
-            // The server only accepts a JPEG thumbnail, so PNGs and large photos are re-encoded.
-            const bitmap = await createImageBitmap(file);
-            aiThumbnailBlob = await jpegThumbnail(bitmap, bitmap.width, bitmap.height);
-            bitmap.close();
-        }
-
-        if (!extractedText.trim()) {
+        const scan = await scanIntakeFile(file);
+        if (!scan.text.trim()) {
             throw new Error('No readable text was found in the file. Upload a clearer scan or fill the fields manually.');
         }
 
-        const compressedFile = new File([aiThumbnailBlob], 'thumb.jpg', { type: 'image/jpeg' });
-        payload.append('ai_thumbnail', compressedFile);
-        payload.append('extracted_text', extractedText);
-
-        const response = await axios.post(route('documents.analyze'), payload, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const response = await axios.post(route('documents.analyze'), { extracted_text: scan.text });
         const data = response.data;
         // A redirect (e.g. outside working hours) is followed by the browser and returns an HTML page, not JSON.
         if (!data || typeof data !== 'object') {
             throw new Error('The server did not return analysis results. Refresh the page and check that it is within working hours.');
         }
 
-        if (data.barcode) form.barcode = data.barcode;
+        // A barcode already typed or scanned by Records wins; a decoded sticker beats the AI's OCR reading.
+        if (!form.barcode.trim()) form.barcode = scan.barcode || data.barcode || '';
         if (data.source_type) form.source_type = data.source_type;
         if (data.source_location) {
             setTimeout(() => { form.source_location = data.source_location; }, 50);
@@ -314,6 +266,14 @@ const handleFileUpload = async (event: Event) => {
     }
 };
 
+// Plain, compact fields in the style of the previous DTS intake form.
+const labelClass = 'mb-1 block text-sm text-slate-700';
+const fieldClass = (error?: string) => [
+    'w-full rounded-md border bg-white px-2.5 py-1.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1',
+    error ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-600 focus:ring-emerald-600',
+];
+const iconButtonClass = 'rounded-md border border-slate-200 p-1.5 text-slate-600 transition hover:bg-slate-100';
+
 function submitDocument() {
     form.post(route('documents.store'), {
         preserveScroll: true,
@@ -335,401 +295,415 @@ function submitDocument() {
     <Head title="System Documents" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
-        <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-100 min-h-screen">
-
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h1 class="text-2xl font-bold text-slate-800 tracking-tight">System Documents</h1>
-                    <p class="text-sm text-slate-500 mt-1">Register new incoming documents and track routing status.</p>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-
+        <div class="mx-auto flex min-h-screen w-full flex-col gap-4 bg-slate-50 p-4">
+            <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
                 <!-- LEFT PANEL: NEW DOCUMENT FORM -->
-                <div class="lg:col-span-5 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div class="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                        <h2 class="text-base font-bold text-slate-800 tracking-tight">New Document</h2>
-                        
-                        <div class="relative flex items-center">
-                            <input type="file" id="ai-upload" accept=".pdf,.jpg,.png" class="hidden" :disabled="isAnalyzing || form.is_confidential" @change="handleFileUpload" />
-                            <label for="ai-upload" class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-semibold cursor-pointer hover:bg-emerald-100 transition" :class="{'opacity-50 pointer-events-none': isAnalyzing || form.is_confidential}" :title="form.is_confidential ? 'AI autofill is off for confidential documents' : undefined">
-                                <Loader2 v-if="isAnalyzing" class="w-3.5 h-3.5 animate-spin" />
-                                <Sparkles v-else class="w-3.5 h-3.5" />
-                                {{ isAnalyzing ? 'Scanning...' : 'AI Autofill' }}
-                            </label>
-                        </div>
+                <section class="rounded-lg border border-slate-200 bg-white lg:col-span-5" aria-labelledby="new-document-title">
+                    <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                        <h2 id="new-document-title" class="text-base font-semibold text-slate-800">New Document</h2>
+
+                        <input
+                            id="ai-upload"
+                            type="file"
+                            accept=".pdf,.jpg,.png"
+                            class="sr-only"
+                            :disabled="isAnalyzing || form.is_confidential"
+                            @change="handleFileUpload"
+                        />
+                        <label
+                            for="ai-upload"
+                            class="flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-50 focus-within:ring-1 focus-within:ring-emerald-600"
+                            :class="{ 'pointer-events-none opacity-50': isAnalyzing || form.is_confidential }"
+                            :title="form.is_confidential ? 'AI autofill is off for confidential documents' : 'Scan a file and fill the form'"
+                        >
+                            <Loader2 v-if="isAnalyzing" class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                            <Sparkles v-else class="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+                            {{ isAnalyzing ? 'Scanning...' : 'AI Autofill' }}
+                        </label>
                     </div>
 
-                    <form @submit.prevent="submitDocument" class="p-5 flex flex-col gap-4">
-                        <p v-if="analysisError" role="alert" class="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                    <form class="flex flex-col gap-3 p-4" @submit.prevent="submitDocument">
+                        <p v-if="analysisError" role="alert" class="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
                             <AlertCircle class="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                             {{ analysisError }}
                         </p>
 
                         <div class="grid grid-cols-3 gap-3">
                             <div>
-                                <label class="block text-xs font-medium text-slate-700 mb-1">Barcode</label>
-                                <input v-model="form.barcode" type="text" maxlength="10" 
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.barcode ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'" 
-                                />
-                                <p v-if="form.errors.barcode" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.barcode }}</p>
+                                <label for="intake_barcode" :class="labelClass">Barcode</label>
+                                <input id="intake_barcode" v-model="form.barcode" type="text" maxlength="10" placeholder="Max 10" :class="fieldClass(form.errors.barcode)" />
+                                <InputError class="mt-1 text-xs" :message="form.errors.barcode" />
                             </div>
                             <div>
-                                <label for="intake_transaction_type" class="block text-xs font-medium text-slate-700 mb-1">Transaction Type</label>
-                                <select id="intake_transaction_type" v-model="form.transaction_type_id"
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.transaction_type_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
-                                    <option value="" disabled>Select</option>
+                                <label for="intake_transaction_type" :class="labelClass">Transaction Type</label>
+                                <select id="intake_transaction_type" v-model="form.transaction_type_id" :class="fieldClass(form.errors.transaction_type_id)">
+                                    <option value="" disabled>Select one</option>
                                     <option v-for="type in transactionTypes" :key="type.id" :value="type.id">{{ type.name }}</option>
                                 </select>
-                                <p v-if="form.errors.transaction_type_id" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
+                                <InputError class="mt-1 text-xs" :message="form.errors.transaction_type_id" />
                             </div>
                             <div>
-                                <label for="intake_document_type" class="block text-xs font-medium text-slate-700 mb-1">Document Type</label>
-                                <select id="intake_document_type" v-model="form.document_type_id"
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.document_type_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
-                                    <option value="" disabled>Select</option>
+                                <label for="intake_document_type" :class="labelClass">Document Type</label>
+                                <select id="intake_document_type" v-model="form.document_type_id" :class="fieldClass(form.errors.document_type_id)">
+                                    <option value="" disabled>Select one</option>
                                     <option v-for="type in documentTypes" :key="type.id" :value="type.id">{{ type.document_type }}</option>
                                 </select>
-                                <p v-if="form.errors.document_type_id" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
+                                <InputError class="mt-1 text-xs" :message="form.errors.document_type_id" />
                             </div>
                         </div>
 
                         <div class="grid grid-cols-3 gap-3">
                             <div>
-                                <label class="block text-xs font-medium text-slate-700 mb-1">Source Type</label>
-                                <select v-model="form.source_type" 
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.source_type ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
+                                <label for="intake_source_type" :class="labelClass">Source Type</label>
+                                <select id="intake_source_type" v-model="form.source_type" :class="fieldClass(form.errors.source_type)">
                                     <option value="External">External</option>
                                     <option value="Internal">Internal</option>
                                 </select>
-                                <p v-if="form.errors.source_type" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.source_type }}</p>
+                                <InputError class="mt-1 text-xs" :message="form.errors.source_type" />
                             </div>
-                            <div>
-                                <label class="block text-xs font-medium text-slate-700 mb-1">Source Location</label>
-                                <input v-if="form.source_type === 'External'" v-model="form.source_location" type="text" disabled class="w-full rounded-xl border border-slate-200 px-3 py-2 bg-slate-100 text-sm text-slate-500 cursor-not-allowed shadow-sm" />
-                                <select v-else v-model="form.source_location" 
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.source_location ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
-                                    <option value="" disabled>Select Department</option>
+                            <div class="col-span-2">
+                                <label for="intake_source_location" :class="labelClass">Source Location</label>
+                                <input
+                                    v-if="form.source_type === 'External'"
+                                    id="intake_source_location"
+                                    v-model="form.source_location"
+                                    type="text"
+                                    disabled
+                                    class="w-full cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-sm text-slate-500"
+                                />
+                                <select v-else id="intake_source_location" v-model="form.source_location" :class="fieldClass(form.errors.source_location)">
+                                    <option value="" disabled>Select office</option>
                                     <option v-for="dept in departments" :key="dept.id" :value="dept.id">{{ dept.name }}</option>
                                 </select>
-                                <p v-if="form.errors.source_location && form.source_type === 'Internal'" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
-                            </div>
-                            <div>
-                                <label for="intake_classification" class="block text-xs font-medium text-slate-700 mb-1">Classification</label>
-                                <select id="intake_classification" v-model="form.classification_id"
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.classification_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
-                                    <option value="" disabled>Select</option>
-                                    <option v-for="classif in allowedClassifications" :key="classif.id" :value="classif.id">{{ classif.name }}</option>
-                                </select>
-                                <p v-if="form.errors.classification_id" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.classification_id }}</p>
+                                <InputError v-if="form.source_type === 'Internal'" class="mt-1 text-xs" :message="form.errors.source_location" />
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-3 gap-3 items-start">
-                            <div class="col-span-2 flex items-start gap-2 rounded-xl border px-3 py-2"
-                                :class="form.is_confidential ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'">
-                                <input id="intake_confidential" v-model="form.is_confidential" type="checkbox" aria-describedby="intake_confidential_hint"
-                                    class="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500" />
-                                <div>
-                                    <label for="intake_confidential" class="text-xs font-semibold text-slate-800">Confidential document</label>
-                                    <p id="intake_confidential_hint" class="text-[11px] leading-tight text-slate-500">
-                                        {{ selectedType?.may_be_confidential ? 'This document type may be confidential. ' : '' }}No AI autofill and no upload; encode details manually. Paper route.
-                                    </p>
-                                    <InputError class="mt-1" :message="form.errors.is_confidential" />
-                                </div>
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="col-span-2">
+                                <label for="intake_classification" :class="labelClass">Document Classification</label>
+                                <select id="intake_classification" v-model="form.classification_id" :class="fieldClass(form.errors.classification_id)">
+                                    <option value="" disabled>Select one</option>
+                                    <option v-for="classif in allowedClassifications" :key="classif.id" :value="classif.id">{{ classif.name }}</option>
+                                </select>
+                                <InputError class="mt-1 text-xs" :message="form.errors.classification_id" />
                             </div>
                             <div>
-                                <label for="intake_route_mode" class="block text-xs font-medium text-slate-700 mb-1">Route</label>
-                                <select id="intake_route_mode" v-model="form.route_mode" aria-describedby="intake_route_mode_hint"
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.route_mode ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
+                                <label for="intake_route_mode" :class="labelClass">Route</label>
+                                <select
+                                    id="intake_route_mode"
+                                    v-model="form.route_mode"
+                                    aria-describedby="intake_route_mode_hint"
+                                    :class="fieldClass(form.errors.route_mode)"
+                                >
                                     <option value="paperless" :disabled="!paperlessAllowed">Paperless (PNPKI)</option>
                                     <option value="paper">Paper (wet signature)</option>
                                 </select>
-                                <p id="intake_route_mode_hint" class="text-[10px] text-slate-500 mt-1">
-                                    {{ paperlessAllowed ? 'Scan required before saving.' : 'Paperless needs a digitally signed, non-confidential type.' }}
+                                <InputError class="mt-1 text-xs" :message="form.errors.route_mode" />
+                            </div>
+                        </div>
+                        <p id="intake_route_mode_hint" class="-mt-1 text-xs text-slate-500">
+                            {{ paperlessAllowed ? 'Paperless: scan required before saving.' : 'Paperless needs a digitally signed, non-confidential type.' }}
+                        </p>
+
+                        <div class="flex items-start gap-2">
+                            <input
+                                id="intake_confidential"
+                                v-model="form.is_confidential"
+                                type="checkbox"
+                                aria-describedby="intake_confidential_hint"
+                                class="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
+                            />
+                            <div>
+                                <label for="intake_confidential" class="text-sm text-slate-800">Confidential document</label>
+                                <p id="intake_confidential_hint" class="text-xs text-slate-500">
+                                    {{ selectedType?.may_be_confidential ? 'This document type may be confidential. ' : '' }}No AI autofill and no
+                                    upload; encode details manually. Paper route.
                                 </p>
-                                <InputError class="mt-1" :message="form.errors.route_mode" />
+                                <InputError class="mt-1 text-xs" :message="form.errors.is_confidential" />
                             </div>
                         </div>
 
                         <div class="grid grid-cols-3 gap-3">
                             <div>
-                                <label class="block text-xs font-medium text-slate-700 mb-1">Delivery Method</label>
-                                <select v-model="form.delivery_method_id" 
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.delivery_method_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
-                                    <option value="" disabled>Select</option>
+                                <label for="intake_delivery_method" :class="labelClass">Delivery Method</label>
+                                <select id="intake_delivery_method" v-model="form.delivery_method_id" :class="fieldClass(form.errors.delivery_method_id)">
+                                    <option value="" disabled>Select one</option>
                                     <option v-for="method in deliveryMethods" :key="method.id" :value="method.id">{{ method.delivery_method_name }}</option>
                                 </select>
-                                <p v-if="form.errors.delivery_method_id" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.delivery_method_id }}</p>
+                                <InputError class="mt-1 text-xs" :message="form.errors.delivery_method_id" />
                             </div>
                             <div class="col-span-2">
-                                <label class="block text-xs font-medium text-slate-700 mb-1">Source Name</label>
-                                <input v-model="form.source_name" type="text" placeholder="Name/Company/Agency" 
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.source_name ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'" 
+                                <label for="intake_source_name" :class="labelClass">Source Name</label>
+                                <input
+                                    id="intake_source_name"
+                                    v-model="form.source_name"
+                                    type="text"
+                                    placeholder="Name/Company/Agency/Office"
+                                    :class="fieldClass(form.errors.source_name)"
                                 />
-                                <p v-if="form.errors.source_name" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
+                                <InputError class="mt-1 text-xs" :message="form.errors.source_name" />
                             </div>
                         </div>
 
                         <div class="grid grid-cols-3 gap-3">
                             <div>
-                                <label class="block text-xs font-medium text-slate-700 mb-1">Gender</label>
-                                <select v-model="form.gender" 
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.gender ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'">
-                                    <option value="" disabled>Select</option>
+                                <label for="intake_gender" :class="labelClass">Gender</label>
+                                <select id="intake_gender" v-model="form.gender" :class="fieldClass(form.errors.gender)">
+                                    <option value="" disabled>Select one</option>
                                     <option value="Male">Male</option>
                                     <option value="Female">Female</option>
                                 </select>
-                                <p v-if="form.errors.gender" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.gender }}</p>
+                                <InputError class="mt-1 text-xs" :message="form.errors.gender" />
                             </div>
                             <div>
-                                <label class="block text-xs font-medium text-slate-700 mb-1">Contact No.</label>
-                                <input v-model="form.contact_no" type="text" placeholder="Optional" 
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.contact_no ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'" 
-                                />
-                                <p v-if="form.errors.contact_no" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.contact_no }}</p>
+                                <label for="intake_contact_no" :class="labelClass">Contact No.</label>
+                                <input id="intake_contact_no" v-model="form.contact_no" type="text" placeholder="Optional" :class="fieldClass(form.errors.contact_no)" />
+                                <InputError class="mt-1 text-xs" :message="form.errors.contact_no" />
                             </div>
                             <div>
-                                <label class="block text-xs font-medium text-slate-700 mb-1">Email</label>
-                                <input v-model="form.email" type="email" placeholder="Optional" 
-                                    class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                    :class="form.errors.email ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'" 
-                                />
-                                <p v-if="form.errors.email" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.email }}</p>
+                                <label for="intake_email" :class="labelClass">Email Address</label>
+                                <input id="intake_email" v-model="form.email" type="email" placeholder="Optional" :class="fieldClass(form.errors.email)" />
+                                <InputError class="mt-1 text-xs" :message="form.errors.email" />
                             </div>
                         </div>
 
                         <div>
-                            <label class="block text-xs font-medium text-slate-700 mb-1">Subject Matter</label>
-                            <textarea v-model="form.subject_matter" rows="2" 
-                                class="w-full rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors"
-                                :class="form.errors.subject_matter ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'"></textarea>
-                            <p v-if="form.errors.subject_matter" class="text-[10px] text-red-500 mt-1 font-bold">Required</p>
+                            <label for="intake_subject_matter" :class="labelClass">Subject Matter</label>
+                            <textarea id="intake_subject_matter" v-model="form.subject_matter" rows="2" :class="fieldClass(form.errors.subject_matter)"></textarea>
+                            <InputError class="mt-1 text-xs" :message="form.errors.subject_matter" />
                         </div>
 
                         <div class="relative">
-                            <label class="block text-xs font-medium text-slate-700 mb-1">Linked Barcode/s (Optional)</label>
-                            <div class="relative">
-                                <LinkIcon class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                                <input 
-                                    id="linked_documents_input"
-                                    v-model="form.linked_documents" 
-                                    @input="handleLinkedDocumentInput"
-                                    type="text" 
-                                    autocomplete="off"
-                                    placeholder="Type barcode to search, separate multiple with space"
-                                    class="w-full rounded-xl border border-slate-300 py-2 pl-9 pr-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm transition-colors"
-                                    :class="{'border-red-500 focus:border-red-500 focus:ring-red-500': form.errors.linked_documents}" 
-                                />
-                            </div>
-                            <p v-if="form.errors.linked_documents" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.linked_documents }}</p>
-                            
-                            <div v-if="showBarcodeDropdown" class="absolute z-10 mt-1 w-full bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
-                                <ul class="max-h-48 overflow-y-auto py-1">
-                                    <li v-for="res in barcodeResults" :key="res.barcode" @click="selectBarcode(res.barcode)" class="px-4 py-2 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 transition-colors">
-                                        <div class="font-mono text-xs font-bold text-emerald-600">{{ res.barcode }}</div>
-                                        <div class="text-[10px] text-slate-500 truncate">{{ res.subject_matter }}</div>
-                                    </li>
-                                </ul>
-                            </div>
+                            <label for="linked_documents_input" :class="labelClass">Linked Document/s <span class="text-slate-400">(optional)</span></label>
+                            <input
+                                id="linked_documents_input"
+                                v-model="form.linked_documents"
+                                type="text"
+                                autocomplete="off"
+                                placeholder="Enter barcode/s, separated by spaces"
+                                :class="fieldClass(form.errors.linked_documents)"
+                                @input="handleLinkedDocumentInput"
+                            />
+                            <InputError class="mt-1 text-xs" :message="form.errors.linked_documents" />
+
+                            <ul v-if="showBarcodeDropdown" class="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-md">
+                                <li v-for="res in barcodeResults" :key="res.barcode">
+                                    <button type="button" class="w-full px-3 py-1.5 text-left hover:bg-slate-50 focus:bg-slate-50 focus:outline-none" @click="selectBarcode(res.barcode)">
+                                        <span class="block font-mono text-xs font-semibold text-emerald-700">{{ res.barcode }}</span>
+                                        <span class="block truncate text-xs text-slate-500">{{ res.subject_matter }}</span>
+                                    </button>
+                                </li>
+                            </ul>
                         </div>
 
                         <div>
-                            <label class="block text-xs font-medium text-slate-700 mb-1">
-                                Attached Document {{ form.route_mode === 'paperless' ? '(Required for paperless)' : '(Optional)' }}
+                            <label for="intake_attachment" :class="labelClass">
+                                Attached Document <span class="text-slate-400">{{ form.route_mode === 'paperless' ? '(required for paperless)' : '(optional)' }}</span>
                             </label>
-                            <p v-if="form.is_confidential" class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                                Confidential documents are not uploaded.
-                            </p>
-                            <div v-else-if="form.attached_file" class="flex items-center justify-between p-2 bg-emerald-50 border border-emerald-200 rounded-xl shadow-sm">
-                                <div class="flex items-center gap-2 overflow-hidden pl-1">
-                                    <FileUp class="w-4 h-4 text-emerald-600 shrink-0" />
-                                    <span class="text-xs font-medium text-emerald-800 truncate">
-                                        {{ form.attached_file.name }}
-                                    </span>
-                                </div>
-                                <button type="button" @click="form.attached_file = null" class="text-emerald-600 hover:text-emerald-800 p-1 bg-emerald-100/50 hover:bg-emerald-200 rounded-lg transition" title="Remove Attachment">
-                                    <X class="w-3.5 h-3.5" />
+                            <p v-if="form.is_confidential" class="text-xs text-slate-500">Confidential documents are not uploaded.</p>
+                            <div v-else-if="form.attached_file" class="flex items-center justify-between rounded-md border border-slate-300 px-2.5 py-1.5">
+                                <span class="flex items-center gap-2 truncate text-sm text-slate-700">
+                                    <FileUp class="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                                    {{ form.attached_file.name }}
+                                </span>
+                                <button type="button" class="rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700" aria-label="Remove attachment" @click="form.attached_file = null">
+                                    <X class="h-3.5 w-3.5" aria-hidden="true" />
                                 </button>
                             </div>
-                            <div v-else class="relative flex items-center">
-                                <FileUp class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                                <input type="file" accept=".pdf,.jpg,.jpeg,.png" @change="(e: any) => form.attached_file = e.target.files[0]" 
-                                    class="w-full rounded-xl border py-1.5 pl-9 pr-3 text-sm bg-white shadow-sm file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 transition-colors"
-                                    :class="form.errors.attached_file ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-slate-300'"
-                                />
-                            </div>
-                            <p v-if="form.errors.attached_file" class="text-[10px] text-red-500 mt-1 font-bold">{{ form.errors.attached_file }}</p>
+                            <input
+                                v-else
+                                id="intake_attachment"
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                class="w-full rounded-md border bg-white py-1 pr-2.5 pl-1 text-sm file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-slate-700 hover:file:bg-slate-200"
+                                :class="form.errors.attached_file ? 'border-red-500' : 'border-slate-300'"
+                                @change="(e: any) => (form.attached_file = e.target.files[0])"
+                            />
+                            <InputError class="mt-1 text-xs" :message="form.errors.attached_file" />
                         </div>
 
-                        <!-- AI Routing Suggestions UI (Records View) -->
-                        <div v-if="executiveSuggestion" class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mt-1 flex flex-col gap-2">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-700 flex items-center gap-1.5">
-                                <Sparkles class="w-3 h-3" /> AI Routing Analysis
-                            </span>
-                            
-                            <div class="bg-white/60 rounded-lg p-2 border border-indigo-50">
-                                <p class="text-[11px] text-indigo-900 font-bold">Executive Routing: {{ executiveSuggestion.route }}</p>
-                                <p class="text-[10px] text-indigo-700 mt-0.5 leading-tight">{{ executiveSuggestion.reason }}</p>
-                            </div>
-                        </div>
-
-                        <!-- <div v-if="aiMetrics" class="bg-slate-800 text-slate-200 border border-slate-700 rounded-xl p-3 flex flex-wrap items-center gap-4 text-[11px] font-mono shadow-inner mb-4 mt-2 mx-1">
-                            <div class="text-emerald-400 font-bold">🛠️ DEBUG METRICS:</div>
-                            <div>Accuracy: <span :class="aiMetrics.confidence > 80 ? 'text-emerald-400' : 'text-amber-400'" class="font-bold">{{ aiMetrics.confidence }}%</span></div>
-                            <div>Total: <span class="text-white">{{ aiMetrics.total_tokens }}</span></div>
-                            <div>Prompt: <span class="text-white">{{ aiMetrics.prompt_tokens }}</span></div>
-                            <div>Completion: <span class="text-white">{{ aiMetrics.completion_tokens }}</span></div>
-                        </div> -->
-
-                        <hr class="border-slate-100 mt-1" />
-
-                        <!-- Footer -->
-                        <div class="flex items-center justify-between">
-                            <div class="text-xs text-slate-500">
-                                Code: <span class="font-bold text-slate-800 ml-1">{{ form.access_code }}</span>
-                            </div>
-                            <div class="flex items-center gap-3">
-                                <select v-model="form.department_id" 
-                                    class="rounded-xl border px-3 py-2 text-sm shadow-sm transition-colors font-semibold bg-indigo-50 text-indigo-800"
-                                    :class="form.errors.department_id ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500' : 'border-indigo-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500'">
-                                    <option :value="cityAdministratorId">Route to City Administrator</option>
-                                    <option :value="cityMayorId">Route to City Mayor</option>
-                                </select>
-                                <button type="submit" :disabled="form.processing || isAnalyzing" class="bg-emerald-600 text-white text-sm px-5 py-2 rounded-xl font-medium shadow-sm hover:bg-emerald-700 transition disabled:opacity-50">
+                        <!-- Footer: access code, executive target, save -->
+                        <div class="mt-1 flex flex-wrap items-end justify-between gap-3 border-t border-slate-200 pt-3">
+                            <p class="text-sm text-slate-600">
+                                Access Code: <span class="font-semibold text-slate-800">{{ form.access_code }}</span>
+                            </p>
+                            <div class="flex items-end gap-2">
+                                <div>
+                                    <label for="intake_direct_to" class="mb-1 block text-xs text-slate-500">Direct to</label>
+                                    <select
+                                        id="intake_direct_to"
+                                        v-model="form.department_id"
+                                        aria-describedby="intake_direct_to_hint"
+                                        :class="fieldClass(form.errors.department_id)"
+                                    >
+                                        <option :value="cityAdministratorId">City Administrator</option>
+                                        <option :value="cityMayorId">City Mayor</option>
+                                    </select>
+                                </div>
+                                <button
+                                    type="submit"
+                                    :disabled="form.processing || isAnalyzing"
+                                    class="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-1 disabled:opacity-50"
+                                >
                                     Save Document
                                 </button>
                             </div>
                         </div>
+                        <p v-if="executiveSuggestion" id="intake_direct_to_hint" class="-mt-1 text-right text-xs text-slate-500">
+                            <Sparkles class="inline h-3 w-3 text-emerald-600" aria-hidden="true" />
+                            AI suggests {{ executiveSuggestion.route }}: {{ executiveSuggestion.reason }}
+                        </p>
+                        <InputError class="text-right text-xs" :message="form.errors.department_id" />
                     </form>
-                </div>
+                </section>
 
                 <!-- RIGHT PANEL: DATATABLE -->
-                <div class="lg:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-                    <div class="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-4">
+                <section class="flex flex-col rounded-lg border border-slate-200 bg-white lg:col-span-7" aria-label="Registered documents">
+                    <div class="border-b border-slate-200 px-4 py-3">
                         <div class="relative w-full max-w-sm">
-                            <Search class="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                            <input v-model="searchTerm" type="text" placeholder="Search barcode or subject..." aria-label="Search documents" class="block w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-10 text-sm placeholder-slate-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" />
-                            <button v-if="searchTerm" @click="clearSearch" class="absolute top-1/2 right-3 -translate-y-1/2 text-slate-400 hover:text-slate-600">×</button>
+                            <Search class="absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                            <input
+                                v-model="searchTerm"
+                                type="text"
+                                placeholder="Search barcode or subject..."
+                                aria-label="Search documents"
+                                class="block w-full rounded-md border border-slate-300 bg-white py-1.5 pr-8 pl-8 text-sm placeholder-slate-400 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 focus:outline-none"
+                            />
+                            <button
+                                v-if="searchTerm"
+                                type="button"
+                                aria-label="Clear search"
+                                class="absolute top-1/2 right-2.5 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                @click="clearSearch"
+                            >
+                                ×
+                            </button>
                         </div>
                     </div>
 
                     <div class="overflow-x-auto">
                         <table class="w-full text-left text-sm text-slate-700">
-                            <thead class="bg-slate-100 text-xs text-slate-600 uppercase tracking-wider border-b border-slate-200">
+                            <thead class="border-b border-slate-200 text-xs text-slate-500 uppercase">
                                 <tr>
-                                    <th class="px-4 py-2.5 font-bold">Barcode</th>
-                                    <th class="px-4 py-2.5 font-bold">Subject Matter</th>
-                                    <th class="px-4 py-2.5 font-bold">Source Name</th>
-                                    <th class="px-4 py-2.5 font-bold">Status</th>
-                                    <th class="px-4 py-2.5 text-center font-bold">Actions</th>
+                                    <th class="px-4 py-2 font-medium">Barcode</th>
+                                    <th class="px-4 py-2 font-medium">Subject Matter</th>
+                                    <th class="px-4 py-2 font-medium">Source Name</th>
+                                    <th class="px-4 py-2 font-medium">Status</th>
+                                    <th class="px-4 py-2 text-center font-medium">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-slate-200">
-                                <tr v-for="doc in documents.data" :key="doc.id" class="transition-colors hover:bg-slate-50">
-                                    <td class="px-4 py-3 font-mono font-semibold text-emerald-600 whitespace-nowrap">
-                                        <Link :href="route('documents.show', doc.id)" class="hover:underline">{{ doc.barcode }}</Link>
+                            <tbody class="divide-y divide-slate-100">
+                                <tr v-for="doc in documents.data" :key="doc.id" class="hover:bg-slate-50">
+                                    <td class="px-4 py-2.5 font-mono whitespace-nowrap">
+                                        <Link :href="route('documents.show', doc.id)" class="text-emerald-700 hover:underline">{{ doc.barcode }}</Link>
                                     </td>
-                                    <td class="px-4 py-3">
-                                        <p class="font-medium text-slate-800 line-clamp-2" :title="doc.subject_matter">{{ doc.subject_matter }}</p>
-                                        <p class="text-[11px] text-slate-500 mt-0.5 flex flex-wrap items-center gap-1.5">
+                                    <td class="px-4 py-2.5">
+                                        <p class="line-clamp-2 text-slate-800" :title="doc.subject_matter">{{ doc.subject_matter }}</p>
+                                        <p class="mt-0.5 text-xs text-slate-500">
                                             {{ doc.document_type?.document_type }}
-                                            <span v-if="doc.is_confidential" class="rounded border border-amber-200 bg-amber-50 px-1.5 text-[10px] font-bold uppercase text-amber-800">Confidential</span>
-                                            <span class="rounded border px-1.5 text-[10px] font-bold uppercase"
-                                                :class="doc.route_mode === 'paperless' ? 'border-sky-200 bg-sky-50 text-sky-800' : 'border-slate-200 bg-slate-100 text-slate-600'">
-                                                {{ doc.route_mode === 'paperless' ? 'Paperless' : 'Paper' }}
-                                            </span>
+                                            · {{ doc.route_mode === 'paperless' ? 'Paperless' : 'Paper' }}
+                                            <span v-if="doc.is_confidential" class="font-medium text-amber-700">· Confidential</span>
                                         </p>
                                     </td>
-                                    <td class="px-4 py-3 whitespace-nowrap text-slate-600">{{ doc.source_name }}</td>
-                                    <td class="px-4 py-3 whitespace-nowrap">
-                                        <div class="flex flex-col gap-1 items-start">
-                                            <span v-if="doc.status === 'Completed'" class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                                Completed
-                                            </span>
-                                            <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                                                {{ doc.status || 'Pending' }}
-                                            </span>
-                                            <span v-if="doc.is_delayed" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 animate-pulse">
-                                                <AlertCircle class="w-3 h-3 mr-1" /> Delayed
-                                            </span>
-                                            <span v-if="doc.is_delinquent" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                                                <Clock class="w-3 h-3 mr-1" /> Delinquent
-                                            </span>
-                                        </div>
+                                    <td class="px-4 py-2.5 whitespace-nowrap text-slate-600">{{ doc.source_name }}</td>
+                                    <td class="px-4 py-2.5 whitespace-nowrap">
+                                        <p :class="doc.status === 'Completed' ? 'text-emerald-700' : 'text-slate-700'">{{ doc.status || 'Pending' }}</p>
+                                        <p v-if="doc.is_delayed" class="flex items-center gap-1 text-xs font-medium text-rose-700">
+                                            <AlertCircle class="h-3 w-3" aria-hidden="true" /> Delayed
+                                        </p>
+                                        <p v-if="doc.is_delinquent" class="flex items-center gap-1 text-xs font-medium text-amber-700">
+                                            <Clock class="h-3 w-3" aria-hidden="true" /> Delinquent
+                                        </p>
                                     </td>
-                                    <td class="px-4 py-3 whitespace-nowrap">
-                                        <div class="flex justify-center items-center gap-2">
-
+                                    <td class="px-4 py-2.5 whitespace-nowrap">
+                                        <div class="flex items-center justify-center gap-1.5">
                                             <!-- REFERRAL SLIP: authorized approvers and Records can reopen an approved slip -->
-                                            <a v-if="doc.approved_routing_slip && doc.requires_signature_from !== 'department_head' && ['records_manager', 'city_administrator', 'city_mayor', 'system_administrator'].includes($page.props.auth.user.role)" :href="route('referral-slips.preview', doc.id)" target="_blank" rel="noopener" class="rounded-md border border-violet-200 bg-violet-50 p-1.5 text-violet-700 shadow-sm transition hover:bg-violet-100" title="Open Referral Action Slip PDF preview">
-                                                <FileText class="h-4 w-4" />
+                                            <a
+                                                v-if="
+                                                    doc.approved_routing_slip &&
+                                                    doc.requires_signature_from !== 'department_head' &&
+                                                    ['records_manager', 'city_administrator', 'city_mayor', 'system_administrator'].includes($page.props.auth.user.role)
+                                                "
+                                                :href="route('referral-slips.preview', doc.id)"
+                                                target="_blank"
+                                                rel="noopener"
+                                                :class="iconButtonClass"
+                                                title="Open Referral Action Slip PDF preview"
+                                                aria-label="Open referral slip PDF"
+                                            >
+                                                <FileText class="h-4 w-4" aria-hidden="true" />
                                             </a>
 
-                                            <!-- ROUTING/STATUS: Hide FastForward while City Administrator approval is pending -->
-                                            <span v-if="pendingApprovalLabels[doc.requires_signature_from] || !holdsCopy(doc, $page.props.auth.user.department_id)" class="text-[10px] font-bold uppercase tracking-wider text-slate-500 py-1.5 px-2 bg-slate-100 rounded-md border border-slate-200" :title="holderNames(doc)">
+                                            <!-- ROUTING/STATUS: no Route button while an executive step is pending or another office is Primary -->
+                                            <span
+                                                v-if="pendingApprovalLabels[doc.requires_signature_from] || !holdsCopy(doc, $page.props.auth.user.department_id)"
+                                                class="px-1 text-xs text-slate-500"
+                                                :title="holderNames(doc)"
+                                            >
                                                 {{ pendingApprovalLabels[doc.requires_signature_from] || `With ${holderCodes(doc)}` }}
                                             </span>
-
-                                            <!-- ROUTING BUTTON: Show only after required approval -->
-                                            <button v-else @click="openRoutingModal(doc)" 
-                                                class="rounded-md p-1.5 transition border shadow-sm"
-                                                :class="doc.approved_routing_slip ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-200' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border-indigo-100'" 
-                                                :title="doc.approved_routing_slip ? 'Execute Referral Slip' : 'Route'">
-                                                <FastForward class="h-4 w-4" />
+                                            <button
+                                                v-else
+                                                type="button"
+                                                :class="[iconButtonClass, doc.approved_routing_slip ? 'text-emerald-700' : '']"
+                                                :title="doc.approved_routing_slip ? 'Execute Referral Slip' : 'Route'"
+                                                :aria-label="doc.approved_routing_slip ? 'Execute referral slip' : 'Route document'"
+                                                @click="openRoutingModal(doc)"
+                                            >
+                                                <FastForward class="h-4 w-4" aria-hidden="true" />
                                             </button>
 
-                                            <!-- EDIT & DELETE ALWAYS VISIBLE -->
-                                            <Link :href="route('documents.edit', doc.id)" class="rounded-md bg-slate-50 p-1.5 text-slate-600 transition hover:bg-slate-100 border border-slate-200" title="Edit">
-                                                <Pencil class="h-4 w-4" />
+                                            <Link :href="route('documents.edit', doc.id)" :class="iconButtonClass" title="Edit" aria-label="Edit document">
+                                                <Pencil class="h-4 w-4" aria-hidden="true" />
                                             </Link>
-                                            <button @click="openDeleteModal(doc)" class="rounded-md bg-rose-50 p-1.5 text-rose-600 transition hover:bg-rose-100 border border-rose-100" title="Delete">
-                                                <Trash2 class="h-4 w-4" />
+                                            <button
+                                                type="button"
+                                                class="rounded-md border border-slate-200 p-1.5 text-rose-600 transition hover:bg-rose-50"
+                                                title="Delete"
+                                                aria-label="Delete document"
+                                                @click="openDeleteModal(doc)"
+                                            >
+                                                <Trash2 class="h-4 w-4" aria-hidden="true" />
                                             </button>
-
                                         </div>
                                     </td>
                                 </tr>
                                 <tr v-if="documents.data.length === 0">
-                                    <td colspan="5" class="py-12 text-center text-slate-500">No documents found.</td>
+                                    <td colspan="5" class="py-10 text-center text-slate-500">No documents found.</td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
 
-                    <div v-if="documents.last_page > 1" class="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3 mt-auto">
-                        <p class="text-sm text-slate-500">
-                            Showing <span class="font-medium text-slate-700">{{ documents.from }}</span>
-                            to <span class="font-medium text-slate-700">{{ documents.to }}</span> of
-                            <span class="font-medium text-slate-700">{{ documents.total }}</span> results
-                        </p>
+                    <div v-if="documents.last_page > 1" class="mt-auto flex items-center justify-between border-t border-slate-200 px-4 py-2.5">
+                        <p class="text-sm text-slate-500">Showing {{ documents.from }} to {{ documents.to }} of {{ documents.total }}</p>
                         <div class="flex gap-1">
-                            <button v-for="(link, index) in documents.links.slice(1, -1)" :key="index" @click="goToPage(String(link.url))" :disabled="!link.url"
-                                class="rounded-lg px-3 py-1 text-sm font-medium transition border"
-                                :class="link.active ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'">
+                            <button
+                                v-for="(link, index) in documents.links.slice(1, -1)"
+                                :key="index"
+                                type="button"
+                                :disabled="!link.url"
+                                :aria-current="link.active ? 'page' : undefined"
+                                class="rounded-md border px-2.5 py-0.5 text-sm transition"
+                                :class="link.active ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'"
+                                @click="goToPage(String(link.url))"
+                            >
                                 {{ link.label }}
                             </button>
                         </div>
                     </div>
-                </div>
-
+                </section>
             </div>
 
-            <DeleteConfirmationModal v-model:show="showDeleteModal" :deleteUrl="itemToDeleteUrl" :delete-data="{ workflow_version: itemToDeleteVersion }" :item-name="itemToDeleteName" title="Deactivate Document" />
+            <DeleteConfirmationModal
+                v-model:show="showDeleteModal"
+                :deleteUrl="itemToDeleteUrl"
+                :delete-data="{ workflow_version: itemToDeleteVersion }"
+                :item-name="itemToDeleteName"
+                title="Deactivate Document"
+            />
             <RoutingModal :show="showRoutingModal" :document="documentToRoute" :departments="departments" @close="showRoutingModal = false" />
-
         </div>
     </AppLayout>
 </template>

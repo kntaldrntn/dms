@@ -16,6 +16,7 @@ import {
     Users,
     Building2,
     Clock,
+    Contact,
     Inbox,
     FileSignature, // <-- ADDED FOR REFERRAL SLIPS
 } from 'lucide-vue-next';
@@ -36,7 +37,7 @@ const mainNavItems = computed<NavItem[]>(() => {
             roles: ['system_administrator', 'records_manager', 'user', 'staff', 'department_head', 'city_administrator', 'city_mayor'],
         },
         {
-            title: 'Document',
+            title: 'New Document',
             href: route('documents.index'),
             icon: FilePlus,
             roles: ['system_administrator', 'records_manager', 'user', 'staff', 'department_head', 'city_administrator', 'city_mayor'],
@@ -70,7 +71,8 @@ const mainNavItems = computed<NavItem[]>(() => {
                       route().current('document-types.*') ||
                       route().current('performance-standards.*') ||
                       route().current('transaction-types.*') ||
-                      route().current('delivery-methods.*'),
+                      route().current('delivery-methods.*') ||
+                      route().current('people.*'),
             items: [
                 {
                     title: 'Departments',
@@ -91,6 +93,11 @@ const mainNavItems = computed<NavItem[]>(() => {
                     title: 'Document Types',
                     href: route('document-types.index'),
                     icon: ClipboardList,
+                },
+                {
+                    title: 'People Directory',
+                    href: route('people.index'),
+                    icon: Contact,
                 },
                 {
                     title: 'Performance Standards',
