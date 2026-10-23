@@ -132,11 +132,6 @@ function submitProcess() {
         <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-100 min-h-screen">
             
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Office Inbox</h1>
-                    <p class="text-sm text-slate-500 mt-1">Process, route, or complete documents currently assigned to your department.</p>
-                </div>
-                
                 <div class="flex flex-col sm:flex-row items-center gap-3">
                     <div class="relative w-full sm:w-80">
                         <ScanBarcode class="absolute top-1/2 left-3 h-5 w-5 -translate-y-1/2 text-emerald-500" />

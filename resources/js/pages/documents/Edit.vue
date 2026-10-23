@@ -112,10 +112,6 @@ function updateDocument() {
         <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-100 min-h-screen">
             
             <div class="flex items-center justify-between">
-                <div>
-                    <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Edit Document Registration</h1>
-                    <p class="text-sm text-slate-500 mt-1">Update the details or routing information for {{ document.barcode }}.</p>
-                </div>
                 <Link :href="route('documents.index')" class="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-emerald-600 transition">
                     <ArrowLeft class="w-4 h-4" /> Back to Dashboard
                 </Link>
