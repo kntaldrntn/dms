@@ -116,8 +116,19 @@ class DocumentController extends Controller
             // The Primary office first, then every office holding a view-only copy (pivot.copy_role).
             'holders' => $document->holders()->get(['departments.id', 'departments.code', 'departments.name']),
             'canChangePrimary' => request()->user()->can('changePrimary', $document),
+            // Linked barcodes the user may open, so each one links to its document (barcode => id).
+            'linkedDocumentIds' => Document::visibleTo(request()->user())
+                ->whereIn('barcode', $this->linkedBarcodes($document))->pluck('id', 'barcode'),
             'offices' => fn () => Department::where('state', 1)->orderBy('code')->get(['id', 'code', 'name']),
         ]);
+    }
+
+    /** @return list<string> linked_documents is an array since the model cast; older rows may hold a plain string. */
+    private function linkedBarcodes(Document $document): array
+    {
+        $linked = $document->linked_documents;
+
+        return array_values(array_filter(is_array($linked) ? $linked : preg_split('/[\s,]+/', (string) $linked)));
     }
 
     public function edit(Document $document)

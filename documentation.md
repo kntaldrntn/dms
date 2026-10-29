@@ -345,6 +345,14 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 
 ## 9. Change log
 
+### 2026-10-29 — Linked documents open their document (Claude Code, uncommitted)
+- `DocumentController::show` passes `linkedDocumentIds` (barcode => id) for linked barcodes of active documents the
+  user may see (`visibleTo`); `documents/Show.vue` renders each as a link to that document (white chip, grey outline,
+  blue text, underline on hover, focus ring). A barcode with no registered document stays plain white text with a
+  tooltip. Green fill removed.
+- Checks: Pest 175 passed (1717 assertions; new `LinkedDocumentsTest`); ESLint ✅; build ✅; Pint ✅. Not checked
+  in the browser.
+
 ### 2026-10-29 — Documents list: aligned actions, Delete hidden (Claude Code, uncommitted)
 - `documents/Index.vue`: the "With CHO" / "Pending City … Approval" text moved from the Actions column to under the
   status, so it no longer pushes the buttons around. Actions are same-size 32 px buttons, centered: Route (only when

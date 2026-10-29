@@ -12,6 +12,8 @@ const props = defineProps<{
     // Primary office first; the others hold view-only copies.
     holders: Array<{ id: number; code: string; name: string; pivot?: { copy_role: 'primary' | 'copy' } }>;
     canChangePrimary: boolean;
+    /** Linked barcodes that resolve to a document the user may open (barcode => id). */
+    linkedDocumentIds: Record<string, number>;
     offices?: Array<{ id: number; code: string; name: string }>;
 }>();
 
@@ -382,13 +384,24 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                         <div v-if="linkedBarcodeList.length">
                             <dt class="font-semibold text-slate-700">Document/s Linked:</dt>
                             <dd class="mt-1 flex flex-wrap gap-1">
+                                <template v-for="barcode in linkedBarcodeList" :key="barcode">
+                                    <!-- Opens the linked (parent) document; a barcode not registered here stays plain text. -->
+                                    <Link
+                                        v-if="linkedDocumentIds[barcode]"
+                                        :href="route('documents.show', linkedDocumentIds[barcode])"
+                                        class="inline-flex items-center gap-1 rounded border border-slate-400 bg-white px-2 py-0.5 font-mono text-xs font-semibold text-blue-700 transition hover:border-blue-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+                                        :title="`Open document ${barcode}`"
+                                    >
+                                        <Link2 class="h-3 w-3" aria-hidden="true" /> {{ barcode }}
+                                    </Link>
                                     <span
-                                        v-for="barcode in linkedBarcodeList"
-                                        :key="barcode"
-                                        class="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono text-xs font-semibold text-emerald-700"
+                                        v-else
+                                        class="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-0.5 font-mono text-xs font-semibold text-slate-600"
+                                        title="No registered document has this barcode"
                                     >
                                         <Link2 class="h-3 w-3" aria-hidden="true" /> {{ barcode }}
                                     </span>
+                                </template>
                             </dd>
                         </div>
                         <div v-if="document.attached_file || hasSignedOcmPdf">
