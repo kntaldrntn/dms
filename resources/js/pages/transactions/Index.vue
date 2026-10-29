@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
-import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { Search, ScanBarcode, CheckCircle2, FastForward, X, AlertCircle, Clock, FileSignature, Sparkles } from 'lucide-vue-next';
+import { Head, router, useForm } from '@inertiajs/vue3';
+import { ScanBarcode, CheckCircle2, FastForward, X, FileSignature, Sparkles } from 'lucide-vue-next';
 import { ref, watch, computed, onMounted } from 'vue';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
@@ -11,13 +11,29 @@ const props = defineProps<{
     departments: Array<{ id: number; name: string }>;
     filters?: { barcode?: string };
     flash?: { success?: string; error?: string };
-    // Set when arriving from the notification bell; its Receive modal opens immediately.
+    // Set when arriving from the notification bell: that row is highlighted (and its Process dialog opens once received).
     focusDocument?: any | null;
     // View-only copies sent to this office (another office is Primary and acts on them).
     copies: any;
     // Set when arriving from the bell for a copy; that row is highlighted.
     focusCopy?: number | null;
 }>();
+
+// Receive first, act later (old DTS): the Primary office logs receipt, then processes it when it has acted on it.
+const isReceived = (doc: any) => Boolean(doc.primary_entry?.received_by);
+const receivingId = ref<number | null>(null);
+function receive(doc: any) {
+    receivingId.value = doc.id;
+    router.post(
+        route('transactions.receive', doc.id),
+        {},
+        {
+            preserveScroll: true,
+            onError: (errors) => notyf.error(String(Object.values(errors)[0] ?? 'The document could not be received.')),
+            onFinish: () => (receivingId.value = null),
+        },
+    );
+}
 
 const receivingCopy = ref<number | null>(null);
 function receiveCopy(doc: any) {
@@ -55,10 +71,6 @@ const breadcrumbs = [
     { title: 'My Office Inbox', href: '/transactions/inbox' },
 ];
 
-// Auth & Roles
-const page = usePage();
-const authUser = computed(() => page.props.auth?.user as any);
-const isStaff = computed(() => authUser.value?.role === 'staff');
 
 // Processing Modal State
 const showProcessModal = ref(false);
@@ -71,7 +83,9 @@ const form = useForm({
     routed_to: '' as number | '',
     copy_to: [] as number[],
     remarks: '',
-    attach_signature: false,
+    // Paper route: the Department Head signed the paper by hand; an optional scan of the signed page.
+    head_signed: false,
+    signed_scan: null as File | null,
     workflow_version: 0,
 });
 const copyOptions = computed(() => props.departments.filter((dept) => dept.id !== Number(form.routed_to)));
@@ -104,19 +118,21 @@ function openProcessModal(doc: any) {
 }
 
 onMounted(() => {
-    if (props.focusDocument) openProcessModal(props.focusDocument);
+    if (props.focusDocument && isReceived(props.focusDocument)) openProcessModal(props.focusDocument);
 });
 
 function submitProcess() {
     form.transform((data) => ({
         action: data.action,
         remarks: data.remarks,
-        attach_signature: data.attach_signature,
+        head_signed: data.head_signed,
+        ...(data.head_signed && data.signed_scan ? { signed_scan: data.signed_scan } : {}),
         workflow_version: data.workflow_version,
         ...(data.action === 'route'
             ? { routed_to: [Number(data.routed_to), ...data.copy_to.filter((id) => id !== Number(data.routed_to))], primary_office_id: Number(data.routed_to) }
             : {}),
     })).post(route('transactions.process', selectedDocument.value.id), {
+        forceFormData: true,
         onSuccess: () => {
             showProcessModal.value = false;
             form.reset();
@@ -147,74 +163,73 @@ function submitProcess() {
                 </div>
             </div>
 
-            <!-- Table Card -->
-            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <!-- Primary documents: this office receives them, then acts (route or end). Same plain style as the copies list. -->
+            <section aria-labelledby="inbox-heading" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-4 py-3 border-b border-slate-200 bg-slate-50">
+                    <h2 id="inbox-heading" class="text-sm font-bold text-slate-800">Documents for your action</h2>
+                    <p class="text-xs text-slate-500">Your office is the Primary office. Receive the document first, then process it once you have acted on it.</p>
+                </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-left text-sm text-slate-700">
                         <thead class="bg-slate-100 text-xs text-slate-600 uppercase tracking-wider border-b border-slate-200">
                             <tr>
-                                <th class="px-4 py-2.5 font-bold">Barcode</th>
-                                <th class="px-4 py-2.5 font-bold">Subject Matter</th>
-                                <th class="px-4 py-2.5 font-bold">Source</th>
-                                <th class="px-4 py-2.5 font-bold">Status</th>
-                                <th class="px-4 py-2.5 text-center font-bold">Action</th>
+                                <th scope="col" class="px-4 py-2.5 font-bold">Barcode</th>
+                                <th scope="col" class="px-4 py-2.5 font-bold">Subject Matter</th>
+                                <th scope="col" class="px-4 py-2.5 font-bold">Source</th>
+                                <th scope="col" class="px-4 py-2.5 text-center font-bold">Action</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-200">
-                            <tr v-for="doc in documents.data" :key="doc.id" class="hover:bg-slate-50 transition-colors">
+                            <tr v-for="doc in documents.data" :key="doc.id" class="transition-colors" :class="focusDocument?.id === doc.id ? 'bg-indigo-50' : 'hover:bg-slate-50'">
                                 <td class="px-4 py-2 font-mono font-semibold text-emerald-600 whitespace-nowrap">{{ doc.barcode }}</td>
                                 <td class="px-4 py-2">
                                     <p class="text-slate-800 font-medium line-clamp-2" :title="doc.subject_matter">{{ doc.subject_matter }}</p>
-                                    <p class="text-xs text-slate-500 mt-0.5">{{ doc.document_type?.document_type || 'Unknown Type' }}</p>
+                                    <p class="text-xs text-slate-500 mt-0.5">
+                                        {{ doc.document_type?.document_type || 'Unknown Type' }}
+                                        <span v-if="doc.is_delayed" class="font-medium text-rose-700" title="Past the category limit (Simple 3 / Complex 7 / Highly Technical 20 days)">· Delayed</span>
+                                        <span v-if="doc.is_delinquent" class="font-medium text-amber-700" title="Held by your office longer than its performance standard">· Delinquent</span>
+                                    </p>
                                 </td>
                                 <td class="px-4 py-2 text-slate-600 whitespace-nowrap">{{ doc.source_name }}</td>
-                                
-                                <td class="px-4 py-2 whitespace-nowrap">
-                                    <div class="flex flex-col gap-1 items-start">
-                                        <span v-if="doc.status === 'Completed'" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                            Completed
-                                        </span>
-                                        <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                                            {{ doc.status || 'Pending' }}
-                                        </span>
-
-                                        <span v-if="doc.is_delayed" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 animate-pulse" title="Missed Global SLA">
-                                            <AlertCircle class="w-3 h-3 mr-1" /> Delayed
-                                        </span>
-                                        
-                                        <span v-if="doc.is_delinquent" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200" title="Exceeded Office Performance Standard">
-                                            <Clock class="w-3 h-3 mr-1" /> Delinquent
-                                        </span>
-                                    </div>
-                                </td>
-
                                 <td class="px-4 py-2 whitespace-nowrap text-center">
-                                    <button 
-                                        @click="openProcessModal(doc)" 
-                                        class="inline-flex items-center gap-2 rounded-lg bg-indigo-50 px-3 py-1.5 text-indigo-700 font-medium transition hover:bg-indigo-100 border border-indigo-100 shadow-sm"
-                                    >
-                                        Process
-                                        <FastForward class="h-4 w-4" />
-                                    </button>
+                                    <div class="flex items-center justify-center gap-2">
+                                        <a :href="route('documents.show', doc.id)" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50">View</a>
+                                        <template v-if="isReceived(doc)">
+                                            <span
+                                                class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700"
+                                                :title="`Received by ${doc.primary_entry?.receiver?.name ?? 'your office'}`"
+                                            >
+                                                Received
+                                            </span>
+                                            <button
+                                                type="button"
+                                                class="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                                                @click="openProcessModal(doc)"
+                                            >
+                                                Process
+                                            </button>
+                                        </template>
+                                        <button
+                                            v-else
+                                            type="button"
+                                            :disabled="receivingId === doc.id"
+                                            class="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-50"
+                                            @click="receive(doc)"
+                                        >
+                                            {{ receivingId === doc.id ? 'Saving...' : 'Receive' }}
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                             <tr v-if="documents.data.length === 0">
-                                <td colspan="5" class="py-16 text-center text-slate-500">
-                                    <div class="flex flex-col items-center">
-                                        <div class="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3 border border-slate-200">
-                                            <Search class="h-6 w-6 text-slate-400" />
-                                        </div>
-                                        <h3 class="text-base font-semibold text-slate-900">Inbox is Clear</h3>
-                                        <p class="mt-1 text-sm text-slate-500 max-w-sm px-4">
-                                            {{ searchTerm ? 'No matching document found in your office.' : 'There are currently no pending documents routed to your department.' }}
-                                        </p>
-                                    </div>
+                                <td colspan="4" class="py-6 text-center text-xs text-slate-500">
+                                    {{ searchTerm ? 'No matching document found in your office.' : 'No documents are waiting for your office.' }}
                                 </td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
-            </div>
+            </section>
 
             <!-- View-only copies: another office is Primary; this office can only receive and view -->
             <section aria-labelledby="copies-heading" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -274,8 +289,10 @@ function submitProcess() {
                         </button>
 
                         <div class="px-6 py-5 border-b border-slate-100">
-                            <h2 class="text-lg font-bold text-slate-800 tracking-tight">Receive &amp; Process Document</h2>
-                            <p class="mt-0.5 text-xs text-slate-500">Receiving is recorded together with the action you choose below.</p>
+                            <h2 class="text-lg font-bold text-slate-800 tracking-tight">Process Document</h2>
+                            <p class="mt-0.5 text-xs text-slate-500">
+                                Received by {{ selectedDocument?.primary_entry?.receiver?.name ?? 'your office' }}. Record the action your office took.
+                            </p>
                         </div>
                         
                         <div class="overflow-y-auto flex-1 p-6">
@@ -326,8 +343,8 @@ function submitProcess() {
                                                     <FastForward class="h-5 w-5" />
                                                 </div>
                                                 <div>
-                                                    <p class="text-sm font-semibold text-slate-900">Receive &amp; Route</p>
-                                                    <p class="text-xs text-slate-500">Act on it, then send to another office</p>
+                                                    <p class="text-sm font-semibold text-slate-900">Route</p>
+                                                    <p class="text-xs text-slate-500">Send it to another office</p>
                                                 </div>
                                             </div>
                                         </label>
@@ -339,7 +356,7 @@ function submitProcess() {
                                                     <CheckCircle2 class="h-5 w-5" />
                                                 </div>
                                                 <div>
-                                                    <p class="text-sm font-semibold text-slate-900">Receive &amp; End Transaction</p>
+                                                    <p class="text-sm font-semibold text-slate-900">End Transaction</p>
                                                     <p class="text-xs text-slate-500">Complete the document; copies close with it</p>
                                                 </div>
                                             </div>
@@ -379,21 +396,35 @@ function submitProcess() {
 
                                 <!-- Workflow Modifiers -->
                                 <div class="space-y-3 pt-2">
-                                    <!-- Signature Checkbox -->
-                                    <label class="flex items-start gap-3 p-3 rounded-xl border transition cursor-pointer" :class="form.attach_signature ? 'bg-amber-50/50 border-amber-200' : 'bg-white border-slate-200 hover:bg-slate-50'">
+                                    <!-- Paper route: record the Department Head's wet signature (no e-signature image is applied) -->
+                                    <label class="flex items-start gap-3 p-3 rounded-xl border transition cursor-pointer" :class="form.head_signed ? 'bg-amber-50/50 border-amber-200' : 'bg-white border-slate-200 hover:bg-slate-50'">
                                         <div class="flex items-center h-5 mt-0.5">
-                                            <input v-model="form.attach_signature" type="checkbox" class="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500" />
+                                            <input v-model="form.head_signed" type="checkbox" aria-describedby="head_signed_hint" class="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500" />
                                         </div>
                                         <div class="flex flex-col">
                                             <span class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                                                <FileSignature class="w-4 h-4 text-amber-600" /> 
-                                                {{ isStaff ? 'Attach Dept. Head Signature (Proxy)' : 'Attach Digital Signature' }}
+                                                <FileSignature class="w-4 h-4 text-amber-600" aria-hidden="true" />
+                                                Signed by the Department Head (wet signature)
                                             </span>
-                                            <span class="text-xs text-slate-500 mt-0.5">
-                                                {{ isStaff ? "Applies your Department Head's authorized visual signature stamp." : "Applies your uploaded visual signature stamp." }}
+                                            <span id="head_signed_hint" class="text-xs text-slate-500 mt-0.5">
+                                                Tick this once your Department Head has signed the paper copy. It is recorded in the trail under their name.
                                             </span>
                                         </div>
                                     </label>
+                                    <p v-if="form.errors.head_signed" role="alert" class="text-xs font-medium text-red-600">{{ form.errors.head_signed }}</p>
+                                    <div v-if="form.head_signed">
+                                        <label for="process_signed_scan" class="mb-1.5 block text-sm font-medium text-slate-700">
+                                            Scan of the signed page <span class="font-normal text-slate-400">(optional)</span>
+                                        </label>
+                                        <input
+                                            id="process_signed_scan"
+                                            type="file"
+                                            accept=".pdf,.jpg,.jpeg,.png"
+                                            class="w-full rounded-xl border border-slate-300 bg-white py-1.5 pl-1.5 pr-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1 file:text-xs file:font-medium file:text-slate-700"
+                                            @change="(e: any) => (form.signed_scan = e.target.files[0] ?? null)"
+                                        />
+                                        <p v-if="form.errors.signed_scan" role="alert" class="mt-1.5 text-xs font-medium text-red-600">{{ form.errors.signed_scan }}</p>
+                                    </div>
                                 </div>
 
                             </form>
@@ -410,7 +441,7 @@ function submitProcess() {
                                 :class="form.action === 'end' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'"
                                 :disabled="form.processing"
                             >
-                                {{ form.processing ? 'Saving...' : form.action === 'end' ? 'Receive & End' : 'Receive & Route' }}
+                                {{ form.processing ? 'Saving...' : form.action === 'end' ? 'End Transaction' : 'Route' }}
                             </button>
                         </div>
 

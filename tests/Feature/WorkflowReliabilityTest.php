@@ -163,15 +163,16 @@ test('stale edits cannot overwrite a newer edit or deactivate the document', fun
 
 test('stale dispatch is rejected even after custody returns to the original office', function () {
     app(DispatchService::class)->dispatch($this->document, $this->records, ['workflow_version' => 0, 'routed_to' => [$this->target->id]]);
+    app(TransactionService::class)->receive($this->document, $this->staff);
     app(TransactionService::class)->process($this->document, $this->staff, [
-        'workflow_version' => 1, 'action' => 'route', 'remarks' => 'Return', 'routed_to' => $this->recordsOffice->id,
+        'workflow_version' => 2, 'action' => 'route', 'remarks' => 'Return', 'routed_to' => $this->recordsOffice->id,
     ]);
     $count = DocumentTrail::count();
     $this->actingAs($this->records)->postJson(route('documents.route', $this->document), [
         'workflow_version' => 0, 'routed_to' => [$this->target->id],
     ])->assertUnprocessable()->assertJsonValidationErrors('workflow_version');
     $this->assertDatabaseCount('document_trails', $count);
-    expect($this->document->fresh()->workflow_version)->toBe(2);
+    expect($this->document->fresh()->workflow_version)->toBe(3);
 });
 
 test('destination and user state are rechecked inside the service', function () {
@@ -352,7 +353,8 @@ test('a multi-office dispatch makes one office Primary and gives the others view
 
     // The Primary office routes it on: the target becomes Primary and an extra office gets a copy.
     $fourth = Department::create(['code' => 'FTH', 'name' => 'Fourth Office', 'state' => 1]);
-    $this->actingAs($secondStaff)->postJson(route('transactions.process', $this->document), [
+    $this->actingAs($secondStaff)->postJson(route('transactions.receive', $this->document))->assertRedirect();
+    $this->postJson(route('transactions.process', $this->document), [
         'workflow_version' => 1, 'action' => 'route', 'remarks' => 'For action', 'routed_to' => [$third->id, $fourth->id], 'primary_office_id' => $third->id,
     ])->assertRedirect()->assertSessionHasNoErrors();
     expect($this->document->fresh()->department_id)->toBe($third->id);
@@ -362,6 +364,7 @@ test('a multi-office dispatch makes one office Primary and gives the others view
         ->assertInertia(fn (Assert $page) => $page->has('documents.data', 1)->has('copies.data', 0));
 
     // Ending the transaction completes the document and closes every copy.
+    $this->postJson(route('transactions.receive', $this->document))->assertRedirect();
     $this->postJson(route('transactions.process', $this->document), [
         'workflow_version' => 2, 'action' => 'end', 'remarks' => 'Done',
     ])->assertRedirect()->assertSessionHasNoErrors();

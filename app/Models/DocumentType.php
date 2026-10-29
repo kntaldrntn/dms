@@ -34,7 +34,7 @@ class DocumentType extends Model
     /** Rulebook: paperless only when the type is digitally signed and the document is not confidential. */
     public function allowsPaperless(bool $isConfidential): bool
     {
-        return $this->signature_type === 'digital' && ! $isConfidential;
+        return (bool) config('services.paperless.enabled') && $this->signature_type === 'digital' && ! $isConfidential;
     }
 
     public function defaultTransactionType(): BelongsTo

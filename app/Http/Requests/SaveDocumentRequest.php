@@ -20,7 +20,10 @@ class SaveDocumentRequest extends FormRequest
         $document = $this->route('document');
         $this->merge([
             'is_confidential' => $this->input('is_confidential', $document instanceof Document ? $document->is_confidential : false),
-            'route_mode' => $this->input('route_mode', $document instanceof Document ? $document->route_mode : 'paper'),
+            // With the paperless route switched off, every saved document takes the paper route.
+            'route_mode' => config('services.paperless.enabled')
+                ? $this->input('route_mode', $document instanceof Document ? $document->route_mode : 'paper')
+                : 'paper',
         ]);
     }
 

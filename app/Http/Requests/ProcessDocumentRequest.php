@@ -24,7 +24,9 @@ class ProcessDocumentRequest extends DocumentMutationRequest
             'routed_to' => ['nullable', 'required_if:action,route', 'array', 'min:1', 'max:100'],
             'routed_to.*' => ['integer', 'distinct', Rule::exists('departments', 'id')->where('state', 1), Rule::notIn([$this->user()?->department_id])],
             'primary_office_id' => ['nullable', 'integer', Rule::in((array) $this->input('routed_to', []))],
-            'attach_signature' => ['sometimes', 'boolean'],
+            // Paper route: the Department Head signed the paper by hand; the scan of the signed page is optional.
+            'head_signed' => ['sometimes', 'boolean'],
+            'signed_scan' => ['exclude_unless:head_signed,true,1', 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
         ];
     }
 

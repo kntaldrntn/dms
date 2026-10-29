@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ChangePrimaryOfficeRequest;
 use App\Http\Requests\ProcessDocumentRequest;
 use App\Http\Requests\ReceiveCopyRequest;
+use App\Http\Requests\ReceiveDocumentRequest;
 use App\Models\Department;
 use App\Models\Document;
 use App\Models\DocumentTrail;
@@ -23,7 +24,7 @@ class TransactionController extends Controller
         // (a document dispatched to several offices appears in each office's inbox).
         $this->authorize('viewAny', Document::class);
         // Documents waiting on an executive step belong to the ADM / OCM Approvals queues instead.
-        $inbox = fn () => Document::visibleTo($request->user())->with(['documentType', 'transactionType', 'primaryEntry'])
+        $inbox = fn () => Document::visibleTo($request->user())->with(['documentType', 'transactionType', 'primaryEntry.receiver:id,name'])
             ->heldBy((int) $request->user()->department_id)
             ->outsideExecutiveStages()
             ->where('status', '!=', 'Completed')
@@ -60,6 +61,8 @@ class TransactionController extends Controller
             'departments' => Department::where('state', 1)->where('id', '!=', $request->user()->department_id)->get(),
             'filters' => $request->only(['barcode']),
             'focusDocument' => $focusDocument,
+            // Receive / Process / Receive copy redirect back here with a message for the toast.
+            'flash' => ['success' => session('success'), 'error' => session('error')],
         ]);
     }
 
@@ -71,6 +74,13 @@ class TransactionController extends Controller
         $transactions->process($document, $request->user(), $request->validated());
 
         return redirect()->back()->with('success', 'Transaction successfully processed.');
+    }
+
+    public function receive(ReceiveDocumentRequest $request, Document $document, TransactionService $transactions)
+    {
+        $transactions->receive($document, $request->user());
+
+        return redirect()->back()->with('success', 'Document received. Process it once your office has acted on it.');
     }
 
     public function receiveCopy(ReceiveCopyRequest $request, Document $document, TransactionService $transactions)

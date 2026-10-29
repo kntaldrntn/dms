@@ -56,6 +56,8 @@ in-memory SQLite. Details in `documentation.md`.
 
 - Secrets only in `.env` (git-ignored); read them through `config/*.php`, never `env()` in
   app code. Add new keys to `.env.example` with an empty value.
+  **Exception (user-approved 2026-10-26):** the SMTP account is edited in Email Settings (`mail_settings`
+  table, System Administrator only); its password uses the `encrypted` cast and is never sent to the browser.
 - Certificate and key material belongs in `storage/app/certificates/` only. Never place keys
   in `public/`, never commit them, never print them.
 - Signed/sensitive files go on the `local` (private) disk and are served through an

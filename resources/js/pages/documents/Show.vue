@@ -45,8 +45,19 @@ const routeStops = computed<RouteStop[]>(() => {
     return stops;
 });
 
-// Newest trail entry first; keep each entry's chronological index for transit-time math.
-const latestFirstTrails = computed(() => props.trails.map((trail, index) => ({ trail, index })).reverse());
+// Newest hand-off first; keep each entry's chronological index for transit-time math. Copies are created in the
+// same moment as the Primary entry they were sent with, so they sit under it: the Primary office's own action
+// (e.g. End Transaction) stays the top, latest row, and closing the copies is listed beneath it.
+const latestFirstTrails = computed(() =>
+    props.trails
+        .map((trail, index) => ({ trail, index }))
+        .sort(
+            (a, b) =>
+                String(b.trail.created_at).localeCompare(String(a.trail.created_at)) ||
+                Number(a.trail.copy_role === 'copy') - Number(b.trail.copy_role === 'copy') ||
+                b.trail.id - a.trail.id,
+        ),
+);
 
 const isCompleted = computed(() => props.document.status === 'Completed');
 
@@ -501,9 +512,9 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                                         <span
                                             v-else-if="trail.signature_mode === 'physical'"
                                             class="inline-flex items-center rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-[10px] font-bold text-slate-700"
-                                            :title="`To be signed by hand by ${trail.signer?.name}`"
+                                            :title="trail.signer ? `Signed by hand by ${trail.signer.name}` : 'Signed by hand'"
                                         >
-                                            <FileSignature class="mr-1 h-3 w-3" aria-hidden="true" /> Physical Signature
+                                            <FileSignature class="mr-1 h-3 w-3" aria-hidden="true" /> Wet Signature
                                         </span>
                                         <span
                                             v-if="trail.trail_type === 'return'"

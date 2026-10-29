@@ -14,6 +14,8 @@ beforeEach(function () {
     // Inside working hours: intake routes use the working_hours middleware.
     $this->travelTo(now('Asia/Manila')->setDate(2026, 10, 21)->setTime(10, 0));
     Storage::fake('public');
+    // These tests cover the paperless rulebook; the hybrid paper-only default has its own test below.
+    config(['services.paperless.enabled' => true]);
 
     $this->recordsOffice = Department::create(['code' => 'REC', 'name' => 'Records', 'state' => 1]);
     Department::create(['code' => 'ADM', 'name' => 'Administrator', 'state' => 1]);
@@ -114,4 +116,15 @@ test('the intake form receives each type rulebook entry', function () {
         ->where('documentTypes.0.signature_type', 'digital')
         ->where('documentTypes.0.may_be_confidential', true)
         ->where('documentTypes.0.classifications.0.id', $this->complaint->id));
+});
+
+test('with the paperless route switched off, every document is saved on the paper route', function () {
+    config(['services.paperless.enabled' => false]);
+
+    $this->actingAs($this->records)->post(route('documents.store'), [
+        ...$this->payload, 'route_mode' => 'paperless', 'attached_file' => scan(),
+    ])->assertSessionHasNoErrors();
+
+    expect(Document::latest('id')->first()->route_mode)->toBe('paper');
+    $this->get(route('documents.index'))->assertInertia(fn (Assert $page) => $page->where('features.paperless', false));
 });

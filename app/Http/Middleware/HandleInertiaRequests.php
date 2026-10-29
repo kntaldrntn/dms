@@ -48,7 +48,10 @@ class HandleInertiaRequests extends Middleware
                 'user' => $request->user(),
                 // ADM Approvals depends on the office (every ADM user receives), not role alone.
                 'canViewAdmApprovals' => (bool) $request->user()?->can('viewAdmApprovals', Document::class),
+                // OCM Approvals: every OCM user records the Mayor's paper approvals.
+                'canViewOcmApprovals' => (bool) $request->user()?->can('viewOcmApprovals', Document::class),
             ],
+            'features' => ['paperless' => (bool) config('services.paperless.enabled')],
             // Lazy so the bell's polling can request it alone (`only: ['incoming']`).
             'incoming' => fn () => app(IncomingDocumentService::class)->forUser($request->user()),
         ]);

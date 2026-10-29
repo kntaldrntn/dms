@@ -10,6 +10,7 @@ use App\Http\Controllers\TransactionTypeController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\DocumentClassificationController;
+use App\Http\Controllers\Settings\MailSettingController;
 use App\Http\Controllers\Settings\PerformanceStandardController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -45,11 +46,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/adm-approvals/{document}/receive', [App\Http\Controllers\AdmApprovalController::class, 'receive'])->name('adm-approvals.receive');
         Route::post('/adm-approvals/{document}/approve', [App\Http\Controllers\AdmApprovalController::class, 'approve'])->name('adm-approvals.approve');
         Route::get('/ocm-approvals', [App\Http\Controllers\OcmApprovalController::class, 'index'])->name('ocm-approvals.index');
+        Route::post('/ocm-approvals/{document}/receive', [App\Http\Controllers\OcmApprovalController::class, 'receive'])->name('ocm-approvals.receive');
         Route::post('/ocm-approvals/{document}/approve', [App\Http\Controllers\OcmApprovalController::class, 'approve'])->name('ocm-approvals.approve');
         Route::post('/approvals/{document}/stamp-placement', [App\Http\Controllers\OcmApprovalController::class, 'findStampPlacement'])->name('approvals.stamp-placement');
         
         Route::get('/transactions/inbox', [TransactionController::class, 'index'])->name('transactions.inbox');
         Route::post('/transactions/{document}/process', [TransactionController::class, 'process'])->name('transactions.process');
+        Route::post('/transactions/{document}/receive', [TransactionController::class, 'receive'])->name('transactions.receive');
         Route::post('/transactions/{document}/receive-copy', [TransactionController::class, 'receiveCopy'])->name('transactions.receive-copy');
         Route::post('/documents/{document}/primary-office', [TransactionController::class, 'changePrimary'])->name('documents.primary-office');
 
@@ -68,6 +71,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
 // User management: System Administrator only (FGD access matrix, slide 9).
 Route::middleware(['auth', 'role:system_administrator'])->group(function () {
     Route::resource('users', UserController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::get('mail-settings', [MailSettingController::class, 'edit'])->name('mail-settings.edit');
+    Route::put('mail-settings', [MailSettingController::class, 'update'])->name('mail-settings.update');
+    Route::post('mail-settings/test', [MailSettingController::class, 'test'])->name('mail-settings.test');
 });
 
 // System settings & registries: System Administrator and Records Section (slide 9).

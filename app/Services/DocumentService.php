@@ -55,7 +55,7 @@ class DocumentService
                 });
             }
 
-            return DB::transaction(function () use ($user, $data) {
+            $document = DB::transaction(function () use ($user, $data) {
                 $user = User::query()->lockForUpdate()->findOrFail($user->id);
                 Gate::forUser($user)->authorize('create', Document::class);
                 $departments = array_values($data['routed_to'] ?? []);
@@ -100,6 +100,9 @@ class DocumentService
 
                 return $document;
             });
+            $this->workflow->notifyClient($document);
+
+            return $document;
         } catch (Throwable $exception) {
             if ($newPath) {
                 Storage::disk('public')->delete($newPath);

@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import AppLayout from '@/layouts/AppLayout.vue';
-import DeleteConfirmationModal from '@/components/DeleteConfirmationModal.vue';
 import RoutingModal from '@/components/RoutingModal.vue';
 import OfficePicker from '@/components/OfficePicker.vue';
 import InputError from '@/components/InputError.vue';
 import { useIntakeRulebook, type IntakeDocumentType } from '@/composables/useIntakeRulebook';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { Search, Pencil, Trash2, FastForward, AlertCircle, Clock, Loader2, Sparkles, FileUp, X } from 'lucide-vue-next';
+import { Search, Pencil, FastForward, AlertCircle, Clock, Loader2, Sparkles, FileUp, X } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
 import axios from 'axios';
 import { scanIntakeFile } from '@/lib/intakeScan';
+import { barcodeBeingTyped, withChosenBarcode } from '@/lib/linkedDocuments';
 
 const props = defineProps<{
     documents: any;
@@ -77,17 +77,6 @@ watch(() => props.flash, (flash) => {
     if (flash?.error) notyf.error(flash.error);
 }, { immediate: true });
 
-const showDeleteModal = ref(false);
-const itemToDeleteUrl = ref('');
-const itemToDeleteName = ref('');
-const itemToDeleteVersion = ref(0);
-function openDeleteModal(doc: any) {
-    itemToDeleteUrl.value = route('documents.destroy', doc.id);
-    itemToDeleteName.value = `Document ${doc.barcode}`;
-    itemToDeleteVersion.value = doc.workflow_version;
-    showDeleteModal.value = true;
-}
-
 const showRoutingModal = ref(false);
 const documentToRoute = ref<any>(null);
 function openRoutingModal(doc: any) {
@@ -123,12 +112,13 @@ const form = useForm({
     ai_routing_suggestions: [] as any[],
 });
 
-const { selectedType, allowedClassifications, paperlessAllowed } = useIntakeRulebook(form, () => props.documentTypes, () => props.classifications);
+const { selectedType, allowedClassifications, paperlessAllowed, paperlessEnabled } = useIntakeRulebook(form, () => props.documentTypes, () => props.classifications);
 
 // Confidential documents get no AI assist and no upload (FGD), so drop anything the AI or a scan already added.
 watch(() => form.is_confidential, (isConfidential) => {
     if (!isConfidential) return;
     form.attached_file = null;
+    analyzedFile.value = null;
     form.ai_routing_suggestions = [];
     form.routed_to = form.routed_to.slice(0, 1);
     executiveSuggestion.value = null;
@@ -140,9 +130,7 @@ const showBarcodeDropdown = ref(false);
 const barcodeResults = ref<Array<{ barcode: string, subject_matter: string }>>([]);
 
 const handleLinkedDocumentInput = async (e: any) => {
-    const val = e.target.value;
-    const words = val.trim().split(' ');
-    const lastWord = words[words.length - 1]; 
+    const lastWord = barcodeBeingTyped(e.target.value);
 
     if (lastWord.length >= 3) {
         try {
@@ -158,10 +146,7 @@ const handleLinkedDocumentInput = async (e: any) => {
 };
 
 const selectBarcode = (barcode: string) => {
-    const words = form.linked_documents.trim().split(' ');
-    words.pop(); 
-    words.push(barcode); 
-    form.linked_documents = words.join(' ') + ' '; 
+    form.linked_documents = withChosenBarcode(form.linked_documents, barcode);
     showBarcodeDropdown.value = false;
     document.getElementById('linked_documents_input')?.focus();
 };
@@ -196,12 +181,36 @@ function analysisFailureReason(err: any): string {
     return 'Document uploaded, but automatic analysis failed. You can fill the fields manually.';
 }
 
-const handleFileUpload = async (event: Event) => {
-    const target = event.target as HTMLInputElement;
-    const file = target.files?.[0];
-    if (!file) return;
+// --- STEP 1: one upload area attaches the scan and (optionally) autofills the form from it ---
+const autofillWithAi = ref(true);
+const isDragging = ref(false);
+const analyzedFile = ref<File | null>(null);
+const ACCEPTED_FILE = /\.(pdf|jpe?g|png)$/i;
 
-    form.attached_file = file; 
+function chooseFile(file?: File | null) {
+    if (!file || form.is_confidential) return;
+    if (!ACCEPTED_FILE.test(file.name)) {
+        notyf.error('Upload a PDF, JPG or PNG file.');
+        return;
+    }
+    form.attached_file = file;
+    form.clearErrors('attached_file');
+    analyzedFile.value = null;
+    if (autofillWithAi.value) analyzeFile(file);
+}
+
+function onFileDrop(event: DragEvent) {
+    isDragging.value = false;
+    chooseFile(event.dataTransfer?.files?.[0]);
+}
+
+function removeFile() {
+    form.attached_file = null;
+    analyzedFile.value = null;
+    analysisError.value = '';
+}
+
+const analyzeFile = async (file: File) => {
     isAnalyzing.value = true;
     executiveSuggestion.value = null;
     analysisError.value = '';
@@ -275,6 +284,7 @@ const handleFileUpload = async (event: Event) => {
             };
         }
 
+        analyzedFile.value = file;
         notyf.success('AI successfully extracted data.');
     } catch (err: any) {
         analysisError.value = analysisFailureReason(err);
@@ -301,12 +311,16 @@ const pickerSuggestions = computed(() =>
 const officeCode = (id: number) => props.departments.find((office) => office.id === id)?.code ?? id;
 
 // Plain, compact fields in the style of the previous DTS intake form.
-const labelClass = 'mb-1 block text-sm text-slate-700';
+const labelClass = 'mb-1 block truncate text-sm text-slate-700';
 const fieldClass = (error?: string) => [
     'w-full rounded-md border bg-white px-2.5 py-1.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1',
     error ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-600 focus:ring-emerald-600',
 ];
-const iconButtonClass = 'rounded-md border border-slate-200 p-1.5 text-slate-600 transition hover:bg-slate-100';
+const iconButtonClass = 'inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-100';
+// Numbered step headings so Records reads the form top to bottom: confidential → file → details → sender → subject → send.
+const stepClass = 'mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500';
+const stepNumberClass = 'flex h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] font-semibold text-white';
+const routeNeedsFile = computed(() => form.route_mode === 'paperless' && !form.attached_file);
 
 function submitDocument() {
     form.transform((data) =>
@@ -320,6 +334,7 @@ function submitDocument() {
             executiveSuggestion.value = null;
             aiMetrics.value = null;
             analysisError.value = '';
+            analyzedFile.value = null;
         },
         onError: () => {
             notyf.error('Please check the highlighted fields.');
@@ -334,50 +349,138 @@ function submitDocument() {
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="mx-auto flex min-h-screen w-full flex-col gap-4 bg-slate-50 p-4">
             <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
-                <!-- LEFT PANEL: NEW DOCUMENT FORM -->
-                <section class="rounded-lg border border-slate-200 bg-white lg:col-span-5" aria-labelledby="new-document-title">
+                <!-- LEFT PANEL: NEW DOCUMENT FORM (dense grid so the whole form fits one screen) -->
+                <section class="rounded-lg border border-slate-200 bg-white lg:col-span-6" aria-labelledby="new-document-title">
                     <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
                         <h2 id="new-document-title" class="text-base font-semibold text-slate-800">New Document</h2>
-
-                        <input
-                            id="ai-upload"
-                            type="file"
-                            accept=".pdf,.jpg,.png"
-                            class="sr-only"
-                            :disabled="isAnalyzing || form.is_confidential"
-                            @change="handleFileUpload"
-                        />
-                        <label
-                            for="ai-upload"
-                            class="flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-50 focus-within:ring-1 focus-within:ring-emerald-600"
-                            :class="{ 'pointer-events-none opacity-50': isAnalyzing || form.is_confidential }"
-                            :title="form.is_confidential ? 'AI autofill is off for confidential documents' : 'Scan a file and fill the form'"
-                        >
-                            <Loader2 v-if="isAnalyzing" class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                            <Sparkles v-else class="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
-                            {{ isAnalyzing ? 'Scanning...' : 'AI Autofill' }}
-                        </label>
+                        <p class="text-xs text-slate-500">
+                            Access Code: <span class="font-mono font-semibold text-slate-800">{{ form.access_code }}</span>
+                        </p>
                     </div>
 
                     <form class="flex flex-col gap-3 p-4" @submit.prevent="submitDocument">
-                        <p v-if="analysisError" role="alert" class="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                        <!-- STEPS 1–2: confidentiality decides whether the scan may be uploaded and read by AI -->
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <h3 :class="stepClass"><span :class="stepNumberClass">1</span> Is it confidential?</h3>
+                                <label
+                                    for="intake_confidential"
+                                    class="flex h-[52px] cursor-pointer items-center gap-2 rounded-md border px-2.5 transition"
+                                    :class="form.is_confidential ? 'border-amber-400 bg-amber-50' : 'border-slate-200 hover:bg-slate-50'"
+                                    title="Confidential documents are not uploaded or read by AI, go by paper, and you type the details yourself."
+                                >
+                                    <input
+                                        id="intake_confidential"
+                                        v-model="form.is_confidential"
+                                        type="checkbox"
+                                        aria-describedby="intake_confidential_hint"
+                                        class="h-4 w-4 shrink-0 rounded border-slate-300 text-amber-600 focus:ring-amber-600"
+                                    />
+                                    <span class="min-w-0 leading-tight">
+                                        <span class="block text-sm font-medium text-slate-800">Confidential document</span>
+                                        <span id="intake_confidential_hint" class="block truncate text-xs text-slate-500">
+                                            {{ selectedType?.may_be_confidential ? 'This type may be confidential · ' : '' }}No upload, no AI
+                                        </span>
+                                    </span>
+                                </label>
+                                <InputError class="mt-1 text-xs" :message="form.errors.is_confidential" />
+                            </div>
+
+                            <div>
+                                <div class="flex items-center justify-between gap-2">
+                                    <h3 :class="stepClass"><span :class="stepNumberClass">2</span> Attach the scan</h3>
+                                    <label v-if="!form.is_confidential" class="mb-1.5 flex items-center gap-1.5 text-xs text-slate-600">
+                                        <input
+                                            v-model="autofillWithAi"
+                                            type="checkbox"
+                                            class="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
+                                        />
+                                        AI autofill
+                                    </label>
+                                </div>
+                                <p
+                                    v-if="form.is_confidential"
+                                    class="flex h-[52px] items-center rounded-md border border-dashed border-slate-300 px-2.5 text-xs text-slate-500"
+                                >
+                                    Skipped for confidential documents.
+                                </p>
+                                <div v-else-if="form.attached_file" class="flex h-[52px] flex-col justify-center rounded-md border border-slate-300 px-2.5">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <span class="flex min-w-0 items-center gap-1.5 text-sm text-slate-700">
+                                            <FileUp class="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true" />
+                                            <span class="truncate">{{ form.attached_file.name }}</span>
+                                        </span>
+                                        <button
+                                            type="button"
+                                            class="rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
+                                            aria-label="Remove attachment"
+                                            :disabled="isAnalyzing"
+                                            @click="removeFile"
+                                        >
+                                            <X class="h-3.5 w-3.5" aria-hidden="true" />
+                                        </button>
+                                    </div>
+                                    <p class="flex items-center gap-1 text-xs leading-tight" role="status" aria-live="polite">
+                                        <template v-if="isAnalyzing">
+                                            <Loader2 class="h-3 w-3 animate-spin text-emerald-600" aria-hidden="true" />
+                                            <span class="text-slate-600">Reading and filling the form…</span>
+                                        </template>
+                                        <template v-else-if="analyzedFile === form.attached_file">
+                                            <Sparkles class="h-3 w-3 text-emerald-600" aria-hidden="true" />
+                                            <span class="text-emerald-700">AI filled the form. Check every field.</span>
+                                        </template>
+                                        <button
+                                            v-else
+                                            type="button"
+                                            class="font-medium text-emerald-700 hover:underline"
+                                            @click="form.attached_file && analyzeFile(form.attached_file)"
+                                        >
+                                            Fill the form with AI
+                                        </button>
+                                    </p>
+                                </div>
+                                <label
+                                    v-else
+                                    for="intake_attachment"
+                                    class="flex h-[52px] cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-dashed px-2.5 text-center transition focus-within:ring-2 focus-within:ring-emerald-600"
+                                    :class="[
+                                        isDragging ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 hover:bg-slate-50',
+                                        form.errors.attached_file ? 'border-red-500' : '',
+                                    ]"
+                                    @dragover.prevent="isDragging = true"
+                                    @dragleave.prevent="isDragging = false"
+                                    @drop.prevent="onFileDrop"
+                                >
+                                    <FileUp class="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                                    <span class="leading-tight">
+                                        <span class="block text-sm font-medium text-slate-700">Choose or drop the scan</span>
+                                        <span class="block text-xs" :class="routeNeedsFile ? 'text-amber-700' : 'text-slate-500'">
+                                            PDF/JPG/PNG · {{ form.route_mode === 'paperless' ? 'required (paperless)' : 'optional' }}
+                                        </span>
+                                    </span>
+                                    <input
+                                        id="intake_attachment"
+                                        type="file"
+                                        accept=".pdf,.jpg,.jpeg,.png"
+                                        class="sr-only"
+                                        @change="(e: any) => chooseFile(e.target.files?.[0])"
+                                    />
+                                </label>
+                                <InputError class="mt-1 text-xs" :message="form.errors.attached_file" />
+                            </div>
+                        </div>
+                        <p v-if="analysisError" role="alert" class="flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs text-rose-700">
                             <AlertCircle class="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                             {{ analysisError }}
                         </p>
 
-                        <div class="grid grid-cols-3 gap-3">
+                        <!-- STEP 3: document details -->
+                        <h3 :class="stepClass"><span :class="stepNumberClass">3</span> Document details</h3>
+                        <div class="grid grid-cols-4 gap-3">
                             <div>
                                 <label for="intake_barcode" :class="labelClass">Barcode</label>
                                 <input id="intake_barcode" v-model="form.barcode" type="text" maxlength="10" placeholder="Max 10" :class="fieldClass(form.errors.barcode)" />
                                 <InputError class="mt-1 text-xs" :message="form.errors.barcode" />
-                            </div>
-                            <div>
-                                <label for="intake_transaction_type" :class="labelClass">Transaction Type</label>
-                                <select id="intake_transaction_type" v-model="form.transaction_type_id" :class="fieldClass(form.errors.transaction_type_id)">
-                                    <option value="" disabled>Select one</option>
-                                    <option v-for="type in transactionTypes" :key="type.id" :value="type.id">{{ type.name }}</option>
-                                </select>
-                                <InputError class="mt-1 text-xs" :message="form.errors.transaction_type_id" />
                             </div>
                             <div>
                                 <label for="intake_document_type" :class="labelClass">Document Type</label>
@@ -387,9 +490,74 @@ function submitDocument() {
                                 </select>
                                 <InputError class="mt-1 text-xs" :message="form.errors.document_type_id" />
                             </div>
+                            <div class="col-span-2">
+                                <label for="intake_classification" :class="labelClass">Classification</label>
+                                <select id="intake_classification" v-model="form.classification_id" :class="fieldClass(form.errors.classification_id)">
+                                    <option value="" disabled>Select one</option>
+                                    <option v-for="classif in allowedClassifications" :key="classif.id" :value="classif.id">{{ classif.name }}</option>
+                                </select>
+                                <InputError class="mt-1 text-xs" :message="form.errors.classification_id" />
+                            </div>
+                            <div>
+                                <label for="intake_transaction_type" :class="labelClass">Transaction Type</label>
+                                <select id="intake_transaction_type" v-model="form.transaction_type_id" :class="fieldClass(form.errors.transaction_type_id)">
+                                    <option value="" disabled>Select one</option>
+                                    <option v-for="type in transactionTypes" :key="type.id" :value="type.id">{{ type.name }}</option>
+                                </select>
+                                <InputError class="mt-1 text-xs" :message="form.errors.transaction_type_id" />
+                            </div>
+                            <div v-if="paperlessEnabled">
+                                <label for="intake_route_mode" :class="labelClass">Route</label>
+                                <select
+                                    id="intake_route_mode"
+                                    v-model="form.route_mode"
+                                    :title="paperlessAllowed ? 'Paperless needs the scan from step 2.' : 'Paperless needs a digitally signed, non-confidential type.'"
+                                    :class="fieldClass(form.errors.route_mode)"
+                                >
+                                    <option value="paperless" :disabled="!paperlessAllowed">Paperless (PNPKI)</option>
+                                    <option value="paper">Paper (wet signature)</option>
+                                </select>
+                                <InputError class="mt-1 text-xs" :message="form.errors.route_mode" />
+                            </div>
+                            <div>
+                                <label for="intake_delivery_method" :class="labelClass">Delivery Method</label>
+                                <select id="intake_delivery_method" v-model="form.delivery_method_id" :class="fieldClass(form.errors.delivery_method_id)">
+                                    <option value="" disabled>Select one</option>
+                                    <option v-for="method in deliveryMethods" :key="method.id" :value="method.id">{{ method.delivery_method_name }}</option>
+                                </select>
+                                <InputError class="mt-1 text-xs" :message="form.errors.delivery_method_id" />
+                            </div>
+                            <div class="relative">
+                                <label for="linked_documents_input" :class="labelClass">Linked Doc/s <span class="text-slate-400">(optional)</span></label>
+                                <input
+                                    id="linked_documents_input"
+                                    v-model="form.linked_documents"
+                                    type="text"
+                                    autocomplete="off"
+                                    placeholder="e.g. C003192314, C003196677"
+                                    :class="fieldClass(form.errors.linked_documents)"
+                                    @input="handleLinkedDocumentInput"
+                                />
+                                <InputError class="mt-1 text-xs" :message="form.errors.linked_documents" />
+                                <ul v-if="showBarcodeDropdown" class="absolute right-0 z-10 mt-1 max-h-48 w-64 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-md">
+                                    <li v-for="res in barcodeResults" :key="res.barcode">
+                                        <button type="button" class="w-full px-3 py-1.5 text-left hover:bg-slate-50 focus:bg-slate-50 focus:outline-none" @click="selectBarcode(res.barcode)">
+                                            <span class="block font-mono text-xs font-semibold text-emerald-700">{{ res.barcode }}</span>
+                                            <span class="block truncate text-xs text-slate-500">{{ res.subject_matter }}</span>
+                                        </button>
+                                    </li>
+                                </ul>
+                            </div>
                         </div>
+                        <p v-if="paperlessEnabled && (form.route_mode === 'paperless' || !paperlessAllowed)" class="-mt-1 text-xs" :class="routeNeedsFile ? 'text-amber-700' : 'text-slate-500'">
+                            <template v-if="!paperlessAllowed">Paperless needs a digitally signed, non-confidential type.</template>
+                            <template v-else-if="routeNeedsFile">Paperless: attach the scan in step 2 before saving.</template>
+                            <template v-else>Paperless: the attached scan will be signed with PNPKI.</template>
+                        </p>
 
-                        <div class="grid grid-cols-3 gap-3">
+                        <!-- STEP 4: who sent it -->
+                        <h3 :class="stepClass"><span :class="stepNumberClass">4</span> Sender</h3>
+                        <div class="grid grid-cols-4 gap-3">
                             <div>
                                 <label for="intake_source_type" :class="labelClass">Source Type</label>
                                 <select id="intake_source_type" v-model="form.source_type" :class="fieldClass(form.errors.source_type)">
@@ -414,61 +582,14 @@ function submitDocument() {
                                 </select>
                                 <InputError v-if="form.source_type === 'Internal'" class="mt-1 text-xs" :message="form.errors.source_location" />
                             </div>
-                        </div>
-
-                        <div class="grid grid-cols-3 gap-3">
-                            <div class="col-span-2">
-                                <label for="intake_classification" :class="labelClass">Document Classification</label>
-                                <select id="intake_classification" v-model="form.classification_id" :class="fieldClass(form.errors.classification_id)">
+                            <div>
+                                <label for="intake_gender" :class="labelClass">Gender</label>
+                                <select id="intake_gender" v-model="form.gender" :class="fieldClass(form.errors.gender)">
                                     <option value="" disabled>Select one</option>
-                                    <option v-for="classif in allowedClassifications" :key="classif.id" :value="classif.id">{{ classif.name }}</option>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
                                 </select>
-                                <InputError class="mt-1 text-xs" :message="form.errors.classification_id" />
-                            </div>
-                            <div>
-                                <label for="intake_route_mode" :class="labelClass">Route</label>
-                                <select
-                                    id="intake_route_mode"
-                                    v-model="form.route_mode"
-                                    aria-describedby="intake_route_mode_hint"
-                                    :class="fieldClass(form.errors.route_mode)"
-                                >
-                                    <option value="paperless" :disabled="!paperlessAllowed">Paperless (PNPKI)</option>
-                                    <option value="paper">Paper (wet signature)</option>
-                                </select>
-                                <InputError class="mt-1 text-xs" :message="form.errors.route_mode" />
-                            </div>
-                        </div>
-                        <p id="intake_route_mode_hint" class="-mt-1 text-xs text-slate-500">
-                            {{ paperlessAllowed ? 'Paperless: scan required before saving.' : 'Paperless needs a digitally signed, non-confidential type.' }}
-                        </p>
-
-                        <div class="flex items-start gap-2">
-                            <input
-                                id="intake_confidential"
-                                v-model="form.is_confidential"
-                                type="checkbox"
-                                aria-describedby="intake_confidential_hint"
-                                class="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
-                            />
-                            <div>
-                                <label for="intake_confidential" class="text-sm text-slate-800">Confidential document</label>
-                                <p id="intake_confidential_hint" class="text-xs text-slate-500">
-                                    {{ selectedType?.may_be_confidential ? 'This document type may be confidential. ' : '' }}No AI autofill and no
-                                    upload; encode details manually. Paper route.
-                                </p>
-                                <InputError class="mt-1 text-xs" :message="form.errors.is_confidential" />
-                            </div>
-                        </div>
-
-                        <div class="grid grid-cols-3 gap-3">
-                            <div>
-                                <label for="intake_delivery_method" :class="labelClass">Delivery Method</label>
-                                <select id="intake_delivery_method" v-model="form.delivery_method_id" :class="fieldClass(form.errors.delivery_method_id)">
-                                    <option value="" disabled>Select one</option>
-                                    <option v-for="method in deliveryMethods" :key="method.id" :value="method.id">{{ method.delivery_method_name }}</option>
-                                </select>
-                                <InputError class="mt-1 text-xs" :message="form.errors.delivery_method_id" />
+                                <InputError class="mt-1 text-xs" :message="form.errors.gender" />
                             </div>
                             <div class="col-span-2">
                                 <label for="intake_source_name" :class="labelClass">Source Name</label>
@@ -480,18 +601,6 @@ function submitDocument() {
                                     :class="fieldClass(form.errors.source_name)"
                                 />
                                 <InputError class="mt-1 text-xs" :message="form.errors.source_name" />
-                            </div>
-                        </div>
-
-                        <div class="grid grid-cols-3 gap-3">
-                            <div>
-                                <label for="intake_gender" :class="labelClass">Gender</label>
-                                <select id="intake_gender" v-model="form.gender" :class="fieldClass(form.errors.gender)">
-                                    <option value="" disabled>Select one</option>
-                                    <option value="Male">Male</option>
-                                    <option value="Female">Female</option>
-                                </select>
-                                <InputError class="mt-1 text-xs" :message="form.errors.gender" />
                             </div>
                             <div>
                                 <label for="intake_contact_no" :class="labelClass">Contact No.</label>
@@ -505,114 +614,72 @@ function submitDocument() {
                             </div>
                         </div>
 
+                        <!-- STEP 5: what it is about -->
+                        <h3 :class="stepClass"><span :class="stepNumberClass">5</span> Subject</h3>
                         <div>
                             <label for="intake_subject_matter" :class="labelClass">Subject Matter</label>
-                            <textarea id="intake_subject_matter" v-model="form.subject_matter" rows="2" :class="fieldClass(form.errors.subject_matter)"></textarea>
+                            <textarea
+                                id="intake_subject_matter"
+                                v-model="form.subject_matter"
+                                rows="2"
+                                :class="fieldClass(form.errors.subject_matter)"
+                            ></textarea>
                             <InputError class="mt-1 text-xs" :message="form.errors.subject_matter" />
                         </div>
 
-                        <div class="relative">
-                            <label for="linked_documents_input" :class="labelClass">Linked Document/s <span class="text-slate-400">(optional)</span></label>
-                            <input
-                                id="linked_documents_input"
-                                v-model="form.linked_documents"
-                                type="text"
-                                autocomplete="off"
-                                placeholder="Enter barcode/s, separated by spaces"
-                                :class="fieldClass(form.errors.linked_documents)"
-                                @input="handleLinkedDocumentInput"
-                            />
-                            <InputError class="mt-1 text-xs" :message="form.errors.linked_documents" />
-
-                            <ul v-if="showBarcodeDropdown" class="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-md">
-                                <li v-for="res in barcodeResults" :key="res.barcode">
-                                    <button type="button" class="w-full px-3 py-1.5 text-left hover:bg-slate-50 focus:bg-slate-50 focus:outline-none" @click="selectBarcode(res.barcode)">
-                                        <span class="block font-mono text-xs font-semibold text-emerald-700">{{ res.barcode }}</span>
-                                        <span class="block truncate text-xs text-slate-500">{{ res.subject_matter }}</span>
-                                    </button>
-                                </li>
-                            </ul>
-                        </div>
-
-                        <div>
-                            <label for="intake_attachment" :class="labelClass">
-                                Attached Document <span class="text-slate-400">{{ form.route_mode === 'paperless' ? '(required for paperless)' : '(optional)' }}</span>
-                            </label>
-                            <p v-if="form.is_confidential" class="text-xs text-slate-500">Confidential documents are not uploaded.</p>
-                            <div v-else-if="form.attached_file" class="flex items-center justify-between rounded-md border border-slate-300 px-2.5 py-1.5">
-                                <span class="flex items-center gap-2 truncate text-sm text-slate-700">
-                                    <FileUp class="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
-                                    {{ form.attached_file.name }}
+                        <!-- STEP 6: where it goes, then save -->
+                        <h3 :class="stepClass"><span :class="stepNumberClass">6</span> Send to</h3>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <label for="intake_direct_to" class="sr-only">Direct to</label>
+                            <select
+                                id="intake_direct_to"
+                                v-model="directTo"
+                                aria-describedby="intake_direct_to_hint"
+                                class="!w-auto"
+                                :class="fieldClass(form.errors.department_id)"
+                            >
+                                <option value="ADM">City Administrator</option>
+                                <option value="OCM">City Mayor</option>
+                                <option value="departments">Departments</option>
+                            </select>
+                            <template v-if="directTo === 'departments'">
+                                <span v-if="form.routed_to.length" class="text-sm text-slate-700">
+                                    <template v-for="(id, index) in form.routed_to" :key="id">
+                                        <span :class="id === form.primary_office_id ? 'font-semibold' : ''">{{ officeCode(id) }}</span
+                                        ><span v-if="id === form.primary_office_id" class="text-xs text-emerald-700"> (Primary)</span
+                                        >{{ index < form.routed_to.length - 1 ? ', ' : '' }}
+                                    </template>
                                 </span>
-                                <button type="button" class="rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700" aria-label="Remove attachment" @click="form.attached_file = null">
-                                    <X class="h-3.5 w-3.5" aria-hidden="true" />
-                                </button>
-                            </div>
-                            <input
-                                v-else
-                                id="intake_attachment"
-                                type="file"
-                                accept=".pdf,.jpg,.jpeg,.png"
-                                class="w-full rounded-md border bg-white py-1 pr-2.5 pl-1 text-sm file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-slate-700 hover:file:bg-slate-200"
-                                :class="form.errors.attached_file ? 'border-red-500' : 'border-slate-300'"
-                                @change="(e: any) => (form.attached_file = e.target.files[0])"
-                            />
-                            <InputError class="mt-1 text-xs" :message="form.errors.attached_file" />
-                        </div>
-
-                        <!-- Footer: access code, executive target, save -->
-                        <div class="mt-1 flex flex-wrap items-end justify-between gap-3 border-t border-slate-200 pt-3">
-                            <p class="text-sm text-slate-600">
-                                Access Code: <span class="font-semibold text-slate-800">{{ form.access_code }}</span>
-                            </p>
-                            <div class="flex items-end gap-2">
-                                <div>
-                                    <label for="intake_direct_to" class="mb-1 block text-xs text-slate-500">Direct to</label>
-                                    <select
-                                        id="intake_direct_to"
-                                        v-model="directTo"
-                                        aria-describedby="intake_direct_to_hint"
-                                        :class="fieldClass(form.errors.department_id)"
-                                    >
-                                        <option value="ADM">City Administrator</option>
-                                        <option value="OCM">City Mayor</option>
-                                        <option value="departments">Departments</option>
-                                    </select>
-                                </div>
+                                <span v-else class="text-sm text-slate-500">No departments chosen</span>
                                 <button
-                                    type="submit"
-                                    :disabled="form.processing || isAnalyzing"
-                                    class="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-1 disabled:opacity-50"
+                                    type="button"
+                                    class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                    @click="showOfficePicker = true"
                                 >
-                                    Save Document
+                                    {{ form.routed_to.length ? 'Change' : 'Choose offices' }}
                                 </button>
-                            </div>
+                            </template>
+                            <button
+                                type="submit"
+                                :disabled="form.processing || isAnalyzing"
+                                class="ml-auto rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-1 disabled:opacity-50"
+                            >
+                                Save Document
+                            </button>
                         </div>
-                        <p v-if="executiveSuggestion" id="intake_direct_to_hint" class="-mt-1 text-right text-xs text-slate-500">
+                        <p v-if="executiveSuggestion" id="intake_direct_to_hint" class="-mt-1 text-xs text-slate-500">
                             <Sparkles class="inline h-3 w-3 text-emerald-600" aria-hidden="true" />
                             AI suggests {{ executiveSuggestion.route }}: {{ executiveSuggestion.reason }}
                         </p>
-                        <InputError class="text-right text-xs" :message="form.errors.department_id" />
-
-                        <div v-if="directTo === 'departments'" class="flex flex-wrap items-center justify-end gap-2 text-sm">
-                            <span v-if="form.routed_to.length" class="text-slate-700">
-                                <template v-for="(id, index) in form.routed_to" :key="id">
-                                    <span :class="id === form.primary_office_id ? 'font-semibold' : ''">{{ officeCode(id) }}</span
-                                    ><span v-if="id === form.primary_office_id" class="text-xs text-emerald-700"> (Primary)</span
-                                    >{{ index < form.routed_to.length - 1 ? ', ' : '' }}
-                                </template>
-                            </span>
-                            <span v-else class="text-slate-500">No departments chosen</span>
-                            <button type="button" class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" @click="showOfficePicker = true">
-                                {{ form.routed_to.length ? 'Change offices' : 'Choose offices' }}
-                            </button>
-                        </div>
-                        <InputError class="text-right text-xs" :message="form.errors.routed_to || form.errors['routed_to.0'] || form.errors.primary_office_id" />
+                        <InputError
+                            class="text-xs"
+                            :message="form.errors.department_id || form.errors.routed_to || form.errors['routed_to.0'] || form.errors.primary_office_id"
+                        />
                     </form>
                 </section>
 
                 <!-- RIGHT PANEL: DATATABLE -->
-                <section class="flex flex-col rounded-lg border border-slate-200 bg-white lg:col-span-7" aria-label="Registered documents">
+                <section class="flex flex-col rounded-lg border border-slate-200 bg-white lg:col-span-6" aria-label="Registered documents">
                     <div class="border-b border-slate-200 px-4 py-3">
                         <div class="relative w-full max-w-sm">
                             <Search class="absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
@@ -662,6 +729,14 @@ function submitDocument() {
                                     <td class="px-4 py-2.5 whitespace-nowrap text-slate-600">{{ doc.source_name }}</td>
                                     <td class="px-4 py-2.5 whitespace-nowrap">
                                         <p :class="doc.status === 'Completed' ? 'text-emerald-700' : 'text-slate-700'">{{ doc.status || 'Pending' }}</p>
+                                        <!-- Where it is now; Records can route it only when no approval is pending and Records is Primary -->
+                                        <p
+                                            v-if="pendingApprovalLabels[doc.stage] || !holdsCopy(doc, $page.props.auth.user.department_id)"
+                                            class="text-xs text-slate-500"
+                                            :title="holderNames(doc)"
+                                        >
+                                            {{ pendingApprovalLabels[doc.stage] || `With ${holderCodes(doc)}` }}
+                                        </p>
                                         <p v-if="doc.is_delayed" class="flex items-center gap-1 text-xs font-medium text-rose-700">
                                             <AlertCircle class="h-3 w-3" aria-hidden="true" /> Delayed
                                         </p>
@@ -670,17 +745,10 @@ function submitDocument() {
                                         </p>
                                     </td>
                                     <td class="px-4 py-2.5 whitespace-nowrap">
+                                        <!-- Same-size buttons, centered: Route (only when Records may route it), then Edit -->
                                         <div class="flex items-center justify-center gap-1.5">
-                                            <!-- ROUTING/STATUS: no Route button while an executive step is pending or another office is Primary -->
-                                            <span
-                                                v-if="pendingApprovalLabels[doc.stage] || !holdsCopy(doc, $page.props.auth.user.department_id)"
-                                                class="px-1 text-xs text-slate-500"
-                                                :title="holderNames(doc)"
-                                            >
-                                                {{ pendingApprovalLabels[doc.stage] || `With ${holderCodes(doc)}` }}
-                                            </span>
                                             <button
-                                                v-else
+                                                v-if="!pendingApprovalLabels[doc.stage] && holdsCopy(doc, $page.props.auth.user.department_id)"
                                                 type="button"
                                                 :class="iconButtonClass"
                                                 title="Route"
@@ -693,15 +761,6 @@ function submitDocument() {
                                             <Link :href="route('documents.edit', doc.id)" :class="iconButtonClass" title="Edit" aria-label="Edit document">
                                                 <Pencil class="h-4 w-4" aria-hidden="true" />
                                             </Link>
-                                            <button
-                                                type="button"
-                                                class="rounded-md border border-slate-200 p-1.5 text-rose-600 transition hover:bg-rose-50"
-                                                title="Delete"
-                                                aria-label="Delete document"
-                                                @click="openDeleteModal(doc)"
-                                            >
-                                                <Trash2 class="h-4 w-4" aria-hidden="true" />
-                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -732,13 +791,6 @@ function submitDocument() {
                 </section>
             </div>
 
-            <DeleteConfirmationModal
-                v-model:show="showDeleteModal"
-                :deleteUrl="itemToDeleteUrl"
-                :delete-data="{ workflow_version: itemToDeleteVersion }"
-                :item-name="itemToDeleteName"
-                title="Deactivate Document"
-            />
             <!-- Intake straight to departments: Primary office + view-only copies -->
             <div v-if="showOfficePicker" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" @keydown.esc="showOfficePicker = false">
                 <div class="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-lg border border-slate-200 bg-white" role="dialog" aria-modal="true" aria-labelledby="office-picker-title">

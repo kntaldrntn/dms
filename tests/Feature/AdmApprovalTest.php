@@ -58,7 +58,7 @@ test('ADM users see the queue and other offices do not', function () {
     $this->actingAs($ictStaff)->get(route('adm-approvals.index'))->assertForbidden();
 });
 
-test('an ADM user receives first, then the City Administrator is pinged to approve', function () {
+test('an ADM user receives first, then the City Administrator is pinged to sign', function () {
     approveAtAdm($this, ['target' => 'ocm', 'signed_scan' => UploadedFile::fake()->create('signed.pdf', 10, 'application/pdf')])
         ->assertForbidden();
 
@@ -71,12 +71,23 @@ test('an ADM user receives first, then the City Administrator is pinged to appro
     $this->actingAs($this->admStaff)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page->where('incoming.count', 0));
     $this->actingAs($this->cityAdministrator)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page
         ->where('incoming.count', 1)->where('incoming.items.0.action', 'Ready for City Administrator approval'));
+});
 
-    // Staff receive but never approve.
+test('on the paper route ADM staff record the signed approval, with or without a scan', function () {
+    receiveAtAdm($this);
     $this->actingAs($this->admStaff)->post(route('adm-approvals.approve', $this->document), [
-        'workflow_version' => $this->document->fresh()->workflow_version, 'target' => 'ocm',
-        'signed_scan' => UploadedFile::fake()->create('signed.pdf', 10, 'application/pdf'),
-    ])->assertForbidden();
+        'workflow_version' => $this->document->fresh()->workflow_version,
+        'target' => 'departments', 'routed_to' => [$this->ict->id], 'primary_office_id' => $this->ict->id,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $approval = DocumentTrail::where('document_id', $this->document->id)->where('released_action', 'Approved by City Administrator')->firstOrFail();
+    // The City Administrator signed the paper; the staff member who recorded it is the releaser, not the signer.
+    expect($approval->released_by)->toBe($this->admStaff->id)
+        ->and($approval->signed_by)->toBeNull()
+        ->and($approval->signature_mode)->toBe('physical')
+        ->and($approval->signed_file_path)->toBeNull();
+    expect($this->document->fresh()->department_id)->toBe($this->ict->id);
+    expect(Storage::disk('local')->allFiles())->toBe([]);
 });
 
 test('a paper approval keeps the wet-signed scan and routes straight to the departments', function () {
@@ -129,7 +140,6 @@ test('invalid approvals change nothing and leave no files behind', function (Clo
         ->and($this->document->fresh()->stage)->toBe(DocumentTrail::STAGE_ADM_APPROVAL);
     expect(Storage::disk('local')->allFiles())->toBe([]);
 })->with([
-    'paper without the signed scan' => [fn ($test) => ['target' => 'ocm'], 'signed_scan'],
     'ADM picked as a department' => [fn ($test) => ['target' => 'departments', 'routed_to' => [$test->adm->id], 'primary_office_id' => $test->adm->id, 'signed_scan' => UploadedFile::fake()->image('s.jpg')], 'routed_to.0'],
     'a stamp placement on the paper route' => [fn ($test) => ['target' => 'ocm', 'signed_scan' => UploadedFile::fake()->image('s.jpg'), 'stamp_placement' => ['page' => 1, 'x' => 0, 'y' => 0, 'width' => 300, 'height' => 100]], 'stamp_placement'],
     'confidential to two offices' => [function ($test) {
@@ -141,6 +151,7 @@ test('invalid approvals change nothing and leave no files behind', function (Clo
 
 function paperlessAtAdm($test): void
 {
+    config(['services.paperless.enabled' => true]);
     Storage::fake('certificates');
     $pdf = new TCPDF;
     $pdf->AddPage();
@@ -157,6 +168,10 @@ const STAMP = ['page' => 1, 'x' => 600, 'y' => 800, 'width' => 300, 'height' => 
 
 test('a paperless approval is signed with the City Administrator own certificate', function () {
     paperlessAtAdm($this);
+    // Only the City Administrator holds the certificate, so staff cannot record a paperless approval.
+    $this->actingAs($this->admStaff)->post(route('adm-approvals.approve', $this->document), [
+        'workflow_version' => $this->document->fresh()->workflow_version, 'target' => 'ocm', 'stamp_placement' => STAMP, 'certificate_pin' => '2468',
+    ])->assertForbidden();
 
     approveAtAdm($this, ['target' => 'ocm', 'stamp_placement' => STAMP, 'certificate_pin' => '2468'])
         ->assertRedirect()->assertSessionHasNoErrors()->assertSessionMissing('_old_input.certificate_pin');
@@ -197,4 +212,17 @@ test('the signed PDF preview shows the newest signed version', function () {
 
     expect($this->actingAs($this->cityAdministrator)->get(route('documents.signed-pdf', $this->document))->assertOk()->streamedContent())
         ->toBe('%PDF newer');
+});
+
+test('with the paperless route switched off, a document saved as paperless is approved on paper', function () {
+    paperlessAtAdm($this);
+    config(['services.paperless.enabled' => false]);
+
+    $this->actingAs($this->admStaff)->post(route('adm-approvals.approve', $this->document), [
+        'workflow_version' => $this->document->fresh()->workflow_version, 'target' => 'ocm',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $approval = DocumentTrail::where('document_id', $this->document->id)->where('released_action', 'Approved by City Administrator')->firstOrFail();
+    expect($approval->signature_mode)->toBe('physical')
+        ->and($this->document->fresh()->stage)->toBe(DocumentTrail::STAGE_OCM_APPROVAL);
 });

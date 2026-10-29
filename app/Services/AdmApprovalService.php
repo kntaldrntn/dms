@@ -12,8 +12,9 @@ use RuntimeException;
 use Throwable;
 
 /**
- * FGD Phase 2c: an ADM user receives the document, then the City Administrator gives the single approval and
- * routes it on to the City Mayor or straight to the departments. It never returns to Records.
+ * FGD Phase 2c: an ADM user receives the document, then the City Administrator's single approval is recorded and
+ * the document routes on to the City Mayor or straight to the departments. It never returns to Records.
+ * Paper route (hybrid): the City Administrator signs the paper and any ADM user records it; the scan is optional.
  */
 class AdmApprovalService
 {
@@ -37,13 +38,13 @@ class AdmApprovalService
         try {
             $this->workflow->mutate($document, $user, (int) $data['workflow_version'], 'approveAdm', function (Document $document, User $user) use ($data, &$signedFile) {
                 $this->approvalEntry($document);
-                $paperless = $document->route_mode === 'paperless';
+                $paperless = $document->isPaperless();
                 if ($paperless && strtolower(pathinfo((string) $document->attached_file, PATHINFO_EXTENSION)) !== 'pdf') {
                     throw ValidationException::withMessages(['stamp_placement' => 'Paperless approval needs the uploaded PDF.']);
                 }
                 if ($paperless) {
                     $signedFile = $this->pdfStamps->stamp($document, $user, $data['stamp_placement'], PdfApprovalStampService::ADM, $data['certificate_pin']);
-                } else {
+                } elseif (($data['signed_scan'] ?? null) instanceof UploadedFile) {
                     $signedFile = $data['signed_scan']->store('signed-documents', 'local');
                     if (! $signedFile) {
                         throw new RuntimeException('The signed scan could not be saved.');
@@ -55,9 +56,11 @@ class AdmApprovalService
                 $primary = $mayor ?? (int) $data['primary_office_id'];
 
                 // A wet signature is recorded as an approval by the City Administrator, not as a digital signature.
+                // signed_by names the signer only when they act themselves; staff recording it appear as the releaser.
                 $this->workflow->release($document, $user, 'Approved by City Administrator', $primary, $data['remarks'] ?? null,
                     $paperless ? $user->id : null, [
-                        'trail_type' => 'approval', 'signed_by' => $user->id, 'signed_file_path' => $signedFile,
+                        'trail_type' => 'approval', 'signed_by' => $paperless || $user->role === 'city_administrator' ? $user->id : null,
+                        'signed_file_path' => $signedFile,
                         'signature_mode' => $paperless ? 'electronic' : 'physical', 'released_to_offices' => $targets,
                     ]);
 

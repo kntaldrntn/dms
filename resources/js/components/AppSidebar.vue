@@ -1,137 +1,81 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { usePage } from '@inertiajs/vue3';
 import NavMain from '@/components/NavMain.vue';
+import { Sidebar, SidebarContent } from '@/components/ui/sidebar';
+import { type NavItem, type NavSection } from '@/types';
+import { usePage } from '@inertiajs/vue3';
 import {
-    Sidebar,
-    SidebarContent,
-} from '@/components/ui/sidebar';
-import { type NavItem } from '@/types';
-import {
-    ArrowLeftRight,
-    FilePlus,
-    LayoutGrid,
-    ClipboardList,
-    Settings,
-    Users,
+    BadgeCheck,
     Building2,
-    Clock,
     Contact,
+    FilePlus,
+    FileText,
+    Gauge,
     Inbox,
-    FileSignature, // <-- ADDED FOR REFERRAL SLIPS
+    LayoutGrid,
+    ListChecks,
+    Mail,
+    Stamp,
+    Tags,
+    Truck,
+    UserCog,
 } from 'lucide-vue-next';
+import { computed } from 'vue';
 
 const page = usePage();
-const user = computed(() => page.props.auth.user);
+const role = computed(() => page.props.auth.user?.role ?? 'guest');
 
-const userRole = computed(() => {
-    return user.value?.role || 'guest';
+const link = (title: string, name: string, icon: NavItem['icon'], activePattern = `${name.split('.')[0]}.*`): NavItem => ({
+    title,
+    href: route(name),
+    icon,
+    isActive: route().current(activePattern),
 });
 
-const mainNavItems = computed<NavItem[]>(() => {
-    const menuConfig = [
-        {
-            title: 'Dashboard',
-            href: route('dashboard'),
-            icon: LayoutGrid,
-            roles: ['system_administrator', 'records_manager', 'user', 'staff', 'department_head', 'city_administrator', 'city_mayor'],
-        },
-        {
-            title: 'New Document',
-            href: route('documents.index'),
-            icon: FilePlus,
-            roles: ['system_administrator', 'records_manager', 'user', 'staff', 'department_head', 'city_administrator', 'city_mayor'],
-        },
-        {
-            title: 'Transactions',
-            href: route('transactions.inbox'),
-            icon: Inbox,
-            roles: ['system_administrator', 'records_manager', 'user', 'staff', 'department_head', 'city_administrator', 'city_mayor'],
-        },
-        // ADM Approvals: ADM users receive, the City Administrator approves (FGD Phase 2c).
-        {
-            title: 'ADM Approvals',
-            href: route('adm-approvals.index'),
-            icon: FileSignature,
-            roles: page.props.auth.canViewAdmApprovals ? [userRole.value] : [],
-        },
-        {
-            title: 'OCM Approvals',
-            href: route('ocm-approvals.index'),
-            icon: FileSignature,
-            roles: ['system_administrator', 'city_mayor'],
-        },
-        {
-            title: 'Settings',
-            icon: Settings,
-            roles: ['system_administrator', 'records_manager'],
-            isActive: route().current('departments.*') || 
-                      route().current('users.*') ||
-                      route().current('document-classifications.*') ||
-                      route().current('document-types.*') ||
-                      route().current('performance-standards.*') ||
-                      route().current('transaction-types.*') ||
-                      route().current('delivery-methods.*') ||
-                      route().current('people.*'),
-            items: [
-                {
-                    title: 'Departments',
-                    href: route('departments.index'),
-                    icon: Building2,
-                },
-                {
-                    title: 'Delivery Methods',
-                    href: route('delivery-methods.index'),
-                    icon: ArrowLeftRight,
-                },
-                {
-                    title: 'Document Classifications',
-                    href : route('document-classifications.index'),
-                    icon : ClipboardList,
-                },
-                {
-                    title: 'Document Types',
-                    href: route('document-types.index'),
-                    icon: ClipboardList,
-                },
-                {
-                    title: 'People Directory',
-                    href: route('people.index'),
-                    icon: Contact,
-                },
-                {
-                    title: 'Performance Standards',
-                    href: route('performance-standards.index'),
-                    icon: Clock,
-                },
-                {
-                    title: 'Transaction Types',
-                    href: route('transaction-types.index'),
-                    icon: ArrowLeftRight,
-                },
-                // User management stays with the System Administrator.
-                ...(userRole.value === 'system_administrator'
-                    ? [
-                          {
-                              title: 'User Management',
-                              href: route('users.index'),
-                              icon: Users,
-                          },
-                      ]
-                    : []),
-            ],
-        },
+const sections = computed<NavSection[]>(() => {
+    const isSystemAdministrator = role.value === 'system_administrator';
+
+    const approvals = [
+        // Approval pages depend on the office (every ADM/OCM user records approvals), not on the role alone.
+        ...(page.props.auth.canViewAdmApprovals ? [link('ADM Approvals', 'adm-approvals.index', Stamp)] : []),
+        ...(page.props.auth.canViewOcmApprovals ? [link('OCM Approvals', 'ocm-approvals.index', BadgeCheck)] : []),
     ];
 
-    return menuConfig.filter(item => item.roles.includes(userRole.value));
+    // Registries are open to Records; user management stays with the System Administrator.
+    const administration =
+        isSystemAdministrator || role.value === 'records_manager'
+            ? [
+                  link('Departments', 'departments.index', Building2),
+                  link('People Directory', 'people.index', Contact),
+                  link('Document Types', 'document-types.index', FileText),
+                  link('Classifications', 'document-classifications.index', Tags),
+                  link('Transaction Types', 'transaction-types.index', ListChecks),
+                  link('Delivery Methods', 'delivery-methods.index', Truck),
+                  link('Performance Standards', 'performance-standards.index', Gauge),
+                  ...(isSystemAdministrator
+                      ? [link('User Management', 'users.index', UserCog), link('Email Settings', 'mail-settings.edit', Mail)]
+                      : []),
+              ]
+            : [];
+
+    return [
+        {
+            label: 'Documents',
+            items: [
+                link('Dashboard', 'dashboard', LayoutGrid, 'dashboard*'),
+                link('New Document', 'documents.index', FilePlus),
+                link('Transactions', 'transactions.inbox', Inbox),
+            ],
+        },
+        { label: 'Approvals', items: approvals },
+        { label: 'Administration', items: administration },
+    ].filter((section) => section.items.length > 0);
 });
 </script>
 
 <template>
     <Sidebar collapsible="icon" class="border-r border-slate-200 bg-white">
-        <!-- SidebarHeader with Logo has been removed. -->
-        <SidebarContent class="px-1.5 pt-16">
-            <NavMain :items="mainNavItems" />
+        <SidebarContent class="gap-2 px-2 pb-4 pt-20">
+            <NavMain :sections="sections" />
         </SidebarContent>
     </Sidebar>
 </template>

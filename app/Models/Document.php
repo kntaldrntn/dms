@@ -108,6 +108,15 @@ class Document extends Model
         return $this->attached_file ? '/storage/'.$this->attached_file : null;
     }
 
+    /**
+     * Whether approvals sign this document digitally. While the paperless route is switched off, documents saved
+     * as paperless earlier are approved on paper too (wet signature, recorded by office staff).
+     */
+    public function isPaperless(): bool
+    {
+        return $this->route_mode === 'paperless' && (bool) config('services.paperless.enabled');
+    }
+
     public function inExecutiveStage(): bool
     {
         return in_array($this->stage, DocumentTrail::EXECUTIVE_STAGES, true);

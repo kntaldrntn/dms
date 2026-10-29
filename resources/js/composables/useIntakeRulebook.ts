@@ -1,3 +1,4 @@
+import { usePage } from '@inertiajs/vue3';
 import { computed, watch } from 'vue';
 
 export interface IntakeDocumentType {
@@ -34,7 +35,10 @@ export function useIntakeRulebook(
         return allowedIds.length ? classifications().filter((classification) => allowedIds.includes(classification.id)) : classifications();
     });
 
-    const paperlessAllowed = computed(() => selectedType.value?.signature_type === 'digital' && !form.is_confidential);
+    // The paperless (PNPKI) route can be switched off server-wide (DMS_PAPERLESS_ENABLED); then everything goes by paper.
+    const page = usePage<{ features?: { paperless?: boolean } }>();
+    const paperlessEnabled = computed(() => Boolean(page.props.features?.paperless));
+    const paperlessAllowed = computed(() => paperlessEnabled.value && selectedType.value?.signature_type === 'digital' && !form.is_confidential);
 
     // Only on change, so the edit form keeps the values already saved on the document.
     watch(
@@ -57,5 +61,7 @@ export function useIntakeRulebook(
         form.route_mode = paperlessAllowed.value ? 'paperless' : 'paper';
     });
 
-    return { selectedType, allowedClassifications, paperlessAllowed };
+    if (!paperlessEnabled.value) form.route_mode = 'paper';
+
+    return { selectedType, allowedClassifications, paperlessAllowed, paperlessEnabled };
 }

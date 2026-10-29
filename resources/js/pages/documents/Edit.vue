@@ -9,6 +9,7 @@ import { ref, watch } from 'vue';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
 import axios from 'axios';
+import { barcodeBeingTyped, linkedDocumentsText, withChosenBarcode } from '@/lib/linkedDocuments';
 
 const props = defineProps<{
     document: any;
@@ -45,7 +46,7 @@ const form = useForm({
     subject_matter: props.document.subject_matter,
     
     // Existing data bindings
-    linked_documents: props.document.linked_documents || '', 
+    linked_documents: linkedDocumentsText(props.document.linked_documents),
     attached_file: null as File | null, 
 
     department_id: props.document.department_id,
@@ -53,7 +54,7 @@ const form = useForm({
     workflow_version: props.document.workflow_version,
 });
 
-const { selectedType, allowedClassifications, paperlessAllowed } = useIntakeRulebook(form, () => props.documentTypes, () => props.classifications);
+const { selectedType, allowedClassifications, paperlessAllowed, paperlessEnabled } = useIntakeRulebook(form, () => props.documentTypes, () => props.classifications);
 
 watch(() => form.is_confidential, (isConfidential) => {
     if (isConfidential) form.attached_file = null;
@@ -69,9 +70,7 @@ const showBarcodeDropdown = ref(false);
 const barcodeResults = ref<Array<{ barcode: string, subject_matter: string }>>([]);
 
 const handleLinkedDocumentInput = async (e: any) => {
-    const val = e.target.value;
-    const words = val.trim().split(' ');
-    const lastWord = words[words.length - 1]; 
+    const lastWord = barcodeBeingTyped(e.target.value);
 
     if (lastWord.length >= 3) {
         try {
@@ -87,10 +86,7 @@ const handleLinkedDocumentInput = async (e: any) => {
 };
 
 const selectBarcode = (barcode: string) => {
-    const words = form.linked_documents.trim().split(' ');
-    words.pop(); 
-    words.push(barcode); 
-    form.linked_documents = words.join(' ') + ' '; 
+    form.linked_documents = withChosenBarcode(form.linked_documents, barcode);
     showBarcodeDropdown.value = false;
     document.getElementById('linked_documents_input')?.focus();
 };
@@ -202,7 +198,7 @@ function updateDocument() {
                                 <InputError class="mt-1" :message="form.errors.is_confidential" />
                             </div>
                         </div>
-                        <div>
+                        <div v-if="paperlessEnabled">
                             <label for="edit_route_mode" class="block text-sm font-medium text-slate-700 mb-1.5">Route</label>
                             <select id="edit_route_mode" v-model="form.route_mode" aria-describedby="edit_route_mode_hint" class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm">
                                 <option value="paperless" :disabled="!paperlessAllowed">Paperless (PNPKI)</option>
@@ -281,7 +277,7 @@ function updateDocument() {
                                 @input="handleLinkedDocumentInput"
                                 type="text" 
                                 autocomplete="off"
-                                placeholder="Type barcode to search, separate multiple with space" 
+                                placeholder="Type a barcode to search; separate several with commas" 
                                 class="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" 
                             />
                         </div>

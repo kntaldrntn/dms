@@ -6,8 +6,8 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
- * City Administrator's single approval (FGD Phase 2c): sign (wet-signed scan for the paper route, certificate
- * stamp for paperless) and route on, to the City Mayor or straight to departments.
+ * City Administrator's single approval (FGD Phase 2c) and route on, to the City Mayor or straight to departments.
+ * Paperless: certificate stamp. Paper: wet signature; the scan of the signed copy is optional.
  */
 class ApproveAdmDocumentRequest extends DocumentMutationRequest
 {
@@ -15,7 +15,7 @@ class ApproveAdmDocumentRequest extends DocumentMutationRequest
 
     public function rules(): array
     {
-        $paperless = $this->route('document')->route_mode === 'paperless';
+        $paperless = $this->route('document')->isPaperless();
 
         return parent::rules() + [
             'target' => ['required', Rule::in(['ocm', 'departments'])],
@@ -23,7 +23,7 @@ class ApproveAdmDocumentRequest extends DocumentMutationRequest
             'routed_to.*' => ['integer', 'distinct', Rule::exists('departments', 'id')->where('state', 1)->whereNotIn('code', ['REC', 'ADM', 'OCM'])],
             'primary_office_id' => ['exclude_unless:target,departments', 'required', 'integer', Rule::in((array) $this->input('routed_to', []))],
             'remarks' => ['nullable', 'string', 'max:1000'],
-            'signed_scan' => $paperless ? ['prohibited'] : ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            'signed_scan' => $paperless ? ['prohibited'] : ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
             // Opens the City Administrator's own certificate for this signing; never stored or flashed.
             'certificate_pin' => $paperless ? ['required', 'string', 'max:100'] : ['prohibited'],
         ] + ($paperless ? ApproveOcmDocumentRequest::placementRules() : ['stamp_placement' => ['prohibited']]);
@@ -37,7 +37,6 @@ class ApproveAdmDocumentRequest extends DocumentMutationRequest
     public function messages(): array
     {
         return [
-            'signed_scan.required' => 'Upload the scan of the wet-signed document.',
             'routed_to.*.exists' => 'Choose active departments. Use "City Mayor" to send it to OCM.',
             'primary_office_id.in' => 'Choose the Primary office from the selected offices.',
         ];

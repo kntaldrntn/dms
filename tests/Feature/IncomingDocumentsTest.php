@@ -32,7 +32,7 @@ beforeEach(function () {
     ]);
 });
 
-test('a dispatched document pings the receiving office until it acts on its copy', function () {
+test('a dispatched document pings the receiving office until it receives it, then the office acts on it', function () {
     $this->actingAs($this->staff)->get(route('dashboard'))
         ->assertInertia(fn (Assert $page) => $page->where('incoming.count', 0));
 
@@ -46,15 +46,28 @@ test('a dispatched document pings the receiving office until it acts on its copy
     // The sender's office is not pinged.
     $this->actingAs($this->records)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page->where('incoming.count', 0));
 
-    // Following the ping opens the inbox with that document ready for its Receive modal.
+    // Following the ping opens the inbox with that document highlighted.
     $this->actingAs($this->staff)->get(route('transactions.inbox', ['document' => $this->document->id]))
-        ->assertInertia(fn (Assert $page) => $page->where('focusDocument.id', $this->document->id));
+        ->assertInertia(fn (Assert $page) => $page->where('focusDocument.id', $this->document->id)
+            ->where('documents.data.0.primary_entry.received_by', null));
+
+    // Receive first, act later: nothing can be routed or ended before the office receives it.
+    $this->postJson(route('transactions.process', $this->document), [
+        'workflow_version' => 1, 'action' => 'end', 'remarks' => 'Too early',
+    ])->assertForbidden();
+    $this->post(route('transactions.receive', $this->document))->assertRedirect()->assertSessionHasNoErrors();
+    $this->post(route('transactions.receive', $this->document))->assertForbidden();
+    $entry = DocumentTrail::where('document_id', $this->document->id)->where('department_id', $this->target->id)->whereNull('released_at')->firstOrFail();
+    expect($entry->received_by)->toBe($this->staff->id)->and($entry->received_action)->toBe('Dispatched from Records');
+
+    // Received: the ping stops, and the document waits in the inbox until the office acts on it.
+    $this->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page->where('incoming.count', 0));
+    $this->get(route('transactions.inbox'))->assertInertia(fn (Assert $page) => $page
+        ->where('documents.data.0.primary_entry.receiver.name', $this->staff->name));
 
     $this->postJson(route('transactions.process', $this->document), [
-        'workflow_version' => 1, 'action' => 'end', 'remarks' => 'Received and done',
+        'workflow_version' => 1, 'action' => 'end', 'remarks' => 'Done',
     ])->assertRedirect()->assertSessionHasNoErrors();
-
-    $this->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page->where('incoming.count', 0));
     $this->get(route('transactions.inbox', ['document' => $this->document->id]))
         ->assertInertia(fn (Assert $page) => $page->where('focusDocument', null));
 });
@@ -79,4 +92,13 @@ test('executive steps ping only the role that acts on them and stay out of the o
         'workflow_version' => 0, 'action' => 'route', 'remarks' => 'Skip the slip', 'routed_to' => $this->target->id,
     ])->assertForbidden();
     expect($adm->fresh()->department_id)->toBe($this->adminOffice->id);
+});
+
+test('receiving shows a confirmation toast on the inbox', function () {
+    app(DispatchService::class)->dispatch($this->document, $this->records, ['workflow_version' => 0, 'routed_to' => [$this->target->id]]);
+
+    $this->actingAs($this->staff)->from(route('transactions.inbox'))->post(route('transactions.receive', $this->document))
+        ->assertRedirect(route('transactions.inbox'));
+    $this->get(route('transactions.inbox'))->assertInertia(fn (Assert $page) => $page
+        ->where('flash.success', 'Document received. Process it once your office has acted on it.'));
 });

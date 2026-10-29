@@ -46,13 +46,41 @@ class DocumentPolicy
         return $this->update($user, $document) && ! $document->inExecutiveStage();
     }
 
+    /**
+     * The Primary office acts (route or end) only after it has received the document, like the old DTS:
+     * receive first, act later. Documents waiting on ADM/OCM approval are acted on from their approval queues.
+     */
     public function process(User $user, Document $document): bool
     {
-        // Documents waiting on a slip, Department Head signature, or OCM approval are acted on
-        // from their executive queues, never routed or ended from the Office Inbox.
+        if (! $this->actsInInbox($user, $document)) {
+            return false;
+        }
+        $entry = $this->openPrimaryEntry($user, $document);
+
+        // No open entry (legacy rows held by department_id alone): nothing to receive, so it may act.
+        return $entry === null || $entry->received_by !== null;
+    }
+
+    /** The receiving officer logs that the Primary office has the document; acting on it is a separate step. */
+    public function receive(User $user, Document $document): bool
+    {
+        $entry = $this->actsInInbox($user, $document) ? $this->openPrimaryEntry($user, $document) : null;
+
+        return $entry !== null && $entry->received_by === null;
+    }
+
+    private function actsInInbox(User $user, Document $document): bool
+    {
         return $user->state === 1 && $this->owns($user, $document)
             && ! $document->inExecutiveStage()
             && $user->department()->where('state', 1)->exists();
+    }
+
+    /** This office's open Primary entry. Offices that registered or held a document before trails existed have none. */
+    private function openPrimaryEntry(User $user, Document $document): ?DocumentTrail
+    {
+        return DocumentTrail::where('document_id', $document->id)->where('department_id', $user->department_id)
+            ->where('copy_role', DocumentTrail::PRIMARY)->whereNull('released_at')->latest('id')->first();
     }
 
     /** A copy office records receipt of its view-only copy once; it can never act on the document. */
@@ -86,42 +114,62 @@ class DocumentPolicy
     /** FGD Phase 2c step 1: an ADM user receives a document waiting on City Administrator approval. */
     public function receiveAdm(User $user, Document $document): bool
     {
-        $entry = $this->admApprovalEntry($document);
+        $entry = $this->approvalEntry($document, DocumentTrail::STAGE_ADM_APPROVAL);
 
         return $entry !== null && $entry->received_by === null && $this->viewAdmApprovals($user);
     }
 
-    /** Step 2: only the City Administrator (or a system administrator) approves, and only after receipt. */
+    /**
+     * Step 2, only after receipt. Paperless: only the City Administrator (or a system administrator) signs with
+     * their own certificate. Paper (hybrid, like the old DTS): the City Administrator signs the paper and any ADM
+     * user records the approval.
+     */
     public function approveAdm(User $user, Document $document): bool
     {
-        $entry = $this->admApprovalEntry($document);
-        $isApprover = $user->role === 'system_administrator'
+        $entry = $this->approvalEntry($document, DocumentTrail::STAGE_ADM_APPROVAL);
+        $isApprover = ! $document->isPaperless() || $user->role === 'system_administrator'
             || ($user->role === 'city_administrator' && $user->department()->where('code', 'ADM')->exists());
 
         return $entry !== null && $entry->received_by !== null && $isApprover && $this->viewAdmApprovals($user);
     }
 
-    private function admApprovalEntry(Document $document): ?DocumentTrail
+    /** The open Primary entry waiting on an executive approval stage (DocumentTrail::STAGE_*). */
+    private function approvalEntry(Document $document, string $stage): ?DocumentTrail
     {
         if ($document->state !== 1 || $document->status === 'Completed') {
             return null;
         }
 
         return DocumentTrail::where('document_id', $document->id)->where('copy_role', DocumentTrail::PRIMARY)
-            ->whereNull('released_at')->where('stage', DocumentTrail::STAGE_ADM_APPROVAL)->latest('id')->first();
+            ->whereNull('released_at')->where('stage', $stage)->latest('id')->first();
     }
 
+    /** Every OCM user (they record the Mayor's paper approvals) and system administrators. */
     public function viewOcmApprovals(User $user): bool
     {
-        return $user->state === 1 && in_array($user->role, ['city_mayor', 'system_administrator'], true)
-            && $user->department()->where('state', 1)->exists();
+        return $user->state === 1 && ($user->role === 'system_administrator'
+            ? $user->department()->where('state', 1)->exists()
+            : $user->department()->where('code', 'OCM')->where('state', 1)->exists());
     }
 
-    /** The City Mayor (or a system administrator) signs a document waiting on OCM approval. */
+    /** Step 1, like ADM: any OCM user receives a document waiting on City Mayor approval. */
+    public function receiveOcm(User $user, Document $document): bool
+    {
+        $entry = $this->approvalEntry($document, DocumentTrail::STAGE_OCM_APPROVAL);
+
+        return $entry !== null && $entry->received_by === null && $this->viewOcmApprovals($user);
+    }
+
+    /**
+     * Step 2, only after receipt. Paperless: only the City Mayor (or a system administrator) signs with their own
+     * certificate. Paper: the Mayor signs the paper and any OCM user records the approval.
+     */
     public function approveOcm(User $user, Document $document): bool
     {
-        return $this->viewOcmApprovals($user) && $document->state === 1 && $document->status !== 'Completed'
-            && $document->stage === DocumentTrail::STAGE_OCM_APPROVAL;
+        $entry = $this->approvalEntry($document, DocumentTrail::STAGE_OCM_APPROVAL);
+        $isApprover = ! $document->isPaperless() || in_array($user->role, ['city_mayor', 'system_administrator'], true);
+
+        return $entry !== null && $entry->received_by !== null && $isApprover && $this->viewOcmApprovals($user);
     }
 
     /**

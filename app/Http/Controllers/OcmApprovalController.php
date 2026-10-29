@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ApproveOcmDocumentRequest;
+use App\Http\Requests\ReceiveOcmDocumentRequest;
+use App\Models\Department;
 use App\Models\Document;
 use App\Models\DocumentTrail;
 use App\Services\OcmApprovalService;
@@ -18,24 +20,37 @@ class OcmApprovalController extends Controller
     public function index(Request $request)
     {
         $this->authorize('viewOcmApprovals', Document::class);
+        $user = $request->user();
 
-        $documents = Document::with(['documentType', 'transactionType', 'primaryEntry'])
+        $documents = Document::with(['documentType', 'transactionType', 'primaryEntry.receiver:id,name'])
             ->inStage([DocumentTrail::STAGE_OCM_APPROVAL])
             ->where('status', 'Pending')->where('state', 1)->latest()->paginate(10)
-            ->through(fn (Document $document) => $document->setAttribute('stamp_source_url', $document->stampSourceUrl()));
+            ->through(fn (Document $document) => $document->setAttribute('stamp_source_url', $document->stampSourceUrl())
+                ->setAttribute('can_receive', $user->can('receiveOcm', $document))
+                ->setAttribute('can_approve', $user->can('approveOcm', $document))
+                ->setAttribute('is_paperless', $document->isPaperless()));
 
         return Inertia::render('ocm-approvals/Index', [
             'documents' => $documents,
-            'hasCertificate' => $request->user()->hasValidCertificate(),
+            // The Mayor's approval routes straight to departments (FGD Phase 3); never back to Records.
+            'departments' => Department::where('state', 1)->whereNotIn('code', ['REC', 'ADM', 'OCM'])->orderBy('code')->get(['id', 'code', 'name']),
+            'hasCertificate' => $user->hasValidCertificate(),
             'flash' => ['success' => session('success'), 'error' => session('error')],
         ]);
+    }
+
+    public function receive(ReceiveOcmDocumentRequest $request, Document $document, OcmApprovalService $approvals)
+    {
+        $approvals->receive($document, $request->user(), $request->integer('workflow_version'));
+
+        return redirect()->back()->with('success', 'Document received. Record the City Mayor approval once it is signed.');
     }
 
     public function approve(ApproveOcmDocumentRequest $request, Document $document, OcmApprovalService $approvals)
     {
         $approvals->approve($document, $request->user(), $request->validated());
 
-        return response()->json(['message' => 'OCM approval completed.']);
+        return redirect()->back()->with('success', 'Approved and routed to the departments.');
     }
 
     public function findStampPlacement(Request $request, Document $document)

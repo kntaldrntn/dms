@@ -24,7 +24,8 @@ class AdmApprovalController extends Controller
             ->latest()->paginate(10)->withQueryString()
             ->through(fn (Document $document) => $document->setAttribute('can_receive', $user->can('receiveAdm', $document))
                 ->setAttribute('can_approve', $user->can('approveAdm', $document))
-                ->setAttribute('stamp_source_url', $document->stampSourceUrl()));
+                ->setAttribute('stamp_source_url', $document->stampSourceUrl())
+                ->setAttribute('is_paperless', $document->isPaperless()));
 
         return Inertia::render('adm-approvals/Index', [
             'documents' => $documents,
@@ -39,7 +40,7 @@ class AdmApprovalController extends Controller
     {
         $approvals->receive($document, $request->user(), $request->integer('workflow_version'));
 
-        return redirect()->back()->with('success', 'Document received. The City Administrator can now approve it.');
+        return redirect()->back()->with('success', 'Document received. Record the City Administrator approval once it is signed.');
     }
 
     public function approve(ApproveAdmDocumentRequest $request, Document $document, AdmApprovalService $approvals)

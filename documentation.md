@@ -4,7 +4,7 @@
 > handoff, and before `/compact`. Mark facts as **verified** only with evidence.
 > Feature-level health is tracked separately by the user in `status.md`.
 
-Last updated: 2026-10-22 (intake AI accuracy/token rework; Primary/copy routing; Phase 2 decisions)
+Last updated: 2026-10-26 (client status email; sidebar sections). Sections 5 and 7 predate FGD Phase 2 — see the change log.
 
 ---
 
@@ -52,6 +52,7 @@ FormRequest (authorize + rules) → service → `DocumentWorkflow` → models/tr
 | `app/Services/AdmApprovalService.php`, `OcmApprovalService.php` | FGD executive approvals: ADM receive → City Administrator single approval → OCM or departments; OCM approval (returns to Records until Phase 3). Both stamp via `PdfApprovalStampService` with the signer's own PNPKI certificate (`SigningCertificateService`). Referral slips were retired in Phase 2d. |
 | `app/Services/PdfApprovalStampService.php` | Stamps the uploaded PDF with a visible signature block and signs it with the certificate from `config/digital-certificate.php`; writes to `storage/app/private/signed-documents` (local disk). Original upload untouched. |
 | `app/Services/DocumentIntakeAnalyzer.php` | Live intake AI (called by `DocumentController::analyze()`): OCR text only (pages 1, 2, last) → strict JSON schema whose ids come from the registries + the type rulebook; answer re-checked server-side (allowed classification, default category, one Primary office, ADM/OCM excluded from routing). Model: `config('services.intake_ai.model')`. |
+| `app/Services/ClientStatusService.php`, `app/Jobs/NotifyClientOfStatus.php` | The client-visible latest status, and the queued email sent when it changes (after every `mutate()` and intake). |
 | `app/Services/DocumentAnalysisService.php` | **Unused** older copy of the intake prompt (prompt reference: `basis.md`); not wired to any route. |
 | `app/Policies/DocumentPolicy.php` | All document abilities: `viewAny`, `view`, `create`, `update`, `delete`, `dispatch`, `process`, `viewReferrals`, `viewOcmApprovals`, `refer`, `signReferral`, `viewReferralSlip`. Ownership = user's department equals document's current department. |
 | `app/Http/Requests/*` | `SaveDocumentRequest`, `DispatchDocumentRequest`, `ProcessDocumentRequest`, `ReceiveAdmDocumentRequest`, `ApproveAdmDocumentRequest`, `ApproveOcmDocumentRequest`, `AnalyzeDocumentRequest`, `Settings/SigningCertificateRequest`, `DocumentMutationRequest` (base: requires `workflow_version`). |
@@ -343,6 +344,180 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 - Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
 
 ## 9. Change log
+
+### 2026-10-29 — Documents list: aligned actions, Delete hidden (Claude Code, uncommitted)
+- `documents/Index.vue`: the "With CHO" / "Pending City … Approval" text moved from the Actions column to under the
+  status, so it no longer pushes the buttons around. Actions are same-size 32 px buttons, centered: Route (only when
+  Records may route it), then Edit. (An empty placeholder slot was tried first; it left Edit off-centre.)
+- **Delete hidden for everyone (user request):** the button, `DeleteConfirmationModal` use and its state were removed
+  from the page. The backend (`documents.destroy`, `DocumentService::deactivate`, policy `delete`) is unchanged, so
+  it can be brought back by restoring the button. No other document page had a delete button.
+- Checks: ESLint ✅; build ✅. Not checked in the browser.
+
+### 2026-10-29 — Document trail: the Primary office's action is the latest row (Claude Code, uncommitted)
+- **Why (user):** after End Transaction, the closed copy (e.g. ACA "Closed with document") was listed above the
+  Primary's "End Transaction" row. `documents/Show.vue` `latestFirstTrails` now sorts by `created_at` (hand-off time)
+  newest first, Primary before copies of the same hand-off, then id; transit math keeps the chronological index.
+  ESLint ✅; build ✅. Not checked in the browser.
+- **Proxy e-signature replaced by a wet-signature record (user decision 2026-10-29, paper route first):** the
+  Process dialog's "Attach Dept. Head Signature (Proxy)" (any staff stamped the head's uploaded image as signer) is
+  now **"Signed by the Department Head (wet signature)"** + optional **scan of the signed page**. Any staff of the
+  office may record it (no permission needed, as decided). `ProcessDocumentRequest`: `attach_signature` → `head_signed`
+  + `signed_scan` (ignored unless ticked). `TransactionService::process()` → `headSignature()`: release gets
+  `trail_type` approval, `signed_by` = the office's active Department Head (or the head themself), `signature_mode`
+  physical, `signed_file_path` (local disk) when scanned; no `is_digitally_signed`; the scan is deleted if the step
+  fails. `DocumentWorkflow::signer()` (image-based) removed → `departmentHeadSigner()` (no image needed; error
+  "Your office has no active Department Head account…" when none). Trail badge "Physical Signature" → **"Wet
+  Signature"** (tooltip "Signed by hand by {name}"). Inbox page: unused role helpers removed; form sent as FormData.
+- Checks: Pest 174 passed (1707 assertions; new `DepartmentHeadSignatureTest`, 4 cases); Pint ✅ (CRLF ignored);
+  ESLint ✅; build ✅. Not checked in the browser (dev server down). When paperless returns, the head signs with
+  their own PNPKI certificate instead.
+
+### 2026-10-29 — Office Inbox: Receive first, act later (Claude Code, uncommitted)
+- **Why (user, testing as a receiving officer):** the inbox only offered "Receive & Route" / "Receive & End"; like
+  the old DTS (and like copies), the Primary office must first **Receive**, then act when it is done.
+- New `transactions.receive` (`POST /transactions/{document}/receive`, `ReceiveDocumentRequest`, policy `receive`,
+  `TransactionService::receive()`): sets `received_by` + `received_at` (actual receipt time) on the office's open
+  Primary entry; `received_action` keeps how it arrived (e.g. "Dispatched from Records"). No stale-form check
+  (like copy receipt); a second receipt is refused.
+- Policy `process` now also requires the office's open Primary entry to be received (legacy rows with no open entry
+  may still act). Shared helpers `actsInInbox()` / `openPrimaryEntry()`.
+- Bell: unchanged query — the ping now stops at **Receive** instead of at processing.
+- `transactions/Index.vue`: unreceived rows show a green **Receive** button; received rows show **Process** with
+  "Received by {name}"; the dialog is now "Process Document" with **Route** / **End Transaction**. From the bell the
+  row is highlighted; the Process dialog opens automatically only if already received. Inbox eager-loads
+  `primaryEntry.receiver`.
+- Checks: Pest 169 passed (1669 assertions; inbox/bell test now covers process-before-receive refused, receive, double
+  receive refused, receiver shown; workflow/copy/email tests receive before acting); Pint ✅ (CRLF ignored); ESLint ✅;
+  build ✅. **Not checked in the browser** (Vite dev server still down).
+- Note: Records' own Route button on the documents page uses `dispatch`, which does not require receipt.
+- **Plainer inbox (same day, user: the Primary list looked over-designed next to the copies list):** the Primary
+  table is now a card like "Copies for your information": heading "Documents for your action" + one-line help;
+  columns Barcode, Subject Matter, Source, Action; the Status column and coloured chips are gone (Delayed/Delinquent
+  are small coloured text after the document type); actions are small plain buttons — View, then Receive, or the
+  "Received" label (tooltip: who received it) + Process; the empty state is one line. ESLint ✅; build ✅.
+- **Fixed (user report): no toast after Receive/Process on the inbox.** `TransactionController::index` never passed
+  `flash` (old next step #7), so the page's notyf watcher had nothing to show. It now passes
+  `flash.success/error`; this also fixes the toasts for Process and Receive copy. New test in
+  `IncomingDocumentsTest` (IncomingDocumentsTest 3 passed).
+
+### 2026-10-29 — Hybrid paper route (old DTS style); paperless switched off; OCM routes to departments (Claude Code, uncommitted)
+- **Why (user decisions 2026-10-29):** finish the paper route first, like the current DTS. Office staff record the
+  executives' approvals; the scan of the signed copy is optional; after the Mayor, documents go straight to the
+  departments (FGD Phase 3); paperless is hidden for now.
+- **Switch:** `config('services.paperless.enabled')` (env `DMS_PAPERLESS_ENABLED`, empty = off; in `.env.example`).
+  Off: `SaveDocumentRequest` saves every document as `paper`; `DocumentType::allowsPaperless()` is false; the Route
+  field is hidden on intake and Edit (`useIntakeRulebook` returns `paperlessEnabled`, shared prop
+  `features.paperless`); `Document::isPaperless()` (route_mode paperless **and** switch on) decides how approvals
+  sign, so documents saved as paperless earlier are approved on paper. All PNPKI code is kept for switching back on.
+- **ADM:** `approveAdm` — paper: any ADM user after receipt; paperless: City Administrator / Sys Admin only. Signed
+  scan optional on paper. `signed_by` is set only when the executive acts (or paperless); staff show as releaser.
+- **OCM:** `viewOcmApprovals` = every active OCM user + Sys Admin (sidebar via shared `auth.canViewOcmApprovals`).
+  `approveOcm` — paper: any OCM user; paperless: City Mayor / Sys Admin. `ApproveOcmDocumentRequest` now requires
+  `routed_to` + `primary_office_id` (departments except REC/ADM/OCM), optional `remarks`, optional `signed_scan`
+  (paper) or PIN + stamp placement (paperless). `OcmApprovalService` records "Approved by City Mayor" (approval
+  trail, physical/electronic) and `distribute()`s to the Primary + copies — **no longer returns to Records**, for both
+  routes. The controller now redirects back with a flash (was JSON).
+- **UI:** new `resources/js/components/ApprovalDialog.vue` (shared by ADM and OCM: departments picker with AI
+  pre-ticks, remarks, optional scan or PIN; ADM also offers "City Mayor"); `adm-approvals/Index.vue` uses it (button
+  "Record approval" on paper); `ocm-approvals/Index.vue` rewritten in the same style.
+- **Bell:** staged entries now ping the whole holding office (any OCM user records the Mayor's paper approval); the
+  City Administrator still gets "Ready for City Administrator approval" after ADM receives.
+- Checks: Pest 169 passed (1574 assertions; new `OcmApprovalTest` 8 cases; ADM tests: staff record paper approval
+  without scan, staff refused on paperless, paperless doc approved on paper while switched off; intake: paperless
+  request saved as paper while off; bell test updated). Pint ✅ once CRLF working-copy endings are ignored (same
+  files pass at HEAD; git normalizes on commit). ESLint ✅; Prettier ✅ on the new files; build ✅.
+  **Not checked in the browser:** the Vite dev server was not running (`public/hot` points to `192.168.4.47:5173`).
+- **OCM Receive step (added the same day, user request):** like ADM, any OCM user first clicks **Receive**
+  (`ocm-approvals.receive`, `ReceiveOcmDocumentRequest`, policy `receiveOcm`, `OcmApprovalService::receive()` sets
+  `received_by/at`, "Received by OCM"); `approveOcm` now requires receipt (this also gates `findStampPlacement`).
+  The page shows a Received column and the Receive button. Bell: unreceived OCM entries ping every OCM user; once
+  received, the City Mayor gets "Ready for City Mayor approval" (same pattern as ADM; policy helper
+  `approvalEntry($document, $stage)` replaces `admApprovalEntry`). Pest 169 passed (1646 assertions; OCM tests now
+  receive first and cover the receive/ping flow; stamp-placement tests set up a received paperless entry); Pint ✅;
+  ESLint ✅; Prettier ✅; build ✅. Still not checked in the browser (dev server down).
+
+### 2026-10-28 — Linked documents are comma-separated (Claude Code, uncommitted)
+- New `resources/js/lib/linkedDocuments.ts` (`barcodeBeingTyped`, `withChosenBarcode`, `linkedDocumentsText`), used by
+  `documents/Index.vue` and `documents/Edit.vue`: picking a barcode suggestion gives "C003192158, C003192314, ";
+  placeholders updated. The server already splits on commas and spaces (`DocumentService::save`), so no backend change.
+- **Fixed on Edit:** `linked_documents` arrives as an array (model cast) and the page called `.trim()` on it; it is now
+  shown as comma-separated text.
+- Checks: ESLint ✅; Prettier ✅ on the new file; build ✅. Browser (intake page): two suggestions picked in a row gave
+  `C003192158, C003192314, `. Edit page not opened in the browser.
+
+### 2026-10-28 — Intake form: numbered steps, confidential and upload first (Claude Code, uncommitted)
+- **Why (user request):** Records should see straight away whether a document is confidential and whether it needs
+  an upload, and read the form as one continuous flow.
+- `resources/js/pages/documents/Index.vue`: the form is now six numbered steps — 1 Is it confidential? (highlighted
+  checkbox card) → 2 Attach the scanned document → 3 Document details → 4 Sender (Source Type/Location moved here) →
+  5 Subject → 6 Send to + Save. The header "AI Autofill" button and the bottom attachment input are merged into one
+  drop zone in step 2 (click or drag; PDF/JPG/PNG): it attaches the file and, unless "Fill the form automatically
+  from the file (AI)" is unticked, runs the same OCR + AI analysis as before (`analyzeFile`, was
+  `handleFileUpload`). The attached-file card shows reading / "AI filled the form" / a "Fill the form with AI"
+  button. Confidential replaces step 2 with a "Skipped" note. The route hint turns amber and points to step 2 when
+  paperless has no file. Access Code moved to the header. No server change.
+- Checks: ESLint ✅; build ✅. Browser (seeded Records Manager): steps render, confidential toggles step 2, steps 4–6
+  shown. **AI upload not re-run in the browser** (same analysis code as before).
+- **Compacted the same day (user: whole form in one screen, no scrolling):** steps 1 and 2 side by side (one-line
+  confidential card, one-line drop zone, "AI autofill" toggle in step 2's heading); 4-column grids — details: Barcode,
+  Document Type, Classification / Transaction Type, Route, Delivery Method, Linked Doc/s; sender: Source Type,
+  Source Location, Gender / Source Name, Contact, Email; subject textarea without a visible label (sr-only);
+  Direct to, chosen offices and Save on one row. Smaller labels (`text-xs`) and inputs (`py-1`). The form and the
+  documents table are now 6/6 columns (was 5/7). Measured at 1366×768: the form ends at 672 px, so it fits without
+  scrolling. ESLint ✅.
+- **Sizes restored (user: "too compact", keep the layout):** the grid layout stays, but labels are back to `text-sm`,
+  inputs to `py-1.5`, gaps to 12 px, step numbers to 20 px, hints to `text-xs`, and the Subject label is visible
+  again. Measured at the user's 1913×950 browser viewport: the form ends at 839 px, so it still fits without
+  scrolling (at 1366×768 it will scroll a little). ESLint ✅.
+
+### 2026-10-26 — Email Settings page (Claude Code, uncommitted)
+- **Why (user request):** set the SMTP account in the app like the old DTS "E-Mail Setting" page, without editing
+  `.env`. **Rule exception approved by the user** and recorded in `CLAUDE.md` (Security).
+- Migration `2026_10_26_010000_create_mail_settings_table` (**run locally** with `--path`, on its own). Model
+  `MailSetting` (`password` uses the `encrypted` cast with APP_KEY and is `$hidden`; `updated_by`).
+  `MailSettingsService`: `apply()` overrides `mail.mailers.smtp.*` + `mail.from` and purges the cached mailer (port
+  465 → `smtps`, else STARTTLS); `.env` values apply while no row exists or if the table cannot be read (logged);
+  `save()` keeps the saved password when the field is blank; `sendTest()`.
+- Applied on every web request (`AppServiceProvider::boot`, skipped in console so migrations work) and at the start
+  of `NotifyClientOfStatus` (a long-running `queue:work` would otherwise keep the old account).
+- Routes `mail-settings.edit/update/test` in the `role:system_administrator` group + FormRequests
+  `MailSettingRequest`, `SendTestMailRequest` (both also check active System Administrator). Controller
+  `Settings\MailSettingController`; a failed test shows the SMTP error under the field and logs it.
+- Page `resources/js/pages/mail-settings/Index.vue` (Administration → **Email Settings**, System Administrator only):
+  host, port, account, password (never pre-filled; "leave blank to keep"), sender name and email, last saved by/at,
+  and a "Send a test email" box. Before the first save it shows the `.env` values.
+- Checks: Pest 159 passed (1465 assertions; new `MailSettingsTest`, 6 cases: access, encryption at rest, password
+  never in props, blank keeps, override incl. port 465, test-mail error/success); Pint ✅; ESLint ✅; Prettier ✅;
+  Ziggy regenerated; build ✅. Browser: page renders for the seeded System Administrator with the `.env` values and the
+  sidebar link active. **Not saved and no email sent** (user will enter a new app password first).
+
+### 2026-10-26 — Client status email; cleaner sidebar (Claude Code, uncommitted)
+- **Why (user request):** the old DTS had an "E-Mail Setting" page; the user added Gmail SMTP to `.env` and wants the
+  client told the latest status by email (SMS later). The SMTP form was **not** rebuilt: credentials stay in `.env`
+  (project rule). The user pasted the Gmail app password in chat — advised to revoke it and create a new one.
+- New `ClientStatusService::latest()` (the one status a client may see: "Received by the Records Section", "Being
+  processed at the {office}", "For approval of the City Administrator/Mayor", "Completed"; null when deactivated),
+  queued job `NotifyClientOfStatus` (3 tries; atomically claims the new status in `documents.client_notified_status`
+  so only real changes are emailed and two workers never both send; a failed send releases the claim and is logged),
+  mailable `ClientStatusUpdate` + `resources/views/mail/client-status-update.blade.php` (barcode, subject — omitted
+  for confidential documents — status, Manila time). Dispatched after commit from `DocumentWorkflow::mutate()` (every
+  change to an existing document) and from intake (`DocumentService::save` create) via
+  `DocumentWorkflow::notifyClient()`; a queueing error is logged and never fails the workflow step.
+- Migration `2026_10_26_000000_add_client_notified_status_to_documents_table` (**pending locally**; plain
+  `php artisan migrate` would also run the pending `drop_approved_routing_slip` migration meant for after the reset,
+  so either do the reset first or run `php artisan migrate --path=database/migrations/2026_10_26_000000_add_client_notified_status_to_documents_table.php`).
+- Needs a running queue worker (`QUEUE_CONNECTION=database`): `composer dev` runs one; production needs
+  `php artisan queue:work`. `MAIL_FROM_NAME` is `${APP_NAME}` = "Laravel" locally — set a real sender name.
+  `MAIL_ENCRYPTION` is not read by Laravel 12 (port 587 uses STARTTLS automatically).
+- SMS not built: needs a provider (e.g. Semaphore or a Globe/Smart gateway), its API key in `.env`, and a decision on
+  cost per message. `ClientStatusService` is ready to reuse for it and for the client barcode lookup.
+- **Sidebar:** `AppSidebar.vue` + `NavMain.vue` rewritten: labelled sections Documents / Approvals / Administration
+  (registries listed flat, no Settings dropdown), current page highlighted in the header blue with a left bar and
+  `aria-current`, distinct icons, same role rules as before. `NavItem` lost the unused `roles`/`items`; new `NavSection`.
+- Checks: Pest 153 passed (1424 assertions; new `ClientStatusEmailTest`, 6 cases); Pint ✅ on changed PHP; ESLint ✅ and
+  Prettier ✅ on the sidebar files; build ✅. Browser: signed in as the seeded System Administrator; sections,
+  active highlight (Dashboard, Departments) and collapsed icon mode checked. **No real email sent yet.**
 
 ### 2026-10-23 — Dashboard details from the old DTS (Claude Code, uncommitted)
 - `DashboardController` + `Dashboard.vue`: **year picker** (first document's year to this year; unknown years fall

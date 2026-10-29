@@ -6,7 +6,11 @@ use App\Models\Department;
 use App\Models\Document;
 use App\Models\DocumentTrail;
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
+use Throwable;
 
 class TransactionService
 {
@@ -18,26 +22,70 @@ class TransactionService
      */
     public function process(Document $document, User $user, array $data): void
     {
-        $this->workflow->mutate($document, $user, null, 'process', function (Document $document, User $user) use ($data) {
-            $office = (int) $user->department_id;
-            if ($this->workflow->primaryOffice($document) !== $office) {
-                throw ValidationException::withMessages(['document' => 'Your office no longer holds the Primary copy of this document. Refresh the page.']);
+        $signedFile = null;
+        try {
+            $this->workflow->mutate($document, $user, null, 'process', function (Document $document, User $user) use ($data, &$signedFile) {
+                $office = (int) $user->department_id;
+                if ($this->workflow->primaryOffice($document) !== $office) {
+                    throw ValidationException::withMessages(['document' => 'Your office no longer holds the Primary copy of this document. Refresh the page.']);
+                }
+                $signature = $this->headSignature($user, $data, $signedFile);
+
+                if ($data['action'] === 'end') {
+                    $this->workflow->release($document, $user, 'End Transaction', null, $data['remarks'], null, $signature, $office);
+                    $this->workflow->closeCopies($document, $user, 'Closed with document');
+                    $document->fill(['status' => 'Completed', 'completed_at' => now('Asia/Manila'), 'current_assignee_id' => null]);
+
+                    return;
+                }
+
+                $targets = $this->workflow->targets((array) $data['routed_to'], $office, 'routed_to');
+                $primary = (int) ($data['primary_office_id'] ?? $targets[0]);
+                $this->workflow->release($document, $user, 'Routed', $primary, $data['remarks'], null, ['released_to_offices' => $targets, ...$signature], $office);
+                $from = $user->department?->code ?? 'Previous Office';
+                $this->workflow->distribute($document, $user, $targets, $primary, 'Routed from '.$from, 'Copy from '.$from);
+            });
+        } catch (Throwable $exception) {
+            if ($signedFile) {
+                Storage::disk('local')->delete($signedFile);
             }
-            $signer = $this->workflow->signer($user, (bool) ($data['attach_signature'] ?? false), true);
+            throw $exception;
+        }
+    }
 
-            if ($data['action'] === 'end') {
-                $this->workflow->release($document, $user, 'End Transaction', null, $data['remarks'], $signer, [], $office);
-                $this->workflow->closeCopies($document, $user, 'Closed with document');
-                $document->fill(['status' => 'Completed', 'completed_at' => now('Asia/Manila'), 'current_assignee_id' => null]);
-
-                return;
+    /**
+     * Paper route: the Department Head's wet signature is recorded on the release (signer + "physical"), with an
+     * optional scan of the signed page. No e-signature image is applied.
+     */
+    private function headSignature(User $user, array $data, ?string &$signedFile): array
+    {
+        if (! ($data['head_signed'] ?? false)) {
+            return [];
+        }
+        $signature = ['trail_type' => 'approval', 'signed_by' => $this->workflow->departmentHeadSigner($user), 'signature_mode' => 'physical'];
+        if (($data['signed_scan'] ?? null) instanceof UploadedFile) {
+            $signedFile = $data['signed_scan']->store('signed-documents', 'local');
+            if (! $signedFile) {
+                throw new RuntimeException('The signed scan could not be saved.');
             }
+            $signature['signed_file_path'] = $signedFile;
+        }
 
-            $targets = $this->workflow->targets((array) $data['routed_to'], $office, 'routed_to');
-            $primary = (int) ($data['primary_office_id'] ?? $targets[0]);
-            $this->workflow->release($document, $user, 'Routed', $primary, $data['remarks'], $signer, ['released_to_offices' => $targets], $office);
-            $from = $user->department?->code ?? 'Previous Office';
-            $this->workflow->distribute($document, $user, $targets, $primary, 'Routed from '.$from, 'Copy from '.$from);
+        return $signature;
+    }
+
+    /** The Primary office logs receipt (who and when); routing or ending it is a later, separate step. */
+    public function receive(Document $document, User $user): void
+    {
+        $this->workflow->mutate($document, $user, null, 'receive', function (Document $document, User $user) {
+            $entry = DocumentTrail::where('document_id', $document->id)->where('department_id', $user->department_id)
+                ->where('copy_role', DocumentTrail::PRIMARY)->whereNull('released_at')->whereNull('received_by')
+                ->lockForUpdate()->latest('id')->first();
+            if (! $entry) {
+                throw ValidationException::withMessages(['document' => 'Your office has already received this document. Refresh the page.']);
+            }
+            // received_action keeps how it arrived (e.g. "Routed from ADM"); received_at becomes the actual receipt time.
+            $entry->fill(['received_by' => $user->id, 'received_at' => now('Asia/Manila')])->save();
         });
     }
 

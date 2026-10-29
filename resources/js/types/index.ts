@@ -12,8 +12,11 @@ export interface NavItem {
     href: string;
     icon?: any;
     isActive?: boolean;
-    roles?: string[];
-    items?: NavItem[]; // <-- Add this line to allow nested dropdowns
+}
+
+export interface NavSection {
+    label: string;
+    items: NavItem[];
 }
 
 export interface SharedData {

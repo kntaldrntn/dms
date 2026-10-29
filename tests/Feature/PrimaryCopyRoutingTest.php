@@ -99,7 +99,9 @@ test('Records or the Supervisory Level can change the Primary office and the old
     $this->actingAs($this->primaryStaff)->postJson(route('transactions.process', $document), [
         'workflow_version' => $document->workflow_version, 'action' => 'end', 'remarks' => 'Not mine anymore',
     ])->assertForbidden();
-    $this->actingAs($this->copyStaff)->postJson(route('transactions.process', $document), [
+    // The new Primary receives it first, then acts.
+    $this->actingAs($this->copyStaff)->postJson(route('transactions.receive', $document))->assertRedirect();
+    $this->postJson(route('transactions.process', $document), [
         'workflow_version' => $document->workflow_version, 'action' => 'end', 'remarks' => 'Done',
     ])->assertRedirect()->assertSessionHasNoErrors();
     expect($document->fresh()->status)->toBe('Completed');

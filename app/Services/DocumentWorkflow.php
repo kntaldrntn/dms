@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\NotifyClientOfStatus;
 use App\Models\Department;
 use App\Models\Document;
 use App\Models\DocumentTrail;
@@ -10,6 +11,7 @@ use Closure;
 use Illuminate\Database\DetectsConcurrencyErrors;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -25,7 +27,7 @@ class DocumentWorkflow
      */
     public function mutate(Document $document, User $user, ?int $version, string $ability, Closure $change): Document
     {
-        return $this->transaction(function () use ($document, $user, $version, $ability, $change) {
+        $document = $this->transaction(function () use ($document, $user, $version, $ability, $change) {
             $document = Document::query()->lockForUpdate()->findOrFail($document->id);
             $user = User::query()->lockForUpdate()->findOrFail($user->id);
             Gate::forUser($user)->authorize($ability, $document);
@@ -39,6 +41,29 @@ class DocumentWorkflow
 
             return $document;
         });
+        $this->notifyClient($document);
+
+        return $document;
+    }
+
+    /**
+     * Queue the client's status email; the job sends only when the client-visible status changed.
+     * Runs after the change is saved, so a mail problem never undoes or fails the workflow step.
+     */
+    public function notifyClient(Document $document): void
+    {
+        if (! $document->email) {
+            return;
+        }
+        try {
+            NotifyClientOfStatus::dispatch($document->id)->afterCommit();
+        } catch (Throwable $exception) {
+            Log::warning('Client status email could not be queued.', [
+                'document_id' => $document->id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+        }
     }
 
     private function transaction(Closure $change): Document
@@ -187,18 +212,19 @@ class DocumentWorkflow
         };
     }
 
-    public function signer(User $user, bool $requested, bool $allowDepartmentHead = false): ?int
+    /**
+     * Paper route: the office's Department Head signed the paper copy by hand; staff record it. A Department Head
+     * recording it is the signer themself.
+     */
+    public function departmentHeadSigner(User $user): int
     {
-        if (! $requested) {
-            return null;
-        }
-        $signer = $allowDepartmentHead && $user->role === 'staff'
-            ? User::where('department_id', $user->department_id)->where('role', 'department_head')->where('state', 1)->lockForUpdate()->first()
-            : $user;
-        if (! $signer?->signature_path) {
-            throw ValidationException::withMessages(['attach_signature' => 'The signing user must upload a digital signature first.']);
+        $head = $user->role === 'department_head'
+            ? $user
+            : User::where('department_id', $user->department_id)->where('role', 'department_head')->where('state', 1)->first();
+        if (! $head) {
+            throw ValidationException::withMessages(['head_signed' => 'Your office has no active Department Head account to record as signer.']);
         }
 
-        return $signer->id;
+        return $head->id;
     }
 }

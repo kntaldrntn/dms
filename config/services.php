@@ -44,4 +44,9 @@ return [
         'max_text_characters' => 9000,
     ],
 
+    // Paperless (PNPKI) route. Off = hybrid paper route like the old DTS: wet signatures, staff record approvals.
+    'paperless' => [
+        'enabled' => (bool) env('DMS_PAPERLESS_ENABLED', false),
+    ],
+
 ];
