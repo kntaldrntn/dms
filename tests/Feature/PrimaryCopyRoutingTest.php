@@ -82,7 +82,12 @@ test('Records or the Supervisory Level can change the Primary office and the old
     $this->actingAs($this->copyStaff)->postJson(route('documents.primary-office', $this->document), ['primary_office_id' => $this->copyOffice->id])
         ->assertForbidden();
 
-    $head = User::factory()->create(['role' => 'department_head', 'department_id' => $this->copyOffice->id]);
+    // The Supervisory Level corrects only documents endorsed to them: the copy office's head may not.
+    $copyHead = User::factory()->create(['role' => 'department_head', 'department_id' => $this->copyOffice->id]);
+    $this->actingAs($copyHead)->postJson(route('documents.primary-office', $this->document), ['primary_office_id' => $this->copyOffice->id])
+        ->assertForbidden();
+
+    $head = User::factory()->create(['role' => 'department_head', 'department_id' => $this->primaryOffice->id]);
     $this->actingAs($head)->postJson(route('documents.primary-office', $this->document), ['primary_office_id' => $this->copyOffice->id])
         ->assertRedirect()->assertSessionHasNoErrors();
 

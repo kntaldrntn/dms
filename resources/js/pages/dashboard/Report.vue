@@ -7,6 +7,8 @@ defineProps<{
     dateRange: string;
     rows: Array<{
         id: number;
+        /** Confidential and this user is Workstation staff: the server left the details out. */
+        details_hidden: boolean;
         date: string;
         barcode: string;
         document_code: string | null;
@@ -80,7 +82,8 @@ const printReport = () => window.print();
                     <tr v-for="row in rows" :key="row.id" class="break-inside-avoid">
                         <td :class="[cell, 'text-center']">{{ row.date }}</td>
                         <td :class="[cell, 'text-center']">
-                            <Link :href="route('documents.show', row.id)" class="text-blue-600 hover:underline">{{ row.barcode }}</Link>
+                            <span v-if="row.details_hidden">{{ row.barcode }}</span>
+                            <Link v-else :href="route('documents.show', row.id)" class="text-blue-600 hover:underline">{{ row.barcode }}</Link>
                         </td>
                         <td :class="[cell, 'text-center']" :title="row.document_type ?? undefined">{{ row.document_code || row.document_type }}</td>
                         <td :class="[cell, 'text-center']">{{ row.source_type }}</td>

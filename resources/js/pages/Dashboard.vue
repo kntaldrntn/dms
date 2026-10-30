@@ -19,6 +19,8 @@ const props = defineProps<{
     years: number[];
     transactionCategories: string[];
     processingCategory: string;
+    /** The Workstation user's own office; null when the dashboard covers every office. */
+    scope: { code: string; name: string } | null;
     summaryCards: Array<any>;
     delinquent: any;
     pipeline: Array<any>;
@@ -97,6 +99,12 @@ const toneClass: Record<string, string> = {
                         Generate
                     </button>
                 </div>
+                <p class="text-sm text-slate-500">
+                    <template v-if="scope">
+                        Showing <span class="font-semibold text-slate-700">{{ scope.name }}</span> only
+                    </template>
+                    <template v-else>Showing all offices</template>
+                </p>
             </div>
 
             <!-- Top Summary Cards -->

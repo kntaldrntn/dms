@@ -72,14 +72,18 @@ test('inactive users cannot read or mutate document workflows', function () {
     $this->postJson(route('transactions.process', $this->document), ['workflow_version' => 0, 'action' => 'end', 'remarks' => 'Done'])->assertForbidden();
 });
 
-test('active users can view the document registry while transactions remain department-scoped', function () {
-    $this->actingAs($this->staff)->get(route('documents.show', $this->document))->assertOk();
-    $this->getJson(route('documents.searchBarcodes', ['q' => 'WF']))->assertJsonPath('0.barcode', 'WF-001');
-    $this->get(route('documents.index'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 1)->where('canCreate', false));
+test('Workstation staff see only documents their office has handled, and transact only what it holds', function () {
+    // Still at Records: another office's staff cannot see it anywhere.
+    $this->actingAs($this->staff)->get(route('documents.show', $this->document))->assertForbidden();
+    $this->getJson(route('documents.searchBarcodes', ['q' => 'WF']))->assertExactJson([]);
+    $this->get(route('documents.index'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 0)->where('canCreate', false));
     $this->get(route('transactions.inbox'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 0));
 
     $this->document->update(['department_id' => $this->target->id]);
     $this->trail->update(['department_id' => $this->target->id]);
+    $this->get(route('documents.show', $this->document))->assertOk();
+    $this->getJson(route('documents.searchBarcodes', ['q' => 'WF']))->assertJsonPath('0.barcode', 'WF-001');
+    $this->get(route('documents.index'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
     $this->get(route('transactions.inbox'))->assertInertia(fn (Assert $page) => $page->has('documents.data', 1));
 
     $this->document->update(['state' => 0]);
@@ -215,13 +219,14 @@ test('reassignment appends custody history without rewriting the original office
     $this->assertDatabaseCount('document_trails', 2);
 });
 
-test('creation without a destination retains records custody', function () {
-    $payload = [...$this->data, 'barcode' => 'NEW', 'department_id' => null];
-    $this->actingAs($this->records)->postJson(route('documents.store'), $payload)->assertRedirect()->assertSessionHasNoErrors();
-    $created = Document::where('barcode', 'NEW')->firstOrFail();
-    expect($created->department_id)->toBe($this->recordsOffice->id);
-    expect($created->trails()->count())->toBe(1);
-    expect($created->workflow_version)->toBe(0);
+test('creation without a destination, or to the registering office itself, is refused', function () {
+    $this->actingAs($this->records)->postJson(route('documents.store'), [...$this->data, 'barcode' => 'NEW', 'department_id' => null, 'routed_to' => []])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['routed_to' => 'Choose where the document goes: the City Administrator, the City Mayor, or at least one department.']);
+    $this->postJson(route('documents.store'), [...$this->data, 'barcode' => 'NEW', 'department_id' => $this->recordsOffice->id])
+        ->assertUnprocessable()->assertJsonValidationErrors(['department_id' => 'Choose an office other than your own.']);
+
+    expect(Document::where('barcode', 'NEW')->exists())->toBeFalse();
 });
 
 test('every existing-document mutation requires the version from the form', function () {

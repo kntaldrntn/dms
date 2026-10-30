@@ -81,10 +81,21 @@ class SaveDocumentRequest extends FormRequest
         ];
     }
 
-    /** FGD rulebook checks that depend on the selected document type. */
+    /** Intake destination, then the FGD rulebook checks that depend on the selected document type. */
     public function after(): array
     {
         return [function (Validator $validator) {
+            // A new document must leave intake with a destination: one left in the registering office reaches
+            // no inbox and pings nobody (user decision 2026-10-30).
+            if (! $this->route('document') && ! $validator->errors()->hasAny(['department_id', 'routed_to'])) {
+                $target = $this->integer('department_id');
+                if (! $target && empty($this->input('routed_to'))) {
+                    $validator->errors()->add('routed_to', 'Choose where the document goes: the City Administrator, the City Mayor, or at least one department.');
+                } elseif ($target && $target === (int) $this->user()?->department_id) {
+                    $validator->errors()->add('department_id', 'Choose an office other than your own.');
+                }
+            }
+        }, function (Validator $validator) {
             $type = DocumentType::with('classifications:id')->find($this->integer('document_type_id'));
             if (! $type || $validator->errors()->hasAny(['is_confidential', 'route_mode'])) {
                 return;

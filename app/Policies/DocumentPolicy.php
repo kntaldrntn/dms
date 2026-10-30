@@ -92,15 +92,38 @@ class DocumentPolicy
                 ->whereNull('released_at')->whereNull('received_by')->exists();
     }
 
-    /** Records and the Supervisory Level may correct a wrong Primary office. */
+    /**
+     * FGD (user decision 2026-10-30): Records and the System Administrator may correct any document; the
+     * Supervisory Level sees every document but corrects only those endorsed to them (their office holds the
+     * Primary copy — for the City Administrator/Mayor, while it waits at ADM/OCM).
+     */
+    private function corrects(User $user, Document $document): bool
+    {
+        if ($user->state !== 1 || ! $user->department()->where('state', 1)->exists()) {
+            return false;
+        }
+
+        return in_array($user->role, self::RECORDS_ROLES, true)
+            || (in_array($user->role, self::SUPERVISORY_ROLES, true) && $this->owns($user, $document));
+    }
+
+    /** Records and the Supervisory Level (endorsed documents only) may correct a wrong Primary office. */
     public function changePrimary(User $user, Document $document): bool
     {
-        return $user->state === 1
-            && in_array($user->role, [...self::RECORDS_ROLES, ...self::SUPERVISORY_ROLES], true)
-            && $user->department()->where('state', 1)->exists()
+        return $this->corrects($user, $document)
             && $document->trails()->where('copy_role', DocumentTrail::PRIMARY)->whereNull('released_at')->exists()
             // Moving the Primary office would drop a pending approval without anyone approving it.
             && ! $document->inExecutiveStage();
+    }
+
+    /**
+     * Only Records, the System Administrator and the Supervisory Level (endorsed documents only) may change a
+     * document's category (Simple / Complex / Highly Technical), which moves its due date.
+     */
+    public function changeCategory(User $user, Document $document): bool
+    {
+        return $this->corrects($user, $document)
+            && $document->state === 1 && $document->status !== 'Completed';
     }
 
     /** ADM Approvals queue: every active ADM user (they receive), plus system administrators. */

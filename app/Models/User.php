@@ -62,6 +62,15 @@ class User extends Authenticatable
     /** Roles that approve and sign documents with their own PNPKI certificate. */
     public const SIGNER_ROLES = ['city_administrator', 'city_mayor', 'department_head', 'system_administrator'];
 
+    /** FGD slide 9: the System Administrator, Records and the Supervisory Level see every document. */
+    public const SEES_ALL_DOCUMENTS_ROLES = ['system_administrator', 'records_manager', 'city_administrator', 'city_mayor', 'department_head'];
+
+    /** Anyone in the Records office counts as Records; everyone else is Workstation staff (own department only). */
+    public function seesAllDocuments(): bool
+    {
+        return in_array($this->role, self::SEES_ALL_DOCUMENTS_ROLES, true) || $this->department?->code === 'REC';
+    }
+
     public function hasValidCertificate(): bool
     {
         return $this->certificate_path !== null && $this->certificate_valid_until?->isFuture() === true;

@@ -29,8 +29,9 @@ class DashboardReportController extends Controller
         } elseif ($category && array_key_exists($pipeline, DashboardReportService::PIPELINES)) {
             $year = $request->year();
             $month = $request->monthNumber();
-            $documents = $reports->pipelineQuery($year, $month, $category, $pipeline)->with($with)->latest()->get();
-            $title = DashboardReportService::PIPELINES[$pipeline].' '.$category.' Documents';
+            $documents = $reports->pipelineQuery($year, $month, $category, $pipeline, $request->user())->with($with)->latest()->get();
+            $title = DashboardReportService::PIPELINES[$pipeline].' '.$category.' Documents'
+                .($reports->seesAllDepartments($request->user()) ? '' : ' (Your Office)');
             $start = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Manila');
             $dateRange = $start->format('m/d/Y').' to '.$start->copy()->endOfMonth()->format('m/d/Y');
         } else {
@@ -40,22 +41,28 @@ class DashboardReportController extends Controller
         return Inertia::render('dashboard/Report', [
             'title' => $title,
             'dateRange' => $dateRange,
-            'rows' => $documents->map(fn (Document $document) => [
-                'id' => $document->id,
-                // created_at is real UTC; the report reads in Manila time.
-                'date' => $document->created_at->copy()->setTimezone('Asia/Manila')->format('M. d, Y'),
-                'barcode' => $document->barcode,
-                'document_code' => $document->documentType?->document_code,
-                'document_type' => $document->documentType?->document_type,
-                'source_type' => ['External' => 'EXT', 'Internal' => 'INT'][$document->source_type] ?? $document->source_type,
-                'source_name' => $document->source_name,
-                'gender' => $document->gender,
-                'contact_no' => $document->contact_no,
-                'email' => $document->email,
-                'subject_matter' => $document->subject_matter,
-                'department' => $document->department?->code,
-                'total_days' => round($reports->totalDays($document), 2),
-            ])->all(),
+            'rows' => $documents->map(function (Document $document) use ($reports, $request) {
+                // Workstation reports count their office's confidential documents but never show their details.
+                $hidden = $document->detailsHiddenFrom($request->user());
+
+                return [
+                    'id' => $document->id,
+                    'details_hidden' => $hidden,
+                    // created_at is real UTC; the report reads in Manila time.
+                    'date' => $document->created_at->copy()->setTimezone('Asia/Manila')->format('M. d, Y'),
+                    'barcode' => $document->barcode,
+                    'document_code' => $document->documentType?->document_code,
+                    'document_type' => $document->documentType?->document_type,
+                    'source_type' => ['External' => 'EXT', 'Internal' => 'INT'][$document->source_type] ?? $document->source_type,
+                    'source_name' => $hidden ? null : $document->source_name,
+                    'gender' => $hidden ? null : $document->gender,
+                    'contact_no' => $hidden ? null : $document->contact_no,
+                    'email' => $hidden ? null : $document->email,
+                    'subject_matter' => $hidden ? 'Confidential document' : $document->subject_matter,
+                    'department' => $document->department?->code,
+                    'total_days' => round($reports->totalDays($document), 2),
+                ];
+            })->all(),
             'generatedBy' => $request->user()->name,
             'generatedOn' => $today->format('M d, Y'),
         ]);

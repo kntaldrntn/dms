@@ -45,9 +45,6 @@ type Holder = { id: number; code: string; name: string };
 const holdersOf = (doc: any): Holder[] => (doc.holders?.length ? doc.holders : doc.department ? [doc.department] : []);
 const holderCodes = (doc: any) => holdersOf(doc).map((office) => office.code || office.name).join(', ') || 'Exec.';
 const holderNames = (doc: any) => holdersOf(doc).map((office) => office.name).join(', ');
-// Only the Primary office acts on a document; offices with a view-only copy cannot route it.
-const holdsCopy = (doc: any, officeId: number) =>
-    holdersOf(doc).some((office: any) => office.id === officeId && (office.pivot?.copy_role ?? 'primary') === 'primary');
 
 const searchTerm = ref(props.filters?.search || '');
 let searchTimeout: ReturnType<typeof setTimeout>;
@@ -322,7 +319,21 @@ const stepClass = 'mb-1.5 flex items-center gap-2 text-xs font-semibold uppercas
 const stepNumberClass = 'flex h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] font-semibold text-white';
 const routeNeedsFile = computed(() => form.route_mode === 'paperless' && !form.attached_file);
 
+const NO_DESTINATION = 'Choose where the document goes: the City Administrator, the City Mayor, or at least one department.';
+watch(
+    () => form.routed_to.length,
+    (count) => {
+        if (count) form.clearErrors('routed_to');
+    },
+);
+
 function submitDocument() {
+    // Same rule as the server: a document never stays in the registering office with nowhere to go.
+    if (directTo.value === 'departments' && !form.routed_to.length) {
+        form.setError('routed_to', NO_DESTINATION);
+        notyf.error('Choose at least one department.');
+        return;
+    }
     form.transform((data) =>
         directTo.value === 'departments' ? { ...data, department_id: null } : { ...data, routed_to: [], primary_office_id: null },
     ).post(route('documents.store'), {
@@ -330,7 +341,8 @@ function submitDocument() {
         onSuccess: () => {
             form.reset();
             directTo.value = 'ADM';
-            form.access_code = Math.random().toString(36).substring(2, 8).toUpperCase();
+            // The server makes each code with a secure random generator; the reloaded page carries the next one.
+            form.access_code = props.generatedAccessCode;
             executiveSuggestion.value = null;
             aiMetrics.value = null;
             analysisError.value = '';
@@ -650,7 +662,7 @@ function submitDocument() {
                                         >{{ index < form.routed_to.length - 1 ? ', ' : '' }}
                                     </template>
                                 </span>
-                                <span v-else class="text-sm text-slate-500">No departments chosen</span>
+                                <span v-else class="text-sm" :class="form.errors.routed_to ? 'text-red-600' : 'text-slate-500'">No departments chosen</span>
                                 <button
                                     type="button"
                                     class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
@@ -729,9 +741,9 @@ function submitDocument() {
                                     <td class="px-4 py-2.5 whitespace-nowrap text-slate-600">{{ doc.source_name }}</td>
                                     <td class="px-4 py-2.5 whitespace-nowrap">
                                         <p :class="doc.status === 'Completed' ? 'text-emerald-700' : 'text-slate-700'">{{ doc.status || 'Pending' }}</p>
-                                        <!-- Where it is now; Records can route it only when no approval is pending and Records is Primary -->
+                                        <!-- Where it is now (not shown once completed, or while this office can route it) -->
                                         <p
-                                            v-if="pendingApprovalLabels[doc.stage] || !holdsCopy(doc, $page.props.auth.user.department_id)"
+                                            v-if="doc.status !== 'Completed' && (pendingApprovalLabels[doc.stage] || !doc.can_route)"
                                             class="text-xs text-slate-500"
                                             :title="holderNames(doc)"
                                         >
@@ -745,10 +757,11 @@ function submitDocument() {
                                         </p>
                                     </td>
                                     <td class="px-4 py-2.5 whitespace-nowrap">
-                                        <!-- Same-size buttons, centered: Route (only when Records may route it), then Edit -->
+                                        <!-- Same-size buttons, centered; the server decides which actions this user may take -->
+
                                         <div class="flex items-center justify-center gap-1.5">
                                             <button
-                                                v-if="!pendingApprovalLabels[doc.stage] && holdsCopy(doc, $page.props.auth.user.department_id)"
+                                                v-if="doc.can_route"
                                                 type="button"
                                                 :class="iconButtonClass"
                                                 title="Route"
@@ -758,7 +771,13 @@ function submitDocument() {
                                                 <FastForward class="h-4 w-4" aria-hidden="true" />
                                             </button>
 
-                                            <Link :href="route('documents.edit', doc.id)" :class="iconButtonClass" title="Edit" aria-label="Edit document">
+                                            <Link
+                                                v-if="doc.can_edit"
+                                                :href="route('documents.edit', doc.id)"
+                                                :class="iconButtonClass"
+                                                title="Edit"
+                                                aria-label="Edit document"
+                                            >
                                                 <Pencil class="h-4 w-4" aria-hidden="true" />
                                             </Link>
                                         </div>

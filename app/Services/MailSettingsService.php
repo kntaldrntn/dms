@@ -54,12 +54,26 @@ class MailSettingsService
         Mail::purge('smtp');
     }
 
-    /** A blank password keeps the saved one, so the page never needs to send it back to the browser. */
+    /** The MAIL_PASSWORD from .env, used when the first save leaves the password blank. */
+    public function envPassword(): ?string
+    {
+        $password = config('mail.mailers.smtp.password');
+
+        return is_string($password) && $password !== '' ? $password : null;
+    }
+
+    /**
+     * A blank password keeps the saved one (or, before the first save, takes the .env one), so the page never
+     * needs to send a password to the browser.
+     */
     public function save(array $data, User $user): MailSetting
     {
         $setting = $this->current() ?? new MailSetting;
         if (($data['password'] ?? '') === '') {
             unset($data['password']);
+            if (! $setting->exists) {
+                $data['password'] = $this->envPassword();
+            }
         }
         $setting->fill([...$data, 'updated_by' => $user->id])->save();
 

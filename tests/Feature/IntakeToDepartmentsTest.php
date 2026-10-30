@@ -77,13 +77,18 @@ test('a confidential document goes to one department only', function () {
     expect(Document::firstOrFail()->department_id)->toBe($this->ict->id);
 });
 
-test('editing a registration cannot route it to departments', function () {
-    // Kept by Records (no target), so Records may still edit the registration.
-    registerTo([])->assertSessionHasNoErrors();
-    $document = Document::firstOrFail();
-    expect($document->department_id)->toBe($this->recordsOffice->id);
+test('intake without a destination is refused', function () {
+    registerTo([])->assertSessionHasErrors(['routed_to' => 'Choose where the document goes: the City Administrator, the City Mayor, or at least one department.']);
 
-    $this->put(route('documents.update', $document), [
+    expect(Document::count())->toBe(0);
+});
+
+test('editing a registration cannot route it to departments', function () {
+    // Held by Records (e.g. an office routed it back), so Records may edit the registration.
+    $document = Document::create([...collect($this->payload)->except(['route_mode', 'is_confidential'])->all(), 'department_id' => $this->recordsOffice->id]);
+    $document->trails()->create(['department_id' => $this->recordsOffice->id, 'received_at' => now('Asia/Manila'), 'received_action' => 'Returned to Records']);
+
+    $this->actingAs($this->records)->put(route('documents.update', $document), [
         ...$this->payload, 'workflow_version' => $document->workflow_version,
         'routed_to' => [$this->ict->id], 'primary_office_id' => $this->ict->id,
     ])->assertSessionHasErrors(['routed_to', 'primary_office_id']);

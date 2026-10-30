@@ -12,6 +12,9 @@ const props = defineProps<{
     // Primary office first; the others hold view-only copies.
     holders: Array<{ id: number; code: string; name: string; pivot?: { copy_role: 'primary' | 'copy' } }>;
     canChangePrimary: boolean;
+    /** Records, the System Administrator and the Supervisory Level may change the category. */
+    canChangeCategory: boolean;
+    categories?: Array<{ id: number; name: string; processing_days: number }>;
     /** Linked barcodes that resolve to a document the user may open (barcode => id). */
     linkedDocumentIds: Record<string, number>;
     offices?: Array<{ id: number; code: string; name: string }>;
@@ -23,6 +26,14 @@ const copyHolders = computed(() => props.holders.filter((office) => office.pivot
 const primaryForm = useForm({ primary_office_id: '' as number | '' });
 function changePrimary() {
     primaryForm.post(route('documents.primary-office', props.document.id), { preserveScroll: true, onSuccess: () => primaryForm.reset() });
+}
+
+const categoryForm = useForm({ transaction_type_id: '' as number | '' });
+function changeCategory() {
+    // The version the page was loaded with: a stale tab is refused instead of overwriting a newer change.
+    categoryForm
+        .transform((data) => ({ ...data, workflow_version: props.document.workflow_version }))
+        .post(route('documents.category', props.document.id), { preserveScroll: true, onSuccess: () => categoryForm.reset('transaction_type_id') });
 }
 
 // `open` = this office still holds its copy (trail received but not yet released).
@@ -330,9 +341,39 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                             <dt class="font-semibold text-slate-700">Date End:</dt>
                             <dd class="text-slate-800">{{ formatDateStr(document.due_date) }}</dd>
                         </template>
-                        <template v-if="document.transaction_type?.name">
+                        <template v-if="document.transaction_type?.name || (canChangeCategory && categories)">
                             <dt class="font-semibold text-slate-700">Transaction Type:</dt>
-                            <dd class="text-slate-800">{{ document.transaction_type.name }}</dd>
+                            <dd class="text-slate-800">
+                                {{ document.transaction_type?.name }}
+                                <form v-if="canChangeCategory && categories" class="mt-1 flex flex-wrap items-center gap-2" @submit.prevent="changeCategory">
+                                    <label for="transaction_type_id" class="sr-only">Change category</label>
+                                    <select
+                                        id="transaction_type_id"
+                                        v-model="categoryForm.transaction_type_id"
+                                        required
+                                        aria-describedby="transaction_type_hint transaction_type_error"
+                                        class="rounded-lg border border-slate-300 px-2 py-1 text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                    >
+                                        <option value="" disabled>Change category...</option>
+                                        <option v-for="category in categories.filter((c) => c.id !== document.transaction_type_id)" :key="category.id" :value="category.id">
+                                            {{ category.name }} ({{ category.processing_days }} days)
+                                        </option>
+                                    </select>
+                                    <button
+                                        type="submit"
+                                        :disabled="categoryForm.processing || !categoryForm.transaction_type_id"
+                                        class="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-50"
+                                    >
+                                        Change
+                                    </button>
+                                    <span id="transaction_type_hint" class="w-full text-[11px] text-slate-500">Date End is recalculated from Date Start.</span>
+                                    <InputError
+                                        id="transaction_type_error"
+                                        class="w-full"
+                                        :message="categoryForm.errors.transaction_type_id || (categoryForm.errors as Record<string, string>).workflow_version"
+                                    />
+                                </form>
+                            </dd>
                         </template>
                         <template v-if="document.document_type?.document_type">
                             <dt class="font-semibold text-slate-700">Document Type:</dt>

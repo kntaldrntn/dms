@@ -2,350 +2,467 @@
 
 > Persistent handoff file. Read before continuing work; update at milestones, before
 > handoff, and before `/compact`. Mark facts as **verified** only with evidence.
-> Feature-level health is tracked separately by the user in `status.md`.
+> This file is the single source of project and feature status (user decision 2026-10-30); `status.md` is
+> outdated (2026-10-09) and is disregarded.
 
-Last updated: 2026-10-26 (client status email; sidebar sections). Sections 5 and 7 predate FGD Phase 2 — see the change log.
+Last updated: 2026-10-30 (sections 1–9 rewritten to match the code; client tracking; dashboard by department;
+category change by role; list buttons by permission; intake requires a destination; city seal in emails).
 
 ---
 
 ## 1. Overview
 
-Internal Document Management / Tracking System for the City of San Fernando (Philippines).
-Records staff register incoming documents by barcode (optionally AI-assisted from a scanned
-first page), route them to departments, and every hand-off is logged in a custody trail.
-Documents addressed to the City Administrator (`ADM`) go through a referral-slip approval;
-documents for the City Mayor (`OCM`) get a visible stamp + certificate-based PDF signature.
-A dashboard reports SLA/delinquency metrics by month and transaction category.
+Internal Document Management / Tracking System for the City of San Fernando, La Union (Philippines), built around
+the FGD process (focus group discussion deck, see §6).
 
-## 2. Verified stack (2026-10-13)
+1. **Records intake:** Records registers each incoming document by barcode, optionally with AI autofill from the
+   scanned file (OCR in the browser, extraction on the server). The document-type rulebook sets the category,
+   allowed classifications and route (paper/paperless). Records picks **Direct to**: City Administrator (ADM),
+   City Mayor (OCM) or Departments (one **Primary** office + view-only copies).
+2. **Executive approvals:** ADM and OCM staff **Receive**, then record the executive's approval (paper route: any
+   office user records it, optional scan of the wet-signed copy). ADM routes on to OCM or departments; OCM routes
+   to departments. Nothing goes back to Records.
+3. **Office processing:** the Primary office **Receives**, then **Processes** (Route to the next Primary + copies,
+   or End Transaction), optionally recording the Department Head's wet signature. Copy offices only receive and view.
+4. **Custody trail:** every hand-off is a `document_trails` row; the trail is never rewritten.
+5. **Monitoring:** dashboard with SLA cards (24 h delinquency per office, delay by category), printable reports.
+6. **Clients:** get one email with the barcode + access code and look up the **latest status only** on the sign-in
+   page (Guest tab). SMS later.
+
+The paperless route (PNPKI per-signer digital signatures, AI stamp placement) is built but **switched off**
+(`DMS_PAPERLESS_ENABLED`) until the paper route is settled. It is still a required feature (user, 2026-10-30): keep
+it working and tested, and design new approval work for both routes.
+
+## 2. Verified stack
 
 | Layer | Technology | Evidence |
 | --- | --- | --- |
-| Backend | Laravel 12.66.0, PHP 8.2.12 locally (CI uses 8.4) | `php artisan --version`, `php -v`, `.github/workflows` |
+| Backend | Laravel 12.66.0, PHP 8.2.12 locally (CI uses 8.4) | `php artisan --version`, `php -v` (2026-10-13) |
 | Frontend | Inertia 2, Vue 3.5, TypeScript 5, Vite 6, Tailwind 3, radix-vue/shadcn-style components, lucide icons, notyf toasts | `package.json`, `components.json` |
-| Routing helper | Ziggy (`resources/js/ziggy.js` is generated) | `composer.json`, CI step `ziggy:generate` |
-| DB | MySQL (`DB_CONNECTION=mysql`, db `dms`) locally via XAMPP; SQLite `:memory:` for tests | `.env`, `phpunit.xml` |
-| Queue / cache / session | `database` drivers | `.env` |
-| AI | `openai-php/laravel` — intake extraction (`DocumentIntakeAnalyzer`, default `gpt-6-luna`) and `gpt-4o-mini` vision for approval stamp placement | `DocumentIntakeAnalyzer`, `OcmApprovalController::findStampPlacement` |
+| Routing helper | Ziggy (`resources/js/ziggy.js` is generated; regenerate after route changes) | `composer.json` |
+| DB | MySQL (db `dms`) locally via XAMPP; SQLite `:memory:` for tests | `.env`, `phpunit.xml` |
+| Queue / cache / session | `database` drivers. **The queue needs a running worker** (emails) | `.env` |
+| Mail | SMTP (Gmail app password) from `.env`, overridable in Email Settings (`mail_settings`) | `MailSettingsService` |
+| AI | `openai-php/laravel`: intake extraction (`DocumentIntakeAnalyzer`, default `gpt-6-luna`, effort `none`); `gpt-4o-mini` vision for stamp placement (paperless only) | `config/services.php`, `OcmApprovalController` |
 | Client-side OCR/scan | tesseract.js, pdfjs-dist, @zxing (barcode) | `package.json` |
-| PDF | barryvdh/laravel-dompdf (referral slips); setasign/fpdi-tcpdf + tecnickcom/tcpdf (OCM signed PDFs); smalot/pdfparser | `composer.json` |
+| PDF | setasign/fpdi-tcpdf + tecnickcom/tcpdf (approval stamps + PNPKI signatures); smalot/pdfparser; barryvdh/laravel-dompdf (installed but unused since referral slips were removed; no reference in `app/`, `routes/`, `config/` or views, checked 2026-10-30) | `composer.json` |
 | Tests | Pest 3 + pest-plugin-laravel; `RefreshDatabase` on Feature tests | `tests/Pest.php` |
-| Node | v26.8.1 / npm 12.0.2 locally (CI uses Node 22) | `node -v` |
+| Node | v26.8.1 / npm 12.0.2 locally (CI uses Node 22) | `node -v` (2026-10-13) |
 
-Unknown / unverified: production hosting, production DB engine/version, whether the queue
-worker is used in production, mail configuration.
+Unknown / unverified: production hosting, production DB engine/version, how the queue worker will run in production.
 
 ## 3. Architecture
 
-Request flow: **route → middleware (`auth`, `verified`, `role:`, `working_hours`) → controller →
-FormRequest (authorize + rules) → service → `DocumentWorkflow` → models/trails.**
+Request flow: **route → middleware (`auth`, `verified`, `role:`, `working_hours`) → controller → FormRequest
+(authorize + rules) → service → `DocumentWorkflow` → models/trails.**
 
 ### Key backend modules
 
 | Path | Responsibility |
 | --- | --- |
-| `routes/web.php` | Document, referral, OCM, transaction, dashboard, and admin-registry routes. Processing routes are inside `working_hours` (Mon–Fri 08:00–17:00 Asia/Manila; system admins bypass). Admin registries require `role:system_administrator`. |
-| `app/Services/DocumentWorkflow.php` | Core concurrency/custody engine. `mutate()` locks document + user, authorizes via policy, rejects inactive/completed docs (409), checks `workflow_version`, increments it, retries deadlocks up to 3×. Also `targets()`, `office(code)`, `release()`, `receive()`, `signer()`. |
-| `app/Services/DocumentService.php` | Create/update/deactivate. On create, `ADM` target → custody moves REC → ADM with `requires_signature_from=city_administrator`; `OCM` target → custody moves to OCM with `requires_signature_from=city_mayor`; other targets → direct dispatch. Cleans up uploaded file on failure. |
-| `app/Services/DispatchService.php`, `TransactionService.php` | Records dispatch (records every target in `released_to_offices`) and per-office inbox processing: each holding office ends or routes its own copy; the document completes when no open copy remains. |
-| `app/Services/IncomingDocumentService.php` | Notification-bell data: open trail entries at the user's office with `received_by` null, filtered to the stages the user's role acts on. Shared lazily as `incoming`. |
-| `app/Services/AdmApprovalService.php`, `OcmApprovalService.php` | FGD executive approvals: ADM receive → City Administrator single approval → OCM or departments; OCM approval (returns to Records until Phase 3). Both stamp via `PdfApprovalStampService` with the signer's own PNPKI certificate (`SigningCertificateService`). Referral slips were retired in Phase 2d. |
-| `app/Services/PdfApprovalStampService.php` | Stamps the uploaded PDF with a visible signature block and signs it with the certificate from `config/digital-certificate.php`; writes to `storage/app/private/signed-documents` (local disk). Original upload untouched. |
-| `app/Services/DocumentIntakeAnalyzer.php` | Live intake AI (called by `DocumentController::analyze()`): OCR text only (pages 1, 2, last) → strict JSON schema whose ids come from the registries + the type rulebook; answer re-checked server-side (allowed classification, default category, one Primary office, ADM/OCM excluded from routing). Model: `config('services.intake_ai.model')`. |
-| `app/Services/ClientStatusService.php`, `app/Jobs/NotifyClientOfStatus.php` | The client-visible latest status, and the queued email sent when it changes (after every `mutate()` and intake). |
-| `app/Services/DocumentAnalysisService.php` | **Unused** older copy of the intake prompt (prompt reference: `basis.md`); not wired to any route. |
-| `app/Policies/DocumentPolicy.php` | All document abilities: `viewAny`, `view`, `create`, `update`, `delete`, `dispatch`, `process`, `viewReferrals`, `viewOcmApprovals`, `refer`, `signReferral`, `viewReferralSlip`. Ownership = user's department equals document's current department. |
-| `app/Http/Requests/*` | `SaveDocumentRequest`, `DispatchDocumentRequest`, `ProcessDocumentRequest`, `ReceiveAdmDocumentRequest`, `ApproveAdmDocumentRequest`, `ApproveOcmDocumentRequest`, `AnalyzeDocumentRequest`, `Settings/SigningCertificateRequest`, `DocumentMutationRequest` (base: requires `workflow_version`). |
-| `app/Http/Controllers/DashboardController.php` | Invokable; SLA/delinquency/to-do metrics and drill-down. Delinquency is all-departments for `ALL_DEPARTMENT_ROLES`, otherwise the user's held documents. |
-| `app/Http/Middleware` | `HandleRoles` (`role:` alias), `CheckWorkingHours`, `TrackUserActivity`, `HandleInertiaRequests` (shares `auth.user`, `auth.canViewReferrals`, lazy `incoming`). |
-| `app/Models` | `Document` (computed `is_delayed`, `is_delinquent`; `holders()` = offices with an open copy; `scopeHeldBy`; `EXECUTIVE_STAGES`), `DocumentTrail`, `Department`, `User`, registries (`DocumentType`, `TransactionType`, `DocumentClassification`, `DeliveryMethod`, `PerformanceStandard`), `AuditLog`, `LoginHistory`. Active/inactive uses integer `state` (1/0). |
+| `routes/web.php` | Documents, transactions (Office Inbox), ADM/OCM approvals, dashboard + report, registries, settings. Processing routes sit in `working_hours` (Mon–Fri 08:00–17:00 Asia/Manila; system admins bypass). `users` and Email Settings: `role:system_administrator`; other registries: `role:system_administrator,records_manager`. |
+| `routes/auth.php` | Login/password routes (guest) + the **public** `POST /track` client lookup (user-approved exception, see CLAUDE.md). `/register` still exists (known issue). |
+| `app/Services/DocumentWorkflow.php` | Core concurrency/custody engine. `mutate()` locks document + user, authorizes via policy, rejects inactive/completed docs (409), checks `workflow_version`, increments it, retries deadlocks up to 3×. Also `targets()`, `office(code)`, `release()`, `receive()`, `distribute()` (Primary + copies), `openOffices()`, `closeCopies()`, `executiveStageFor()`, `departmentHeadSigner()`. |
+| `app/Services/DocumentService.php` | Create/update/deactivate. Create: ADM/OCM target → custody moves there with the approval stage; Departments → `distribute()`; queues the tracking-code email. Update queues it again when the client email is added/changed. Deletes the uploaded file on failure. |
+| `app/Services/TransactionService.php`, `DispatchService.php` | Office Inbox: `receive()` (Primary must receive before acting), `process()` (route/end, wet-signature record), `receiveCopy()`, `changePrimary()`. Records' Route button uses `dispatch`. |
+| `app/Services/AdmApprovalService.php`, `OcmApprovalService.php` | Receive + approve for each executive stage; paper: optional signed scan (`local` disk); paperless: `PdfApprovalStampService`. ADM → OCM or departments; OCM → departments. |
+| `app/Services/PdfApprovalStampService.php`, `SigningCertificateService.php` | Paperless only: stamp + PNPKI-sign with the **signer's own** `.p12` (`certificates` disk, `users/{id}.p12`; PIN typed at each signing, never stored). Output in `storage/app/private/signed-documents`. |
+| `app/Services/DocumentIntakeAnalyzer.php` | Intake AI (called by `DocumentController::analyze()`): OCR text of pages 1, 2, last → strict JSON with registry ids + rulebook; re-checked server-side; People Directory name match. |
+| `app/Services/IncomingDocumentService.php` | Notification bell: open trail entries not yet received at the user's office, per stage/role. Shared lazily as `incoming`. |
+| `app/Services/ClientStatusService.php` | The one status a client may see (`latest()`), and `track(barcode, access code)` for the public lookup (constant-time code compare; never the trail). |
+| `app/Jobs/SendTrackingCode.php`, `app/Mail/DocumentTrackingCode.php` | Queued email with barcode + access code (+ subject unless confidential) and a link to `/login?tab=track`; the city seal is embedded inline. `resources/views/vendor/mail/html/{header,message}.blade.php` override the framework's email header/footer for every email (city name instead of the Laravel logo). |
+| `app/Services/MailSettingsService.php` | Email Settings: applies the saved SMTP row (encrypted password) over `.env` per request and in mail jobs; a blank first save takes `MAIL_PASSWORD` from `.env`. |
+| `app/Services/DashboardReportService.php` | Dashboard card sets + printable reports (`dashboard.report`). |
+| `app/Console/Commands/ResetDocuments.php` | `php artisan dms:reset-documents [--dry-run] [--force]` — deletes all documents, trails and their files (run once on 2026-10-30). |
+| `app/Services/DocumentAnalysisService.php` | **Unused** older copy of the intake prompt (known issue). |
+| `app/Policies/DocumentPolicy.php` | `viewAny`, `view`, `create`, `update`, `delete`, `dispatch`, `process`, `receive`, `receiveCopy`, `changePrimary`, `changeCategory`, `viewAdmApprovals`, `receiveAdm`, `approveAdm`, `viewOcmApprovals`, `receiveOcm`, `approveOcm`. Ownership = the office holding the open **Primary** trail entry. `view` uses `Document::visibleTo()` (Workstation: own office's documents, never confidential); `changePrimary`/`changeCategory`: Records roles any document, Supervisory endorsed only. Who sees everything: `User::seesAllDocuments()`. |
+| `app/Http/Middleware` | `HandleRoles` (`role:`), `CheckWorkingHours`, `TrackUserActivity`, `HandleInertiaRequests` (shares `auth.user`, `auth.canViewAdmApprovals`, `auth.canViewOcmApprovals`, `features.paperless`, lazy `incoming`). |
+| `app/Models` | `Document` (`is_delayed`, `is_delinquent`, `stage`, `primaryEntry()`, `holders()`, `scopeHeldBy`, `scopeCopiedTo`, `isPaperless()`), `DocumentTrail` (`stage`, `copy_role`, `STAGE_*`), `Department`, `User` (`certificate_*`), `MailSetting`, `Person`, registries (`DocumentType` + rulebook, `TransactionType`, `DocumentClassification`, `DeliveryMethod`, `PerformanceStandard`), `AuditLog`, `LoginHistory`. Active/inactive = integer `state` (1/0). |
 
 ### Roles (string column `users.role`)
-`system_administrator`, `records_manager`, `city_administrator`, `city_mayor`,
-`department_head`, `staff`.
+`system_administrator`, `records_manager`, `city_administrator`, `city_mayor`, `department_head`, `staff`.
+FGD mapping (confirmed 2026-10-22): Supervisory = `city_administrator`, `city_mayor`, `department_head`;
+Workstation = `staff`; Records Section = users in the `REC` office.
 
 ### Department codes the code depends on
-`REC` (Records), `ADM` (City Administrator), `OCM` (Office of the City Mayor). Exactly one
-active department per code is required (`DocumentWorkflow::office()`).
+`REC` (Records), `ADM` (City Administrator), `OCM` (Office of the City Mayor). Exactly one active department per code
+(`DocumentWorkflow::office()`).
 
 ### Custody model
-Custody = open trail entries (`released_at IS NULL`). A multi-office dispatch gives every target office
-its own copy (`Document::holders`). `documents.department_id` is only the primary office (first target or the
-latest office a copy moved to). Inbox, `process`/`update` ownership, "Currently with", and the bell all use the trail.
+Custody = open trail entries (`released_at IS NULL`). Each open entry has `copy_role` (`primary` or `copy`) and, on
+the Primary entry, an optional `stage` (`adm_approval`, `ocm_approval`; null = normal processing). Only the office
+holding the open Primary entry acts, and only after it has **received** (`received_by`); copies close when the
+Primary ends the document. `documents.department_id` is always the Primary office. Delinquency counts the Primary only.
+
+### Client tracking
+Intake (or an Edit that adds/changes the email) queues `SendTrackingCode`. The client enters barcode + access code on
+`/login` → Guest tab → `POST /track` (5 wrong tries per IP, then a wait; one message for every miss) → the result is
+flashed once to the page: latest status, as-of time, barcode, received time, subject unless confidential. Access
+codes are made on the server (`Str::random(6)`, uppercased).
 
 ### Frontend
-`resources/js/app.ts` boots Inertia; pages resolve from `resources/js/pages/**`.
-Feature pages: `documents/{Index,Show,Edit}`, `transactions/Index`, `adm-approvals/Index`, `ocm-approvals/Index`, `settings/Certificate`,
-`ocm-approvals/Index`, `Dashboard`, admin registries (`departments`, `users`,
-`document-types`, `transaction-types`, `document-classifications`, `delivery-methods`,
-`performance-standards`), `settings/*`, `auth/*`. Shared: `components/` (app shell,
-`RoutingModal`, `DeleteConfirmationModal`, `InputError`) and `components/ui/*`
-(generated primitives; ESLint-ignored). Alias `@` → `resources/js`.
+`resources/js/app.ts` boots Inertia; pages resolve from `resources/js/pages/**`. Alias `@` → `resources/js`.
+- Pages: `documents/{Index,Show,Edit}` (intake form + list, detail + trail, edit), `transactions/Index` (Office Inbox),
+  `adm-approvals/Index`, `ocm-approvals/Index`, `Dashboard`, `dashboard/Report`, `mail-settings/Index`,
+  `settings/{Profile,Password,Appearance,Certificate}`, registries (`departments`, `users`, `people`, `document-types`,
+  `transaction-types`, `document-classifications`, `delivery-methods`, `performance-standards`), `auth/*`
+  (`Login` has the Employee / Guest tabs).
+- Shared components: `AppSidebar`/`NavMain` (sections Documents / Approvals / Administration), `OfficePicker`,
+  `RoutingModal`, `ApprovalDialog` (ADM + OCM), `DeleteConfirmationModal`, `InputError`; `components/ui/*` generated
+  primitives (ESLint-ignored).
+- `lib/intakeScan.ts` (OCR + barcode), `lib/linkedDocuments.ts`, `lib/stampPlacement.ts`;
+  `composables/useIntakeRulebook.ts`.
 
 ## 4. Setup & commands
 
 ```bash
 composer install && npm install
-cp .env.example .env && php artisan key:generate   # then set DB_* (MySQL), OPENAI_API_KEY
+cp .env.example .env && php artisan key:generate   # then set DB_* (MySQL), OPENAI_API_KEY, MAIL_*
 php artisan migrate
-php artisan storage:link                            # public/storage symlink (exists locally)
-composer dev                                        # artisan serve + queue:listen + vite
+php artisan storage:link
+composer dev            # artisan serve + queue:listen + vite
 ```
 
-Env vars beyond Laravel defaults: `OPENAI_API_KEY`, `OPENAI_ORGANIZATION`,
-`DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD` (read by `config/digital-certificate.php`; **not yet
-listed in `.env.example`**). Certificate files expected in `storage/app/certificates/`.
+**How the user runs it locally (2026-10-30):** `php artisan serve --host=192.168.4.33 --port=8000` and `npm run dev`
+separately, which starts **no queue worker** — emails wait in the `jobs` table. Run `php artisan queue:work` as well
+(or use `composer dev`). In production the worker must run permanently (e.g. a Windows service / Task Scheduler).
 
-`vite.config.ts` hard-codes `hmr.host: 192.168.4.47` (LAN dev); change locally if your IP differs.
+Env vars beyond Laravel defaults (all in `.env.example`): `OPENAI_API_KEY`, `OPENAI_ORGANIZATION`,
+`DMS_INTAKE_AI_MODEL` (empty = `gpt-6-luna`), `DMS_INTAKE_AI_REASONING_EFFORT` (empty = `none`),
+`DMS_PAPERLESS_ENABLED` (empty = off). `APP_URL` is used for the link in the tracking-code email — it is
+`http://192.168.4.33:8000` locally and must be the public address in production.
+`DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD` in the local `.env` is no longer read (per-signer certificates replaced it).
 
-### Check results (run 2026-10-13, check-only modes, no files modified)
+`vite.config.ts` sets `hmr.host: 192.168.4.33` (LAN dev; the working tree has the user's uncommitted edit). The
+in-app preview `.claude/launch.json` (`dms-local`) serves on 127.0.0.1:8001.
+
+### Check results (run 2026-10-30, check-only modes)
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Tests | `./vendor/bin/pest` | ✅ 64 passed, 407 assertions (6.8 s) |
-| ESLint | `npx eslint .` | ❌ 1 error: unused `props` in `resources/js/pages/ocm-approvals/Index.vue:13` |
-| Prettier | `npx prettier --check resources/` | ❌ 23 files need formatting |
-| Type check | `npx vue-tsc --noEmit` | ❌ TS2688: cannot find type definitions `./resources/js/types` and `vue/tsx` (tsconfig `compilerOptions.types`) |
-| Pint | `./vendor/bin/pint --test` | ❌ ~60 files with style violations (pre-existing, widespread) |
-| Build | `npm run build` | Not run this session (status.md reports it passing on 2026-10-09) |
+| Tests | `./vendor/bin/pest` | ✅ 205 passed, 2170 assertions (re-run after the visibility rules) |
+| ESLint | `npx eslint .` | ✅ no errors |
+| Prettier | `npx prettier --check resources/` | ❌ 20 files need formatting (pre-existing) |
+| Type check | `npx vue-tsc --noEmit` | ❌ TS2688: cannot find type definition `./resources/js/types` (tsconfig `compilerOptions.types`) |
+| Pint | `./vendor/bin/pint --test` | ❌ 65 files (10 of them only CRLF line endings in the working copy; git normalizes on commit) |
+| Build | `npm run build` | ✅ |
 
-⚠️ `npm run lint` = `eslint . --fix` and `npm run format` = `prettier --write`; both modify files.
-CI (`.github/workflows/lint.yml`) runs Pint/format/lint in **fix** mode, so it does not fail
-on style.
+⚠️ `npm run lint` = `eslint . --fix` and `npm run format` = `prettier --write`; both modify files. CI
+(`.github/workflows/lint.yml`) runs Pint/format/lint in **fix** mode, so it does not fail on style.
 
-## 5. Current status
+## 5. Current status (2026-10-30)
 
-Branch `main`. The referral-slip AI pre-fill fix is committed locally but **not pushed** (push when ready).
-Everything before it is pushed (`2cb71ea` bell + delinquency scope + holders, `eb09eda` multi-office custody +
-Released To, `75f4c3b` two-step referral). Migrations to run on other environments:
-`2026_10_13_000000_add_signature_mode_to_document_trails_table`,
-`2026_10_14_000000_add_released_to_offices_to_document_trails_table` (includes a data backfill). The latest fix needs
-no migration.
-Checks before the latest commit: Pest 71 passed (708 assertions), ESLint on changed Vue files OK, `npm run build` OK,
-Pint on changed test/request OK.
+- Branch `main`, in sync with `origin/main` at `69ff0f8`. **Uncommitted (all of 2026-10-30, see §10):** Email
+  Settings `.env` password fallback; client tracking (tracking-code email, `/track`, Guest tab, status-change emails
+  removed, migration `2026_10_30_000000_drop_client_notified_status_from_documents_table`); documentation refresh;
+  dashboard scoped to the own department for Workstation staff; category change limited to Records/Sys
+  Admin/Supervisory; Edit/Route buttons shown only where allowed; intake requires a destination; city seal in emails.
+  The user's own uncommitted `package-lock.json` and `vite.config.ts` changes are untouched.
+- Migrations: all applied locally (`migrate:status`, 2026-10-30). Other environments need everything from
+  `2026_10_21_*` onward, in order.
+- Fresh-data reset **done** (2026-10-30, by the user). The local database then held 1 test document (C003192158,
+  routed through OCM to CBO and Completed by the end of the day) and the `mail_settings` table is empty (the `.env`
+  SMTP account is in use).
 
-### Implementation status
-- Completed (automated tests pass, 71/71): intake/registration, dispatch, processing, two-step ADM
-  referral (generate → Department Head E-/Physical signature → Records), OCM custody + approval,
-  stale-form protection, rollback on failure, dashboard metrics.
-- Unverified in a browser: notification bell + Receive modal, role-scoped delinquency card, multi-office
-  inbox behaviour, OCM PDF signing in a PDF reader, stale-form UX in two tabs. (User walked the two-step
-  referral with E-Signature through to dispatch on 2026-10-14.)
-- `DatabaseSeeder` now creates one Department Head (`<code>.dh@gmail.com`) and one Staff (`<code>.staff@gmail.com`)
-  per office, password `password`. Run `php artisan db:seed` locally to get them (not run yet). Note: re-seeding also
-  resets the four executive/admin accounts' passwords to `password` and their office (existing seeder behaviour).
+### Verified by the user in the browser
+- 2026-10-30, as reported by the user ("all worked"): receive-first Office Inbox, ADM receive + recorded approval,
+  OCM receive + recorded approval → departments, Department Head wet-signature record, AI autofill with real scans,
+  notification bell, stale-form protection, clickable linked documents, change Primary office. (The old status-change
+  email was also on that list; it has since been replaced.)
+- 2026-10-30: tracking-code email received (after the queue was run) and the Guest tab lookup showed the latest
+  status for the real document.
+- 2026-10-30, checked by Claude Code in the preview (Records Manager): no Edit/Route on a document Records does not
+  hold or a completed one; intake with Departments and no office is blocked before saving. The email with the seal
+  was previewed only (built in memory, not sent).
+- Earlier: intake rulebook form (2026-10-21), dashboard + printable reports (2026-10-23), sidebar (2026-10-26),
+  Email Settings page render (2026-10-26/30).
 
-### FGD process transition (started 2026-10-21; Phases 0–1 pushed at `79f08d8`; Primary/copy routing pushed at `e7e0768` on 2026-10-22; next: Phase 2)
+### Built but switched off or unverified
+- Paperless route (PNPKI per-signer signing, AI stamp placement): off; real PNPKI `.p12` files never opened under
+  OpenSSL 3 and no signed PDF checked in a PDF reader.
+- Delete document: button hidden at the user's request; backend unchanged.
+- Email Settings save + test email: not exercised with a real account (the `.env` account sends today).
+- Dashboard office scope and the Change category control (2026-10-30): seen in the browser as the Records Manager
+  ("Showing all offices"; control present) and as CHO staff ("Showing Office of the City Health Officer only").
+- Confidential documents hidden from Workstation staff (2026-10-30): tests only; the local database has no
+  confidential document to look at. Seen as CHO staff: an empty documents list and 403 on a document CHO never held.
+
+## 6. FGD process (reference)
 
 Source: Google Slides "Document Management Focus Group Discussion" (presentationId
-`1re2mVrRkyyvndW1gAm3F6DvMXTyrgjYDKDS0AzLelno`), slides 5–9 (workflows, RBAC) and 13–16 (FGD answers).
-Checkpoint before the transition: commit `8f59dea` (Pest 74 passed, 816 assertions).
+`1re2mVrRkyyvndW1gAm3F6DvMXTyrgjYDKDS0AzLelno`), slides 5–9 (workflows, RBAC) and 13–16 (FGD answers); rulebook in
+the Google Sheet "Document Management System Sheets" (`1monsI2DhgNCQoWd9Kuam-KBMM5Es3XJAyfjEuFJ2OfQ`).
 
-**User decisions (2026-10-21):** City Administrator gives a single approval (no slip generate + ADM Dept Head
-signature); paperless vs paper route comes from the Document Type (Records may override); start with fresh
-document data (keep offices, users, registries); no migration of in-flight documents.
+**Phases:** 0 rulebook + 24 h delinquency ✅ · 1 confidential + route mode ✅ · 2 stages, intake Direct to, ADM single
+approval, per-signer PNPKI, referral slips retired, reset command ✅ · 3 OCM routes to departments ✅ (2026-10-29) ·
+4 receiving office: receive-first ✅, Dept Head wet-signature record ✅, Dept Head PNPKI ⏸ (with paperless) ·
+5 monitoring: 24 h per Primary ✅, ADM delinquency tagging ❌, delayed-by-category view ❌ · 6 later: client status
+lookup ✅ (2026-10-30), office-scoped visibility ✅ (2026-10-30), SMS ❌, spreadsheet reports ❌.
 
-**FGD decisions already in the deck:** 24 h delinquency per office for now (CC timeline review later, by CART);
-delayed = end-to-end beyond the category limit (Simple 3 / Complex 7 / Highly Technical 20 days, RA 11032);
-ADM monitors and tags delinquency; confidential documents are tagged at intake, get no AI assist and no upload;
-ADM/OCM route directly to the concerned departments (not back to Records); supervisory level can change the
-category; external clients see the latest status only.
+**Decisions (user, 2026-10-21 → 2026-10-30):**
+- City Administrator gives a single approval (no referral slip; removed entirely). ADM/OCM route directly to
+  departments, never back to Records.
+- Paper first, like the old DTS (2026-10-29): office staff record the executives' approvals; the signed scan is
+  optional; paperless hidden behind `DMS_PAPERLESS_ENABLED`. When paperless returns: paperless only when the type is
+  signed Digital **and** the document is not confidential; signers use their own PNPKI `.p12` (uploaded by the
+  signer in Settings → Signing certificate; PIN typed each time, never stored).
+- Proxy e-signature replaced by a wet-signature record by any staff of the office (2026-10-29).
+- Delinquency: 1440 minutes (24 h) per office, Primary office only; per-office/type calibration in
+  `performance_standards` pending CART's Citizen's Charter review. Delayed = end-to-end beyond the category limit
+  (Simple 3 / Complex 7 / Highly Technical 20 days, RA 11032).
+- Primary office + view-only copies (2026-10-22): Records picks the Primary (AI pre-selected); Records or the
+  Supervisory Level may change it; confidential documents get no copies; copies close with the Primary.
+- Confidential = Yes on a type means *may be* confidential: Records ticks it per document; confidential documents
+  get no AI assist and no upload, and client emails/lookups omit the subject.
+- Clients (slide 13; user 2026-10-30): one email (SMS later) with barcode + access code; they see the latest status
+  only, on the sign-in page. No email per status change.
+- Fresh start of document data (done 2026-10-30); offices, users, registries kept.
+- Email Settings stores the SMTP account in the app (exception to the `.env`-only rule, 2026-10-26).
+- Dashboard (slide 9; user 2026-10-30): System Administrator, Records (role `records_manager` or anyone in the `REC`
+  office) and the Supervisory Level see every office; Workstation staff see their own department on every card and
+  report.
+- Category (user 2026-10-30): only Records, the System Administrator and the Supervisory Level may change it.
+- Visibility (user 2026-10-30): Supervisory = City Administrator, City Mayor, Department Heads. The Supervisory Level
+  **sees** every document but **transacts and corrects** (category, Primary office) only documents endorsed to them
+  (their office holds the Primary copy; for the City Administrator/Mayor, while it waits at ADM/OCM). Records and the
+  System Administrator correct any document. Workstation staff see only documents their office has handled.
+- Confidential (user 2026-10-30, "Records only"): only Records, the System Administrator and the Supervisory Level
+  see a confidential document's details. The office it is routed to still receives, routes or ends it, from the
+  paper copy: its inbox, approval queue, bell and reports show the barcode and "Confidential document" only.
 
-**Keep as-is:** `DocumentWorkflow` (mutate/locks/`workflow_version`/release/receive), multi-office copies and
-`holders`, trail table, notification bell, intake AI + barcode/OCR, `PdfApprovalStampService`, registries.
+**RBAC (deck slide 9):**
+| Capability | Sys Admin | Records Section | Supervisory | Workstation | External client |
+| --- | --- | --- | --- | --- | --- |
+| User management | ✔ | | | | |
+| System settings & registries | ✔ | ✔ | | | |
+| Document registration (barcode, scan, AI form) | ✔ | ✔ | | | |
+| Dashboard | all offices | all offices | all offices | own department | |
+| View transactions | all | all | all | own department | |
+| Transact | any document | any document | edit only if endorsed to them | own department | |
+| Executive approvals | ✔ | ✔ | sign / approve when endorsed | | |
+| Track document status | | | | | ✔ (latest status only) |
 
-**Phases** (each a separate, tested change):
-0. ✅ **Done 2026-10-21** — Document Type rulebook (`signature_type`, `may_be_confidential`,
-   `default_transaction_type_id`, `rulebook_remarks`) + classification-per-type pivot, seeded from the sheet and
-   editable in the registry; 1440-min delinquency default; registries opened to Records (users stay Sys Admin).
-   The "category" already exists per document as `transaction_type_id` (Simple 3 / Complex 7 / HT 20 days), so no
-   new category column. Document fields and the stage refactor moved to Phases 1–2, where they are first used.
-1. ✅ **Done 2026-10-21** — document `is_confidential` + `route_mode`; rulebook enforced server-side and mirrored
-   on the intake/edit forms (see change log). Intake routing (ADM/OCM/direct) and the fresh-data reset were left for
-   Phase 2, because Phase 2 rewrites those flows and the old documents still work under Phase 1.
-2. **Plan (2026-10-23, awaiting user approval of the defaults below), one tested commit per step:**
-   - 2a. Explicit stage: migration adds `document_trails.stage` (null = normal processing, `adm_approval`,
-     `ocm_approval`) on the open Primary entry; queues, policy, inbox and bell read it instead of
-     `documents.requires_signature_from` (kept read-only until 2d, then dropped in a new migration).
-   - 2b. Intake "Direct to": City Administrator, City Mayor, or Departments (Primary + copies picker reused from
-     `RoutingModal`, AI suggestions pre-ticked). ADM/OCM targets open the matching approval stage.
-   - 2c. ADM single approval: ADM staff receive (bell) → City Administrator **Approve & Route**: paperless =
-     PNPKI stamp via `PdfApprovalStampService`, paper = upload of the wet-signed scan → routes to OCM (stage
-     `ocm_approval`) or to departments (Primary + copies, AI suggestion pre-filled). Never back to Records.
-     **2c detail (2026-10-23, proposed):** new "ADM Approvals" page (sidebar; ADM users + Sys Admin) listing
-     `adm_approval` documents. (1) Any active ADM user clicks **Receive** → `received_by/at` on the ADM entry;
-     bell pings ADM users until received, then pings the City Administrator. (2) City Administrator **Approve &
-     Route** (only after receipt): target = OCM (opens `ocm_approval`) **or** departments (OfficePicker, AI
-     pre-ticked, Primary + copies); remarks optional. Paper route: upload of the wet-signed scan (PDF/JPG/PNG,
-     `local` disk `signed-documents/`, served by the existing authorized `previewSigned`). Paperless: PDF stamped
-     by `PdfApprovalStampService` (location/reason per office) with the placement logic moved from
-     `ocm-approvals/Index.vue` into `resources/js/lib/stampPlacement.ts`; `findStampPlacement` accepts ADM too.
-     Trail: release "Approved by City Administrator" (approval trail, `signed_file_path`), receive at targets.
-     Referral Slips page lists only legacy `adm_signature` documents until 2d. Still signs with the configured
-     certificate; **2c-2 (new step): per-signer PNPKI `.p12` + PIN** for ADM and OCM.
-   - 2d. Retire referral slips: `ReferralService::generate/sign`, `department_head` stage, Referral Slips page,
-     print/preview routes and template, `approved_routing_slip` use (old data is reset in 2e).
-   - 2e. Reset command `php artisan dms:reset-documents` (documents, trails, uploaded/signed files; keeps offices,
-     users, registries, people). Written and tested, **run only after the user confirms**. Then drop the unused
-     `documents.approved_routing_slip` column in a new migration.
-   - PNPKI per signer (default to confirm): each signer uploads their own `.p12` once to
-     `storage/app/certificates/users/{user_id}.p12` (local disk, never public); the PIN is typed at each
-     signing and never stored. Replaces the single Mayor certificate in `config/digital-certificate.php`.
-   Original scope note: Reset document data (fresh start, user-approved 2026-10-21; confirm before running). Intake target choice:
-   ADM, OCM or departments directly. Replace the overloaded `requires_signature_from` with an explicit stage per
-   open copy. ADM: ADM staff
-   receive (notified) → City Administrator approves (paperless: PNPKI stamp via
-   `PdfApprovalStampService`; paper: scan in signed copy) → routes to OCM or departments, AI suggestion pre-filled.
-   Retire referral-slip generate/sign.
-3. OCM: Mayor approves (exists) → routes directly to departments.
-4. Receiving office: Receiving Officer receives → Dept Head action if needed (PNPKI or wet sign + upload) →
-   final action + remarks → end or route to the next office.
-5. Monitoring: 24 h delinquency per open copy (fixes known issue #17); delayed by category; ADM views all.
-6. Later, pending FGD answers: client status lookup, email/SMS alerts, PDF/spreadsheet reports, office-scoped
-   visibility (security #4), classification-per-type filtering.
+**Rulebook answers (sheet tab *Rulebook*, ADM response):** Digital = Communications, Project Proposal (both
+Confidential = Yes); Handwritten = the other types except Permits (blank, "to be consulted"). Category: Simple = AOC,
+AIR/RIS, BAC Resolution, OBR, Permits, PO, PR; Complex = Payroll; Highly Technical = IPW; varies = Communications,
+Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, editable in Document Types.
 
-**Answers (user, 2026-10-21):**
-- **Delinquency:** 1440 minutes (24 h, counted per minute) per office for now; default replaces the current
-  7200-minute fallback in `Document::is_delinquent`. Per-office/type calibration stays in the `performance_standards`
-  registry, pending CART's review of the Citizen's Charter.
-- **RBAC:** follow deck slide 9 (the version in the memo). Matrix read from the slide image:
-  | Capability | Sys Admin | Records Section | Supervisory | Workstation | External client |
-  | --- | --- | --- | --- | --- | --- |
-  | User management | ✔ | | | | |
-  | System settings & registries | ✔ | ✔ | | | |
-  | Document registration (barcode, scan, AI form) | ✔ | ✔ | | | |
-  | Dashboard | all offices | all offices | all offices | own department | |
-  | View transactions | all | all | all | own department | |
-  | Transact | any document | any document | edit only if endorsed to them | own department | |
-  | Referral slips & OCM approvals | ✔ | ✔ | sign / approve when endorsed | | |
-  | Track document status | | | | | ✔ (latest status only) |
-  Assumed mapping (to confirm): Supervisory = `city_administrator`, `city_mayor`, `department_head`;
-  Workstation = `staff`; Records Section = users in the `REC` office (incl. `records_manager`); External client = no
-  account (barcode + access code lookup). Supervisory also may adjust the category (FGD slide 14).
-- **Document-type rulebook:** Google Sheet "Document Management System Sheets"
-  (`1monsI2DhgNCQoWd9Kuam-KBMM5Es3XJAyfjEuFJ2OfQ`), tab *Rulebook* (ADM response) — Route = Paperless only when
-  Signature = Digital **and** Confidential = No, else Paper. Current answers: Digital = Communications, Project
-  Proposal (both marked Confidential = Yes, so both still Paper); Handwritten = the other 10 except Permits
-  (blank, "to be consulted"). Category per type: Simple = AOC, AIR/RIS, BAC Resolution, OBR, Permits, PO, PR;
-  Complex = Payroll; Highly Technical = IPW ("with extension"); varies by content = Communications,
-  Disbursement Voucher (Simple for Petty Cash/AICS, Complex for procurement), Project Proposal (Complex or HT).
-  Confidential is blank for OBR, Payroll, PO, PR, Permits. Tab *Classifications* maps the 18 classifications to
-  types (Communications carries 17; Financial applies to 11 types; Special Mayor's Permit → Permits only).
-- **PNPKI signatories:** per slide 7 (and slide 3): the Department Head signs digitally with PNPKI unless the
-  document needs a wet signature; slide 3 also lists the City Administrator and the City Mayor.
+**Still open:** SMS provider and cost; Permits signature type.
 
-- **Client tracking (FGD slide 13, 2026-10-22):** clients see only the latest status of their document, never the
-  full trail. For confidential documents clients likewise see only the latest status, and only Records has access to
-  the document's data. (Open: whether "only Records" also limits what receiving offices can see inside the DMS.)
-- **Performance tracking (slide 13):** city-level records and reports for the Supervisory Level, Records and the
-  System Administrator only; every other department sees and reports on its own department's data only.
+## 7. Known issues, risks & technical debt
 
-**Built 2026-10-22 (committed and pushed as `e7e0768`; migration applied locally, verified 2026-10-22 with
-`migrate:status`): Primary office + view-only copies.** User accepted all eight defaults: Records picks the Primary (AI Primary
-pre-selected); Records or the Supervisory Level can change it (old Primary keeps a copy, logged as new trail entries);
-copy offices only receive (name + time) and view; copies close when the Primary ends the transaction; routing on makes
-the target Primary (with optional copies); delinquency counts the Primary only; confidential documents get no copies;
-the client status lookup (not built yet) shows the Primary only. See the change log entry of 2026-10-22.
-Original plan: When a document goes to
-several offices, only the **Primary** office can act on it (receive, act, end, route on); the others get a
-**view-only copy** they are notified of and can receive and view. This replaces the 2026-10-13 rule that every office
-gets its own actionable copy. Added to the FGD summary doc (Records Section + Open Items).
-Draft design (pending the user's answers, see the chat of 2026-10-22):
-- Schema: `document_trails.copy_role` enum('primary','copy') default 'primary' (new migration). `documents.department_id`
-  stays the Primary office, so existing consumers keep working.
-- Dispatch (`DispatchService`, `DispatchDocumentRequest`, `RoutingModal.vue`): new `primary_office_id`, which must be one
-  of `routed_to`; pre-selected from the AI suggestion marked Primary. The Primary gets a `primary` trail entry and the
-  others get `copy` entries. Phase 2's ADM/OCM routing reuses the same request.
-- Authorization (`DocumentPolicy::process` / `owns`): only the office holding the open `primary` entry may act. New
-  ability `receiveCopy` lets a copy office record receipt (`received_by`/`received_at`) without acting.
-- Inbox (`TransactionController` + `transactions/Index.vue`): a separate "Copies (view only)" list with a Receive
-  button; no Route/End. Bell (`IncomingDocumentService`): pings copy offices until they receive.
-- Completion (`TransactionService::process`): the document completes when the Primary office ends it; the copies are
-  closed with it or stay open, depending on the user's answer.
-- SLA: delinquency counts only the Primary office's open entry, which also resolves known issue #17.
-- Display: `holders` / Show.vue / documents list label each office Primary or Copy.
-- Tests: dispatch validation (primary must be a target), copy office cannot route/end, copy receive, completion, bell,
-  delinquency on the Primary only.
+**Security**
+1. Document attachments are stored on the `public` disk (`storage/app/public/documents`) and are reachable by URL
+   without signing in.
+2. ~~Every active user could see every active document, including confidential ones.~~ **Resolved 2026-10-30:**
+   `Document::scopeVisibleTo()` + `hideConfidentialDetailsFrom()` (see the change log). The signed-scan preview
+   (`documents.signed-pdf`) authorizes with `view`, so it follows the same rule.
+3. `/register` and `Register.vue` still exist, so anyone can self-register by URL.
+4. `HandleInertiaRequests` shares the full `User` model to the browser (password/2FA/certificate path hidden;
+   other columns such as `signature_path` exposed — last reviewed 2026-10-13).
+5. `.gitignore` contains merge-conflict markers; `/public/certificates` is not ignored (the folder was deleted).
+6. Public `/track` is limited per IP: offices behind one shared public IP share the 5-tries limit.
 
-**Design consequences:** category is a per-document field defaulted from the type (blank or "varies" types need
-Records/AI to choose; Supervisory can change it). Classification dropdown is filtered by the type (new pivot
-table). Rulebook values are seeded but editable in the Document Types registry, since several are still blank.
-
-**Decided (user, 2026-10-22):** (a) Confidential = Yes on a type means *may be* confidential: Records ticks it per
-document (the Phase 1 behaviour stays). (b) The role mapping above is confirmed. (c) The fresh-data reset runs at the
-start of Phase 2. (d) PNPKI uses **per-signer certificates** (City Administrator, Mayor, Department Heads each hold
-their own), designed at the start of Phase 2; the single certificate in `config/digital-certificate.php` is replaced.
-(e) The **System Administrator** uploads each signer's `.p12` (User Management), not the signer. (f) The referral slip is
-**removed entirely** in Phase 2 (pages, routes, print template, ADM Dept Head signing step).
-**Still open:** whether the certificate password is typed at every signing or stored encrypted — the user wants to
-finish pending **Phase 1 changes** before deciding; Phase 2 does not start until then.
-Facts found 2026-10-22: the local DB already has 0 documents / 0 trails, but `storage/app/public/documents` (10 files)
-and `storage/app/private/signed-documents` (4 files) still hold old files, so the Phase 2 reset should be an artisan
-command that also clears these (needed for other environments too). `storage/app/certificates/` already holds one
-person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to the shared `certificate.pem` +
-`private.key`; it can become the first per-signer certificate.
-
-## 6. Known issues, risks & technical debt
-
-**Security (high)**
-1. ~~`public/certificates/` contained `private.key` and a `.p12` bundle (web-accessible, not ignored).~~
-   **Resolved 2026-10-13:** user deleted the folder (verified absent; copies remain in
-   `storage/app/certificates/`). Still recommended: add `/public/certificates` to `.gitignore`.
-2. `.gitignore` contains unresolved merge-conflict markers (`<<<<<<< HEAD … >>>>>>>`). Git treats
-   the marker lines as patterns; rules still mostly apply, but the file should be cleaned up.
-3. Document attachments are stored on the `public` disk (`storage/app/public/documents`) and are
-   reachable by URL without authorization.
-4. `Document::scopeVisibleTo()` only filters `state = 1`; every active user can list/view every
-   active document. Confirm this is intended.
-5. `HandleInertiaRequests` shares the full `User` model to the browser (password/2FA fields are
-   hidden, but `signature_path` etc. are exposed).
+**Operations**
+7. Emails need a running queue worker; none runs with `artisan serve` + `npm run dev` alone.
+8. `APP_URL` must be the public address before clients get emails outside the LAN.
+9. `.env.example` defaults to SQLite and `MAIL_MAILER=log`, while local dev uses MySQL + SMTP.
 
 **Maintainability**
-6. `DocumentController::create()` renders a non-existent `documents/Create` page and has no route (dead code).
-7. `app/Models/User.php` imports `Laravel\Fortify\TwoFactorAuthenticatable` but Fortify is not installed (unused import).
-8. `routes/web.php` declares `dashboard` twice (closure and `DashboardController`); the later one wins.
-9. `findStampPlacement` calls OpenAI directly from the controller instead of a service; model name
-   `gpt-4o-mini` hard-coded in two places. (The duplicated `ReferralSlipController::index` query was fixed 2026-10-13.)
-10. Migrations add → remove → re-add `signed_file_path` on `document_trails` (2026_10_01 ×2, 2026_10_06).
-11. Print template hard-codes the City Administrator's name (per `status.md`, intentional).
-12. `vue-tsc` broken via tsconfig `types`; Pint/Prettier debt across most files; no `typecheck` npm script.
-13. `README.md` still begins with the Laravel starter-kit text; `composer.json` name is `laravel/vue-starter-kit`.
-14. Vite warns about a >500 kB chunk (OCR/PDF libs) per `status.md`.
-15. **Mixed timestamp conventions:** app timezone is UTC, so `created_at`/`updated_at` are real UTC while
-   workflow timestamps are Manila wall-clock labelled as UTC. Frontends must treat them differently (see Show.vue
-   `formatUtcDateStr`). Changing `APP` timezone would require migrating existing rows and re-checking SLA math
-   (`Document::getIsDelinquentAttribute`, DashboardController) — needs a decision before touching.
-16. `.env.example` defaults to SQLite while local dev uses MySQL; `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD` missing.
-17. ~~SLA/delinquency evaluates only `department_id`; with multi-office copies it reflects one holder.~~
-   **Resolved 2026-10-22:** only the Primary office acts and `department_id` is always the Primary, so delinquency
-   counting the Primary only is the intended rule.
+10. `DocumentController::create()` renders a non-existent `documents/Create` page and has no route (dead code).
+11. `app/Models/User.php` imports `Laravel\Fortify\TwoFactorAuthenticatable` but Fortify is not installed.
+12. `routes/web.php` declares `dashboard` twice (closure and `DashboardController`); the later one wins.
+13. `findStampPlacement` calls OpenAI from the controller; `gpt-4o-mini` hard-coded (4 places).
+14. `DocumentAnalysisService` is unused.
+15. Migrations add → remove → re-add `signed_file_path` on `document_trails`; trail columns used only by the retired
+    referral slips (`required_actions`, …) remain for history.
+16. `vue-tsc` broken via tsconfig `types`; Pint/Prettier debt (§4); no `typecheck` npm script.
+17. `README.md` still begins with the Laravel starter-kit text; `composer.json` name is `laravel/vue-starter-kit`.
+18. Vite warns about a >500 kB chunk (OCR/PDF libs).
+19. **Mixed timestamps:** app timezone is UTC, so `created_at`/`updated_at` are real UTC while workflow timestamps
+    (`received_at`, `released_at`, `due_date`, `completed_at`) are Manila wall-clock stored as if UTC. Frontends and SLA
+    math treat them differently (`formatUtcDateStr`, `Document::is_delinquent`, `DashboardReportService::totalDays`).
+    Dashboard month filters use `whereMonth('created_at')` in UTC, so a document registered before 8 AM Manila on
+    the 1st counts in the previous month.
 
-## 7. Next steps (suggested, none started)
+## 8. Next steps (suggested)
 
-1. Browser-test the bell (dispatch to an office with a user, click the ping, Receive & End / Route) and the
-   role-scoped delinquency card; revert specific commits if behaviour is not as intended.
-   Also register a new ADM document with AI analysis and confirm Generate Slip pre-ticks the suggested offices
-   (local doc 1 has only an ADM suggestion, so it correctly pre-fills nothing). Then push the local commit.
-2. Add `/public/certificates` to `.gitignore` and resolve the `.gitignore` conflict markers (needs approval).
-3. Fix the ESLint error in `ocm-approvals/Index.vue` and the tsconfig `types` entry so `vue-tsc` runs.
-4. Add `DMS_CERTIFICATE_PRIVATE_KEY_PASSWORD=` to `.env.example`.
-5. Decide on authorization for attachment downloads and for `visibleTo` scoping (security #3, #4).
-6. Decide on the timestamp convention (#15) and per-copy SLA (#17) before further date/SLA work.
-7. Transactions page never receives `flash` from `TransactionController` (success toast after processing does not show).
-8. Remove dead code (#6–#8, and the unused `DocumentAnalysisService`, an old copy of the intake prompt now
-   replaced by `DocumentIntakeAnalyzer`) in a small cleanup change with tests.
+1. Commit the uncommitted 2026-10-30 work (§5) — the user said "not yet"; needs their OK. Before that, send one real
+   tracking-code email to see the seal in Gmail.
+2. Production readiness: permanent queue worker, public `APP_URL`, a real sender name in Email Settings (local
+   `MAIL_FROM_NAME` is "Laravel"), run all migrations, `ziggy:generate` + `npm run build`.
+3. Security: attachments on the private disk behind an authorized download (#1); remove `/register` (#3).
+4. FGD Phase 5: ADM delinquency tagging and the delayed-by-category view.
+5. SMS: choose a provider (e.g. Semaphore or a Globe/Smart gateway) and send the same barcode + access code.
+6. Small cleanup change with tests: #10–#14, `.gitignore` (#5), tsconfig `types` so `vue-tsc` runs (#16).
+7. Decide the timestamp convention (#19) before further date/SLA work.
+8. Later: spreadsheet export of reports; paperless switch-on (test real PNPKI `.p12` files under OpenSSL 3 first).
 
-## 8. Decisions & assumptions
+## 9. Decisions & assumptions
 
 - Decision (existing code): optimistic concurrency via `workflow_version` + pessimistic row locks inside `mutate()`.
 - Decision (existing code): executive approvals keyed by department code, not IDs.
-- Assumption: `status.md` is user-maintained and authoritative for feature intent; this file
-  documents architecture and handoff state and does not duplicate its feature checklist.
-- Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`).
+- Decision: trail history is never rewritten; `dms:reset-documents` is the only code that deletes it (user-approved
+  fresh start).
+- Decision (user, 2026-10-30): this file is the single source of project and feature status; `status.md` is
+  outdated and disregarded.
+- Assumption: local environment is XAMPP on Windows (path `C:\xampp\htdocs\dms`), served on the LAN at
+  192.168.4.33.
 
-## 9. Change log
+## 10. Change log
 
-### 2026-10-29 — Linked documents open their document (Claude Code, uncommitted)
+Newest first. Everything up to 2026-10-29 is committed and pushed (latest `69ff0f8`); the 2026-10-30 entries are
+uncommitted. Older "not checked in the browser" notes are superseded by §5 "Verified by the user in the browser".
+
+### 2026-10-30 — Visibility by role; confidential details hidden; Supervisory corrects endorsed only (Claude Code, uncommitted)
+- **Why (user decisions):** the Supervisory Level (City Administrator, City Mayor, Department Heads) sees all
+  documents but transacts only those endorsed to them; confidential documents: "Records only"; changing the category
+  or Primary office counts as transacting.
+- `User::SEES_ALL_DOCUMENTS_ROLES` + `seesAllDocuments()` (System Administrator, Records Manager, Supervisory, anyone
+  in `REC`); `DashboardReportService::seesAllDepartments()` now delegates to it (its constant was removed).
+- `Document::scopeVisibleTo()`: everyone else sees only active, non-confidential documents with a trail entry at their
+  office (documents list, document page via policy `view`, barcode search, linked documents, copies list).
+  `Document::CONFIDENTIAL_FIELDS`, `detailsHiddenFrom()`, `hideConfidentialDetailsFrom()` (serialization only:
+  `makeHidden` + `details_hidden`).
+- Places an office must act on a confidential document no longer use `visibleTo()` and hide the details instead:
+  Office Inbox (+ bell focus document), ADM and OCM approval queues; the bell shows "Confidential document"; Workstation
+  dashboard reports blank the sender fields and show "Confidential document". Pages: `transactions/Index.vue`
+  (label, no View link, Process dialog text), `adm-approvals/Index.vue`, `ocm-approvals/Index.vue`,
+  `dashboard/Report.vue` (barcode without a link).
+- `DocumentPolicy::corrects()`: Records roles any document; Supervisory only when `owns()`; used by `changePrimary` and
+  `changeCategory`.
+- Tests: new `ConfidentialVisibilityTest` (9 cases); `DocumentCategoryTest` (endorsed-only case; the fixture now has
+  its Primary trail entry); `PrimaryCopyRoutingTest` (copy office's head refused, Primary office's head allowed);
+  `WorkflowReliabilityTest` (Workstation staff see a document only after their office handles it). Pest 205 passed
+  (2170 assertions); Pint: no new violations; ESLint ✅; build ✅. Browser (CHO staff): dashboard "Showing Office of
+  the City Health Officer only", empty documents list, 403 on C003192158.
+
+### 2026-10-30 — Emails: city seal instead of the Laravel logo (Claude Code, uncommitted)
+- **Why (user):** the email header showed the Laravel logo (Laravel draws it when `APP_NAME` is "Laravel").
+- Overrode two framework mail components (others still come from the framework): `resources/views/vendor/mail/html/
+  header.blade.php` (seal image when a `logo` is given, then "City Government of San Fernando"; never the framework
+  logo) and `.../html/message.blade.php` (passes `logo` to the header; footer "© {year} City Government of San
+  Fernando, La Union · Document Management System"). Every email, password reset included, now has the city header
+  and footer.
+- `mail/document-tracking-code.blade.php` embeds `public/images/san_fernando_logo.png` **inline** (`$message->embed`,
+  a `cid:` image), because a link to the DMS server (`APP_URL`, LAN-only) would show broken in Gmail. The cid is
+  computed once into a variable: Blade evaluates an anonymous component's attribute expression twice, which
+  attached the seal twice. Previews/tests without `$message` show the text header only.
+- Checks: Pest 195 passed (2017 assertions; new `ClientTrackingTest` case sends through a real in-memory mailer:
+  exactly one inline PNG, referenced by the HTML, no `laravel.com`, no `cid:` in the text part); Pint ✅. The email
+  for C003192158 was built in memory (not sent) and shared with the user as an HTML preview. **No real email sent**
+  with the new header yet.
+
+### 2026-10-30 — Intake requires a destination (Claude Code, uncommitted)
+- **Why (user decision):** "It should require where to go to, not stale." Direct to = Departments with no office
+  chosen used to save the document in the registering user's own office (Records, or e.g. CICTO for a System
+  Administrator) with no inbox entry and no ping.
+- `SaveDocumentRequest::after()` (create only): refuses no `department_id` and no `routed_to` ("Choose where the
+  document goes: the City Administrator, the City Mayor, or at least one department.", on `routed_to`) and a
+  `department_id` equal to the user's own office ("Choose an office other than your own."). Edit is unchanged.
+- `documents/Index.vue`: Save with Departments and no office shows the same message under Send to (and a toast)
+  without posting; "No departments chosen" turns red; the error clears once an office is picked.
+- Documents can still reach Records when an office routes them back; Records' Route button handles those.
+- Tests: `WorkflowReliabilityTest` "creation without a destination retains records custody" became a refusal test;
+  new `IntakeToDepartmentsTest` case; `RecordsIntakeTest` and `ClientTrackingTest` payloads now carry a destination,
+  and their Edit cases first return the document to Records (as an office routing it back would). Pest 194 passed
+  (2009 assertions); Pint ✅ on changed files (except a pre-existing import-order issue in
+  `WorkflowReliabilityTest.php`); ESLint ✅; build ✅. Browser (Records Manager): Departments + no office + Save shows
+  the message and sends no request.
+
+### 2026-10-30 — Documents list: Route hidden on completed documents (Claude Code, uncommitted)
+- **Bug (user report, screenshot):** completed C003192158 still offered Route. Every trail entry was closed, so
+  `holders` was empty and the page fell back to `department_id` (CBO, the office that ended it) as the holder;
+  policy `owns()` has the same fallback. Routing would have been refused (409), but the button was misleading.
+- `DocumentController::index` now also sends `can_route` (policy `dispatch` + not Completed); `documents/Index.vue`
+  shows Route only when `can_route` (the client-side `holdsCopy` check was removed) and no longer shows "With …"
+  under a completed document.
+- Checks: Pest 193 passed (2006 assertions; `DocumentListActionsTest` now 5 cases, incl. the completed-with-no-open-
+  entry case); ESLint ✅; build ✅; Pint ✅. Browser (Records Manager): C003192158 shows "Completed" with no Route or Edit.
+
+### 2026-10-30 — Documents list: Edit button only where editing is allowed (Claude Code, uncommitted)
+- **Why (user):** the pencil showed on every row, and clicking it on a document Records no longer holds (or as a
+  non-Records user, or on a completed document) gave a 403/409 page.
+- `DocumentController::index` adds `can_edit` per row (policy `update` + not Completed — the same gates as `edit()`;
+  6 rows per page, so the per-row check is cheap). `documents/Index.vue` shows the Edit link only when `can_edit`.
+- Checks: Pest 190 passed (1961 assertions; new `DocumentListActionsTest`, 2 cases); ESLint ✅; build ✅; Pint ✅ on the
+  new test. Browser (`dms-local`, Records Manager): C003192158 (not held by Records) shows no Edit button.
+
+### 2026-10-30 — Dashboard by department; category change by role (Claude Code, uncommitted)
+- **Why (user, FGD slide 9):** Workstation staff see their own department only; only Records, the System
+  Administrator and the Supervisory Level may change a document's category.
+- **Dashboard:** `DashboardReportService::ALL_DEPARTMENT_ROLES` now follows slide 9 (adds `city_mayor` and
+  `department_head`, which were office-scoped before), and anyone in the `REC` office counts as Records
+  (`seesAllDepartments`). New `scopeToUser()` + `Document::scopeHandledBy()` (documents the office ever held as
+  Primary) scope the monthly summary cards, the pipeline, average processing times and the pipeline reports (title
+  gets "(Your Office)"); the alert cards keep `heldBy` (held now). `Dashboard.vue` shows "Showing {office} only" or
+  "Showing all offices" (new `scope` prop).
+- **Category:** policy `changeCategory` (Records roles + Supervisory, active and not completed), `ChangeCategoryRequest`
+  (`transaction_type_id` + `workflow_version`), `DocumentService::changeCategory()` (inside `mutate()`, refuses the
+  same category, recomputes `due_date` from `created_at` like Edit, writes an `AuditLog` row `category_changed`),
+  route `documents.category` (`POST /documents/{document}/category`, `working_hours`). `documents/Show.vue`: a
+  "Change category" select + button under Transaction Type for allowed roles. Edit stays Records-only as before.
+- Checks: Pest 188 passed (1934 assertions; new dashboard scope test, new `DocumentCategoryTest` 9 cases); ESLint ✅;
+  build ✅; Ziggy regenerated; Pint: no new violations (touched files keep their pre-existing debt; the policy file
+  passes once CRLF is ignored); Prettier: `Dashboard.vue` and `Show.vue` already failed at HEAD.
+  **Not checked in the browser:** the preview browser could not reach the Vite dev server at 192.168.4.33:5173
+  (connection timed out); the user's dev server was left as is.
+
+### 2026-10-30 — Documentation refresh (Claude Code, uncommitted)
+- Sections 1–9 rewritten to match the code (referral slips, single certificate and status-change emails removed from
+  the description; FGD decisions condensed into §6; known issues re-checked against the code; checks re-run, see §4).
+  Change-log labels corrected: entries up to 2026-10-29 were committed, not "uncommitted".
+
+### 2026-10-30 — Client tracking: one barcode + access code email, public lookup on the sign-in page (Claude Code, uncommitted)
+- **Why (user decision 2026-10-30, FGD slide 13):** clients get their barcode + access code once (email now, SMS
+  later) and look up the latest status themselves on the DMS sign-in page. **Status-change emails were removed.**
+- Removed: `NotifyClientOfStatus`, `ClientStatusUpdate` + `mail/client-status-update` view, `ClientStatusEmailTest`,
+  `DocumentWorkflow::notifyClient()` (and its call in `mutate()`). Migration
+  `2026_10_30_000000_drop_client_notified_status_from_documents_table` (**run locally**).
+- New `SendTrackingCode` job (queued, 3 tries, logs "Tracking code email failed.") + mailable `DocumentTrackingCode`
+  (`mail/document-tracking-code`: barcode, access code, subject unless confidential, received time, "Track my
+  document" button → `/login?tab=track`). Queued by `DocumentService` after registration and after an Edit that
+  adds or changes the client email; a queueing error is logged and never fails the save.
+- New public route `POST /track` (`track`, guest group in `routes/auth.php`; exception recorded in CLAUDE.md),
+  `TrackDocumentController`, `TrackDocumentRequest` (5 wrong tries per IP, then a wait message),
+  `ClientStatusService::track()` (active document, barcode + access code compared case-insensitively and in
+  constant time; returns barcode, subject unless confidential, received time, latest status, as-of time — never the
+  trail). Every miss gets one message: "No document matches that barcode number and access code." The result is
+  flashed once to the sign-in page (`initialTab`, `tracking` props).
+- `auth/Login.vue` Guest tab now works: barcode + access code form with field errors, result card ("Latest status",
+  as of, barcode, received, subject), "Track another document". Unused `TextLink` import removed.
+- `documents/Index.vue`: after a save the next access code comes from the server (`Str::random`), not
+  `Math.random()` in the browser.
+- **Email link host:** `route('login')` in the queued email uses `APP_URL` (`http://192.168.4.33:8000` locally);
+  set it to the real public address in production, or clients get an unreachable link.
+- Checks: Pest 179 passed (1776 assertions; new `ClientTrackingTest`, 9 cases); Pint ✅; ESLint ✅; Prettier ✅ on
+  `Login.vue` (`documents/Index.vue` already failed at HEAD); Ziggy regenerated; build ✅. Browser (`dms-local`):
+  `/login?tab=track` opens the Guest tab; a made-up barcode/code shows the no-match message. The console held 5 Axios "Network Error"
+  entries (ERR_CONNECTION_REFUSED) from the tab's earlier signed-in pages; not investigated, not shown to be caused by
+  this change.
+- **First real email (same day):** the user registered a document with their own email and got nothing: they run
+  `php artisan serve` (192.168.4.33:8000) + `npm run dev` separately, so **no queue worker** was running and the
+  job waited in `jobs`. Ran `php artisan queue:work --stop-when-empty` once: `SendTrackingCode` DONE in 4 s over
+  the `.env` SMTP account (no `mail_settings` row). Also deleted 4 stale `NotifyClientOfStatus` jobs (ids 1–4, class
+  removed). Keep `php artisan queue:work` running next to `artisan serve`.
+- **Verified by the user (same day):** the email arrived with barcode + access code, and the Guest tab lookup showed
+  the latest status of the real document.
+
+### 2026-10-30 — Email Settings: the .env password fills a blank first save (Claude Code, uncommitted)
+- **Why (user request):** "autofill the password from .env". The password is still **never sent to the browser**
+  (CLAUDE.md Security), so the autofill happens on the server instead.
+- `MailSettingsService::envPassword()` (MAIL_PASSWORD via `config('mail.mailers.smtp.password')`, null when empty);
+  `save()`: a blank password on the **first** save takes the .env one; later blank saves keep the saved one.
+  `MailSettingRequest`: password required only when no row exists **and** .env has none. `MailSettingController`
+  passes `defaults.has_password` (a boolean, never the value).
+- `mail-settings/Index.vue`: before the first save, the field reads "From the .env file — leave blank to use it" and
+  is not required.
+- Checks: Pest 176 passed (1732 assertions; new MailSettingsTest case: blank first save stores the .env password,
+  page props and HTML never contain it, later .env changes don't overwrite it); Pint ✅; ESLint ✅; Prettier ✅; build ✅.
+  Browser (seeded System Administrator, `dms-local` on :8001): placeholder shown, field not required, page props hold
+  only `has_password: true`. **Not saved** (it would store the real account); the sender name still shows "Laravel".
+
+### 2026-10-29 — Linked documents open their document (Claude Code)
 - `DocumentController::show` passes `linkedDocumentIds` (barcode => id) for linked barcodes of active documents the
   user may see (`visibleTo`); `documents/Show.vue` renders each as a link to that document (white chip, grey outline,
   blue text, underline on hover, focus ring). A barcode with no registered document stays plain white text with a
@@ -353,7 +470,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 - Checks: Pest 175 passed (1717 assertions; new `LinkedDocumentsTest`); ESLint ✅; build ✅; Pint ✅. Not checked
   in the browser.
 
-### 2026-10-29 — Documents list: aligned actions, Delete hidden (Claude Code, uncommitted)
+### 2026-10-29 — Documents list: aligned actions, Delete hidden (Claude Code)
 - `documents/Index.vue`: the "With CHO" / "Pending City … Approval" text moved from the Actions column to under the
   status, so it no longer pushes the buttons around. Actions are same-size 32 px buttons, centered: Route (only when
   Records may route it), then Edit. (An empty placeholder slot was tried first; it left Edit off-centre.)
@@ -362,7 +479,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   it can be brought back by restoring the button. No other document page had a delete button.
 - Checks: ESLint ✅; build ✅. Not checked in the browser.
 
-### 2026-10-29 — Document trail: the Primary office's action is the latest row (Claude Code, uncommitted)
+### 2026-10-29 — Document trail: the Primary office's action is the latest row (Claude Code)
 - **Why (user):** after End Transaction, the closed copy (e.g. ACA "Closed with document") was listed above the
   Primary's "End Transaction" row. `documents/Show.vue` `latestFirstTrails` now sorts by `created_at` (hand-off time)
   newest first, Primary before copies of the same hand-off, then id; transit math keeps the chronological index.
@@ -381,7 +498,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   ESLint ✅; build ✅. Not checked in the browser (dev server down). When paperless returns, the head signs with
   their own PNPKI certificate instead.
 
-### 2026-10-29 — Office Inbox: Receive first, act later (Claude Code, uncommitted)
+### 2026-10-29 — Office Inbox: Receive first, act later (Claude Code)
 - **Why (user, testing as a receiving officer):** the inbox only offered "Receive & Route" / "Receive & End"; like
   the old DTS (and like copies), the Primary office must first **Receive**, then act when it is done.
 - New `transactions.receive` (`POST /transactions/{document}/receive`, `ReceiveDocumentRequest`, policy `receive`,
@@ -409,7 +526,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   `flash.success/error`; this also fixes the toasts for Process and Receive copy. New test in
   `IncomingDocumentsTest` (IncomingDocumentsTest 3 passed).
 
-### 2026-10-29 — Hybrid paper route (old DTS style); paperless switched off; OCM routes to departments (Claude Code, uncommitted)
+### 2026-10-29 — Hybrid paper route (old DTS style); paperless switched off; OCM routes to departments (Claude Code)
 - **Why (user decisions 2026-10-29):** finish the paper route first, like the current DTS. Office staff record the
   executives' approvals; the scan of the signed copy is optional; after the Mayor, documents go straight to the
   departments (FGD Phase 3); paperless is hidden for now.
@@ -445,7 +562,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   receive first and cover the receive/ping flow; stamp-placement tests set up a received paperless entry); Pint ✅;
   ESLint ✅; Prettier ✅; build ✅. Still not checked in the browser (dev server down).
 
-### 2026-10-28 — Linked documents are comma-separated (Claude Code, uncommitted)
+### 2026-10-28 — Linked documents are comma-separated (Claude Code)
 - New `resources/js/lib/linkedDocuments.ts` (`barcodeBeingTyped`, `withChosenBarcode`, `linkedDocumentsText`), used by
   `documents/Index.vue` and `documents/Edit.vue`: picking a barcode suggestion gives "C003192158, C003192314, ";
   placeholders updated. The server already splits on commas and spaces (`DocumentService::save`), so no backend change.
@@ -454,7 +571,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 - Checks: ESLint ✅; Prettier ✅ on the new file; build ✅. Browser (intake page): two suggestions picked in a row gave
   `C003192158, C003192314, `. Edit page not opened in the browser.
 
-### 2026-10-28 — Intake form: numbered steps, confidential and upload first (Claude Code, uncommitted)
+### 2026-10-28 — Intake form: numbered steps, confidential and upload first (Claude Code)
 - **Why (user request):** Records should see straight away whether a document is confidential and whether it needs
   an upload, and read the form as one continuous flow.
 - `resources/js/pages/documents/Index.vue`: the form is now six numbered steps — 1 Is it confidential? (highlighted
@@ -479,7 +596,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   again. Measured at the user's 1913×950 browser viewport: the form ends at 839 px, so it still fits without
   scrolling (at 1366×768 it will scroll a little). ESLint ✅.
 
-### 2026-10-26 — Email Settings page (Claude Code, uncommitted)
+### 2026-10-26 — Email Settings page (Claude Code)
 - **Why (user request):** set the SMTP account in the app like the old DTS "E-Mail Setting" page, without editing
   `.env`. **Rule exception approved by the user** and recorded in `CLAUDE.md` (Security).
 - Migration `2026_10_26_010000_create_mail_settings_table` (**run locally** with `--path`, on its own). Model
@@ -500,7 +617,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   Ziggy regenerated; build ✅. Browser: page renders for the seeded System Administrator with the `.env` values and the
   sidebar link active. **Not saved and no email sent** (user will enter a new app password first).
 
-### 2026-10-26 — Client status email; cleaner sidebar (Claude Code, uncommitted)
+### 2026-10-26 — Client status email; cleaner sidebar (Claude Code)
 - **Why (user request):** the old DTS had an "E-Mail Setting" page; the user added Gmail SMTP to `.env` and wants the
   client told the latest status by email (SMS later). The SMTP form was **not** rebuilt: credentials stay in `.env`
   (project rule). The user pasted the Gmail app password in chat — advised to revoke it and create a new one.
@@ -527,7 +644,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   Prettier ✅ on the sidebar files; build ✅. Browser: signed in as the seeded System Administrator; sections,
   active highlight (Dashboard, Departments) and collapsed icon mode checked. **No real email sent yet.**
 
-### 2026-10-23 — Dashboard details from the old DTS (Claude Code, uncommitted)
+### 2026-10-23 — Dashboard details from the old DTS (Claude Code)
 - `DashboardController` + `Dashboard.vue`: **year picker** (first document's year to this year; unknown years fall
   back to the current one); **For Due Tomorrow** and **To-Do List** are their own cards and open drill-downs like
   Delinquent (`?report=delinquent|due_tomorrow|todo`, replacing `?delinquent=1`), with the same office scope;
@@ -549,7 +666,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   Manager; the six cards, category switch, On-Going Simple and To-Do reports, and barcode → document page work; no
   console errors after reload.
 
-### 2026-10-23 — Intake routing edge cases (Claude Code, uncommitted)
+### 2026-10-23 — Intake routing edge cases (Claude Code)
 - `DocumentIntakeAnalyzer::validated()`: `department_id` is discarded unless it is ADM or OCM; routing suggestions
   never include Records, and include OCM only when the document goes to the City Administrator (ADM may forward
   to the Mayor). So the Primary picked by the server is always an office the intake form can route to.
@@ -558,7 +675,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 - Checks: Pest 142 passed (1268 assertions; 3 new tests in `DocumentAnalysisTest`); Pint ✅; ESLint ✅.
   **Not tested in the browser** (needs a real scan and AI call).
 
-### 2026-10-23 — FGD Phase 2e: fresh-data reset command (Claude Code, uncommitted, **not run**)
+### 2026-10-23 — FGD Phase 2e: fresh-data reset command (Claude Code; committed; run by the user 2026-10-30)
 - New `app/Console/Commands/ResetDocuments.php` → `php artisan dms:reset-documents [--dry-run] [--force]`.
   Deletes all `documents` + `document_trails` rows (one transaction; MySQL auto-increments reset to 1 afterwards)
   and then every file under `storage/app/public/documents/` (intake scans) and
@@ -573,7 +690,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 - Checks: Pest 139 passed (1261 assertions; new `ResetDocumentsTest` 5 cases on faked disks); Pint ✅. The command
   was not run against the local database.
 
-### 2026-10-23 — FGD Phase 2d: referral slips retired (Claude Code, uncommitted)
+### 2026-10-23 — FGD Phase 2d: referral slips retired (Claude Code)
 - Migration `2026_10_23_030000_retire_referral_slips` (**not yet run locally**): open `adm_signature` entries move
   to `adm_approval` (they are already at ADM and go through the single approval); closed entries keep their
   history; **drops `documents.requires_signature_from`** (the trail stage is the only source). `approved_routing_slip`
@@ -594,7 +711,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   incl. file cleanup, new tests for the 2d migration and the newest-signed preview); Pint ✅; ESLint ✅; build ✅.
   **Not tested in the browser.**
 
-### 2026-10-23 — FGD Phase 2c-2: per-signer PNPKI certificates (Claude Code, uncommitted)
+### 2026-10-23 — FGD Phase 2c-2: per-signer PNPKI certificates (Claude Code)
 - Migration `2026_10_23_020000_add_signing_certificate_to_users_table` (**not yet run locally**):
   `users.certificate_path` (hidden from serialization, set only by the service), `certificate_subject`,
   `certificate_valid_until`. New private disk `certificates` (root `storage/app/certificates`, `serve` false;
@@ -621,7 +738,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   with a generated certificate and check `/ByteRange` + `/Type /Sig`; `testCertificate()` helper in
   `tests/Pest.php`); Pint ✅; ESLint ✅; build ✅. **Not tested in the browser.**
 
-### 2026-10-23 — FGD Phase 2c: ADM single approval (Claude Code, uncommitted)
+### 2026-10-23 — FGD Phase 2c: ADM single approval (Claude Code)
 - New page **ADM Approvals** (`adm-approvals.index/receive/approve`, `AdmApprovalController`,
   `AdmApprovalService`, `ReceiveAdmDocumentRequest`, `ApproveAdmDocumentRequest`, page
   `resources/js/pages/adm-approvals/Index.vue`, sidebar item via shared `auth.canViewAdmApprovals`).
@@ -647,7 +764,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   queue expectations updated in IncomingDocuments/ExecutiveStage/WorkflowReliability); Pint ✅ on new/changed
   PHP; ESLint ✅; build ✅. **Not tested in the browser.**
 
-### 2026-10-23 — FGD Phase 2b: intake "Direct to" Departments (Claude Code, uncommitted)
+### 2026-10-23 — FGD Phase 2b: intake "Direct to" Departments (Claude Code)
 - `SaveDocumentRequest` (create only): `routed_to[]` (active offices except REC/ADM/OCM) + `primary_office_id`
   (required with `routed_to`, must be one of them); `department_id` prohibits `routed_to` (ADM/OCM **or**
   departments); both prohibited on update.
@@ -662,7 +779,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 - Checks: Pest 120 passed (1114 assertions; new `IntakeToDepartmentsTest`, 8 cases); ESLint ✅ on the 3 files;
   build ✅; Pint ✅ on changed PHP. **Not tested in the browser** (in-app browser cannot load the LAN Vite server).
 
-### 2026-10-23 — FGD Phase 2a: explicit stage on the open Primary entry (Claude Code, uncommitted)
+### 2026-10-23 — FGD Phase 2a: explicit stage on the open Primary entry (Claude Code)
 - Migration `2026_10_23_010000_add_stage_to_document_trails_table` (**not yet run locally — the app needs it,
   since `Document` now appends `stage`**): nullable indexed `document_trails.stage`; backfills the newest open
   Primary entry of active documents from `requires_signature_from` (city_administrator → `adm_approval`,
@@ -682,7 +799,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   added to WorkflowReliability; OcmStampPlacement fixture now sets the trail stage); ESLint ✅ on the 3 pages;
   build ✅; Pint: no new violations (the touched legacy files keep their pre-existing style debt).
 
-### 2026-10-23 — Intake page: leaner layout in the old DTS style (Claude Code, uncommitted)
+### 2026-10-23 — Intake page: leaner layout in the old DTS style (Claude Code)
 - **Why (user request):** keep the current form but make it plain like the previous DTS ("remove the blue").
 - `resources/js/pages/documents/Index.vue` template only (script logic unchanged apart from three style helpers
   `labelClass`, `fieldClass()`, `iconButtonClass` and the unused `LinkIcon` import removed): square-ish fields,
@@ -694,7 +811,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 - Checks: ESLint ✅ on the page; build ✅; Pest 107 passed. **Not viewed in the browser** (the in-app browser
   blocks the LAN Vite server and needs a sign-in).
 
-### 2026-10-23 — People Directory: complete sender names hidden under signatures (Claude Code, uncommitted)
+### 2026-10-23 — People Directory: complete sender names hidden under signatures (Claude Code)
 - **Why (user report after browser test):** the OT memo still gave "Atty. R. L. Caloza"; "GILBERT" sits under the
   handwritten signature and is not in the OCR text, so no model can read it. Everything else on both scans was
   correct; the Junalyn sender is "almost all correct" (what is still off was not stated yet).
@@ -716,7 +833,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
 - Checks: Pest 106 passed (1012 assertions; new `PeopleDirectoryTest`, 6 cases); Pint ✅; ESLint ✅ and
   Prettier ✅ on the new page; build ✅. Not checked in the browser (migration pending).
 
-### 2026-10-23 — Intake AI: referral-slip signer, split surnames, subject names the invitee (Claude Code, uncommitted)
+### 2026-10-23 — Intake AI: referral-slip signer, split surnames, subject names the invitee (Claude Code)
 - **Why (user report, Q-DRIVE panel invitation):** sender came out "Atty. RT L. Caloza" (the City Administrator,
   who signs the attached referral slip) or "Junalyn F. Ayan" (surname split by OCR under the signature); the subject
   named only the Mayor although the invitation is for Mr. Kenneth Jay D. Bruno.
@@ -744,7 +861,7 @@ person's PNPKI bundle (`GUALBERTO+HERMENEGILDO+ANDAYA.p12/.crt/.pem`) next to th
   **Caveat:** one sample only, typed from a screenshot; re-check with real uploads (the OT memo sample too).
 - Checks after upgrade: Pest 100 passed (989 assertions; new model-parameter test); Pint ✅.
 
-### 2026-10-22 — Intake AI autofill: more accurate, half the tokens (Claude Code, uncommitted)
+### 2026-10-22 — Intake AI autofill: more accurate, half the tokens (Claude Code)
 - **Why (user report):** autofill gave the wrong sender name, left fields empty, ignored the rulebook, and gave
   different results on laptop vs PC. Causes found with two real scans: only page 1 was OCR'd (both signatures are on
   page 2; one page 1 was the attached referral slip); a low-detail image cost ~2.8k tokens for no gain; the prompt had

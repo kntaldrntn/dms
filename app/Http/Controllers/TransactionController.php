@@ -24,7 +24,8 @@ class TransactionController extends Controller
         // (a document dispatched to several offices appears in each office's inbox).
         $this->authorize('viewAny', Document::class);
         // Documents waiting on an executive step belong to the ADM / OCM Approvals queues instead.
-        $inbox = fn () => Document::visibleTo($request->user())->with(['documentType', 'transactionType', 'primaryEntry.receiver:id,name'])
+        // Not visibleTo(): the office must act on confidential documents it holds, so their details are hidden instead.
+        $inbox = fn () => Document::with(['documentType', 'transactionType', 'primaryEntry.receiver:id,name'])
             ->heldBy((int) $request->user()->department_id)
             ->outsideExecutiveStages()
             ->where('status', '!=', 'Completed')
@@ -36,16 +37,18 @@ class TransactionController extends Controller
             $query->where('barcode', 'LIKE', "%{$request->barcode}%");
         }
 
-        $documents = $query->latest()->paginate(10)->withQueryString();
+        $documents = $query->latest()->paginate(10)->withQueryString()
+            ->through(fn (Document $document) => $document->hideConfidentialDetailsFrom($request->user()));
 
         // Opened from the notification bell: preload that document so its Receive modal opens directly,
         // even when it is not on the current page. Null once the office has acted on it.
         $focusDocument = $request->integer('document')
-            ? $inbox()->whereKey($request->integer('document'))->first()
+            ? $inbox()->whereKey($request->integer('document'))->first()?->hideConfidentialDetailsFrom($request->user())
             : null;
 
         // View-only copies sent to this office: it can receive and view them but not act on them.
         $office = (int) $request->user()->department_id;
+        // Confidential documents never get copies, so the visibility rule can apply as is.
         $copies = Document::visibleTo($request->user())->copiedTo($office)
             ->where('status', '!=', 'Completed')
             ->with(['documentType:id,document_type', 'department:id,code,name'])

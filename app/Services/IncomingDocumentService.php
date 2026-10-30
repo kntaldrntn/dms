@@ -36,12 +36,14 @@ class IncomingDocumentService
             ->whereHas('document', fn ($documents) => $documents->where('state', 1)->where('status', '!=', 'Completed'));
 
         $items = (clone $query)
-            ->with('document:id,barcode,subject_matter')
+            ->with('document:id,barcode,subject_matter,is_confidential')
             ->latest('received_at')->latest('id')->take(5)->get()
             ->map(fn (DocumentTrail $trail) => [
                 'id' => $trail->id,
                 'barcode' => $trail->document->barcode,
-                'subject_matter' => Str::limit((string) $trail->document->subject_matter, 80),
+                'subject_matter' => $trail->document->detailsHiddenFrom($user)
+                    ? 'Confidential document'
+                    : Str::limit((string) $trail->document->subject_matter, 80),
                 'action' => match ($trail->received_by ? $trail->stage : null) {
                     DocumentTrail::STAGE_ADM_APPROVAL => 'Ready for City Administrator approval',
                     DocumentTrail::STAGE_OCM_APPROVAL => 'Ready for City Mayor approval',

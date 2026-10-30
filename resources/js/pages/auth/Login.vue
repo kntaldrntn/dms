@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
-import TextLink from '@/components/TextLink.vue';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -9,11 +8,21 @@ import AuthBase from '@/layouts/AuthLayout.vue';
 import { Head, useForm } from '@inertiajs/vue3';
 import { Barcode, Eye, EyeOff, Info, KeyRound, LoaderCircle, LockKeyhole, Mail, Search, UserRound, Users } from 'lucide-vue-next';
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'radix-vue';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
-defineProps<{
+interface TrackingResult {
+    barcode: string;
+    subject: string | null;
+    received_at: string;
+    status: string;
+    updated_at: string;
+}
+
+const props = defineProps<{
     status?: string;
     canResetPassword: boolean;
+    initialTab: 'staff' | 'guest';
+    tracking?: TrackingResult | null;
 }>();
 
 const form = useForm({
@@ -24,15 +33,36 @@ const form = useForm({
 
 const showPassword = ref(false);
 
-const activeTab = ref<'staff' | 'guest'>('staff');
+const activeTab = ref<'staff' | 'guest'>(props.tracking ? 'guest' : props.initialTab);
 const heading = computed(() =>
     activeTab.value === 'staff'
         ? { title: 'Sign in', description: 'Use the official account issued to you by the System Administrator.' }
         : { title: 'Track a document', description: 'Check the status of a document you submitted to the City Government.' },
 );
 
-// Guest tracking is a placeholder until the public lookup endpoint exists; nothing is submitted.
-const guest = ref({ barcode: '', accessCode: '' });
+const trackForm = useForm({ barcode: '', access_code: '' });
+// 'tracking' is the form-level error (no match, too many tries); the field errors cover empty inputs.
+const trackingError = computed(() => (trackForm.errors as Record<string, string | undefined>).tracking);
+const result = ref<TrackingResult | null>(props.tracking ?? null);
+watch(
+    () => props.tracking,
+    (tracking) => {
+        if (tracking) result.value = tracking;
+    },
+);
+
+const track = () => {
+    trackForm.post(route('track'), {
+        preserveState: true,
+        preserveScroll: true,
+        onSuccess: () => trackForm.reset(),
+    });
+};
+
+const trackAnother = () => {
+    result.value = null;
+    trackForm.clearErrors();
+};
 
 const submit = () => {
     form.post(route('login'), {
@@ -157,24 +187,55 @@ const submit = () => {
             </TabsContent>
 
             <TabsContent value="guest" class="focus-visible:outline-none">
-                <form @submit.prevent class="flex flex-col gap-4">
+                <section v-if="result" aria-labelledby="tracking-result-heading" aria-live="polite">
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <h3 id="tracking-result-heading" class="text-xs font-semibold uppercase tracking-wide text-slate-500">Latest status</h3>
+                        <p class="mt-1 text-lg font-bold text-gov-navy">{{ result.status }}</p>
+                        <p class="text-xs text-slate-500">As of {{ result.updated_at }}</p>
+
+                        <dl class="mt-4 grid gap-2 border-t border-slate-200 pt-3 text-sm">
+                            <div class="flex gap-2">
+                                <dt class="w-24 shrink-0 text-slate-500">Barcode</dt>
+                                <dd class="font-mono font-semibold text-slate-800">{{ result.barcode }}</dd>
+                            </div>
+                            <div class="flex gap-2">
+                                <dt class="w-24 shrink-0 text-slate-500">Received</dt>
+                                <dd class="text-slate-800">{{ result.received_at }}</dd>
+                            </div>
+                            <div v-if="result.subject" class="flex gap-2">
+                                <dt class="w-24 shrink-0 text-slate-500">Subject</dt>
+                                <dd class="text-slate-800">{{ result.subject }}</dd>
+                            </div>
+                        </dl>
+                    </div>
+
+                    <Button type="button" variant="outline" class="mt-4 h-10 w-full" @click="trackAnother">
+                        <Search class="h-4 w-4" aria-hidden="true" />
+                        Track another document
+                    </Button>
+                </section>
+
+                <form v-else @submit.prevent="track" class="flex flex-col gap-4">
                     <div class="grid gap-2">
                         <Label for="guest-barcode" class="text-slate-700">Barcode Number</Label>
                         <div class="relative">
                             <Barcode class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
                             <Input
                                 id="guest-barcode"
-                                v-model="guest.barcode"
+                                v-model="trackForm.barcode"
+                                required
                                 autocomplete="off"
-                                maxlength="10"
+                                maxlength="20"
                                 placeholder="e.g. C003196677"
                                 class="h-10 pl-9 font-mono uppercase focus-visible:ring-gov-blue"
-                                aria-describedby="guest-barcode-hint"
+                                :aria-invalid="!!trackForm.errors.barcode"
+                                aria-describedby="guest-barcode-hint guest-barcode-error"
                             />
                         </div>
                         <p id="guest-barcode-hint" class="text-xs text-slate-500">
-                            Printed on the receiving copy given to you by the Records Office.
+                            On your receiving copy and in the email from the Records Section.
                         </p>
+                        <InputError id="guest-barcode-error" :message="trackForm.errors.barcode" />
                     </div>
 
                     <div class="grid gap-2">
@@ -186,32 +247,37 @@ const submit = () => {
                             />
                             <Input
                                 id="guest-access-code"
-                                v-model="guest.accessCode"
+                                v-model="trackForm.access_code"
+                                required
                                 autocomplete="off"
                                 maxlength="20"
                                 placeholder="6-character code"
                                 class="h-10 pl-9 font-mono uppercase focus-visible:ring-gov-blue"
+                                :aria-invalid="!!trackForm.errors.access_code"
+                                aria-describedby="guest-access-code-error"
                             />
                         </div>
+                        <InputError id="guest-access-code-error" :message="trackForm.errors.access_code" />
                     </div>
+
+                    <InputError :message="trackingError" role="alert" />
 
                     <Button
                         type="submit"
-                        disabled
-                        aria-describedby="guest-coming-soon"
-                        class="mt-1 h-10 w-full bg-gov-navy text-white hover:bg-gov-navy-dark"
+                        :disabled="trackForm.processing"
+                        class="mt-1 h-10 w-full bg-gov-navy text-white hover:bg-gov-navy-dark focus-visible:ring-gov-orange"
                     >
-                        <Search class="h-4 w-4" aria-hidden="true" />
+                        <LoaderCircle v-if="trackForm.processing" class="h-4 w-4 animate-spin" aria-hidden="true" />
+                        <Search v-else class="h-4 w-4" aria-hidden="true" />
                         Track document
                     </Button>
                 </form>
 
                 <p
-                    id="guest-coming-soon"
                     class="mt-5 flex items-start gap-2 rounded-lg border border-gov-blue/30 bg-sky-50 px-3 py-2 text-xs leading-relaxed text-slate-600"
                 >
                     <Info class="mt-0.5 h-4 w-4 shrink-0 text-gov-blue" aria-hidden="true" />
-                    <span>Online document tracking for the public is coming soon. For now, please inquire at the Records Office.</span>
+                    <span>Only the latest status is shown. For details, please inquire at the Records Section.</span>
                 </p>
             </TabsContent>
         </TabsRoot>

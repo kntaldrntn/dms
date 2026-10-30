@@ -25,7 +25,9 @@ class OcmApprovalController extends Controller
         $documents = Document::with(['documentType', 'transactionType', 'primaryEntry.receiver:id,name'])
             ->inStage([DocumentTrail::STAGE_OCM_APPROVAL])
             ->where('status', 'Pending')->where('state', 1)->latest()->paginate(10)
-            ->through(fn (Document $document) => $document->setAttribute('stamp_source_url', $document->stampSourceUrl())
+            // OCM staff record approvals of confidential documents too, without seeing their details.
+            ->through(fn (Document $document) => $document->hideConfidentialDetailsFrom($user)
+                ->setAttribute('stamp_source_url', $document->stampSourceUrl())
                 ->setAttribute('can_receive', $user->can('receiveOcm', $document))
                 ->setAttribute('can_approve', $user->can('approveOcm', $document))
                 ->setAttribute('is_paperless', $document->isPaperless()));

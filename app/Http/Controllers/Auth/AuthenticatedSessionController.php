@@ -21,6 +21,9 @@ class AuthenticatedSessionController extends Controller
         return Inertia::render('auth/Login', [
             'canResetPassword' => Route::has('password.request'),
             'status' => $request->session()->get('status'),
+            // ?tab=track opens the client lookup (link in the tracking-code email); the result is flashed once.
+            'initialTab' => $request->query('tab') === 'track' ? 'guest' : 'staff',
+            'tracking' => $request->session()->get('tracking'),
         ]);
     }
 

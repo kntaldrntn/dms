@@ -34,6 +34,8 @@ class MailSettingController extends Controller
                 'username' => config('mail.mailers.smtp.username'),
                 'from_address' => config('mail.from.address'),
                 'from_name' => config('mail.from.name'),
+                // Only whether .env has one; the value stays on the server.
+                'has_password' => $settings->envPassword() !== null,
             ],
             'flash' => ['success' => $request->session()->get('success')],
         ]);

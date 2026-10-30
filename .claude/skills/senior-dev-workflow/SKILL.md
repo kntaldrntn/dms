@@ -13,7 +13,7 @@ explicitly authorizes it in the current request.
 
 ## 1. Orient
 
-1. Read `documentation.md` (state, known issues, next steps) and the relevant part of `status.md`.
+1. Read `documentation.md` (state, verified features, known issues, next steps). Disregard `status.md` (outdated).
 2. `git status` + `git diff --stat` — identify uncommitted user work and leave it intact.
 3. Restate the requirement in one or two sentences. If it is ambiguous in a way that changes
    the implementation, ask; otherwise state your assumption and proceed.

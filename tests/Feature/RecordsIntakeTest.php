@@ -18,7 +18,7 @@ beforeEach(function () {
     config(['services.paperless.enabled' => true]);
 
     $this->recordsOffice = Department::create(['code' => 'REC', 'name' => 'Records', 'state' => 1]);
-    Department::create(['code' => 'ADM', 'name' => 'Administrator', 'state' => 1]);
+    $this->administrator = Department::create(['code' => 'ADM', 'name' => 'Administrator', 'state' => 1]);
     $this->records = User::factory()->create(['role' => 'records_manager', 'department_id' => $this->recordsOffice->id]);
     $this->simple = TransactionType::create(['name' => 'Simple Transaction', 'processing_days' => 3, 'state' => 1]);
     $this->complaint = DocumentClassification::create(['name' => 'Complaint', 'state' => 1]);
@@ -37,6 +37,8 @@ beforeEach(function () {
         'barcode' => 'INTAKE-1', 'access_code' => 'ABC123', 'source_type' => 'External', 'source_name' => 'Client',
         'subject_matter' => 'Intake rulebook', 'transaction_type_id' => $this->simple->id,
         'document_type_id' => $this->communications->id, 'route_mode' => 'paper', 'is_confidential' => false,
+        // Intake always needs a destination.
+        'department_id' => $this->administrator->id,
     ];
 });
 
@@ -97,8 +99,13 @@ test('editing keeps the intake flags unless changed and refuses confidential wit
         ...$this->payload, 'route_mode' => 'paperless', 'attached_file' => scan(),
     ])->assertSessionHasNoErrors();
     $document = Document::where('barcode', 'INTAKE-1')->firstOrFail();
+    // Records edits only what it holds: as if ADM had routed it back to Records.
+    $document->trails()->whereNull('released_at')->update(['released_at' => now('Asia/Manila'), 'stage' => null]);
+    $document->trails()->create(['department_id' => $this->recordsOffice->id, 'received_at' => now('Asia/Manila'), 'received_action' => 'Returned to Records']);
+    $document->update(['department_id' => $this->recordsOffice->id]);
 
     $update = collect($this->payload)->except(['route_mode', 'is_confidential'])->all();
+    $update['department_id'] = $this->recordsOffice->id;
     $this->put(route('documents.update', $document), [...$update, 'subject_matter' => 'Edited', 'workflow_version' => $document->workflow_version])
         ->assertSessionHasNoErrors();
     $document->refresh();

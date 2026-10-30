@@ -6,7 +6,7 @@ import { Head, useForm } from '@inertiajs/vue3';
 import { Mail, Send } from 'lucide-vue-next';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
-import { watch } from 'vue';
+import { computed, watch } from 'vue';
 
 interface MailFields {
     host: string | null;
@@ -18,7 +18,7 @@ interface MailFields {
 
 const props = defineProps<{
     setting: (MailFields & { has_password: boolean; updated_at: string | null; updated_by: string | null }) | null;
-    defaults: MailFields;
+    defaults: MailFields & { has_password: boolean };
     flash?: { success?: string | null };
 }>();
 
@@ -29,12 +29,17 @@ const form = useForm({
     host: initial.host ?? '',
     port: initial.port ?? 587,
     username: initial.username ?? '',
-    // Never pre-filled: the saved password is not sent to the browser.
+    // Never pre-filled: neither the saved nor the .env password is sent to the browser; blank keeps it.
     password: '',
     from_address: initial.from_address ?? '',
     from_name: initial.from_name ?? '',
 });
 const testForm = useForm({ test_address: '' });
+
+const passwordPlaceholder = computed(() => {
+    if (props.setting) return 'Saved — leave blank to keep it';
+    return props.defaults.has_password ? 'From the .env file — leave blank to use it' : '';
+});
 
 const notyf = new Notyf({ duration: 3000, position: { x: 'right', y: 'top' } });
 watch(
@@ -102,8 +107,8 @@ const fieldClass =
                             v-model="form.password"
                             type="password"
                             autocomplete="new-password"
-                            :required="!setting"
-                            :placeholder="setting ? 'Saved — leave blank to keep it' : ''"
+                            :required="!setting && !defaults.has_password"
+                            :placeholder="passwordPlaceholder"
                             :class="fieldClass"
                             aria-describedby="password-help"
                         />

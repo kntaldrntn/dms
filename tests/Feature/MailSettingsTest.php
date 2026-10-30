@@ -39,7 +39,8 @@ test('the password is stored encrypted and never sent to the page', function () 
             ->missing('setting.password'));
 });
 
-test('a blank password keeps the saved one; the first save requires it', function () {
+test('a blank password keeps the saved one; the first save requires it when .env has none', function () {
+    config(['mail.mailers.smtp.password' => null]);
     $this->actingAs($this->admin)->put(route('mail-settings.update'), [...$this->settings, 'password' => ''])
         ->assertSessionHasErrors('password');
 
@@ -49,6 +50,23 @@ test('a blank password keeps the saved one; the first save requires it', functio
 
     expect(MailSetting::count())->toBe(1)
         ->and(MailSetting::first()->only(['password', 'from_name']))->toBe(['password' => 'app-password-1', 'from_name' => 'DMS']);
+});
+
+test('a blank first save takes the .env password, which is never sent to the page', function () {
+    config(['mail.mailers.smtp.password' => 'env-app-password']);
+
+    $this->actingAs($this->admin)->get(route('mail-settings.edit'))
+        ->assertInertia(fn (Assert $page) => $page->where('defaults.has_password', true)->missing('defaults.password'));
+    expect($this->actingAs($this->admin)->get(route('mail-settings.edit'))->getContent())->not->toContain('env-app-password');
+
+    $this->actingAs($this->admin)->put(route('mail-settings.update'), [...$this->settings, 'password' => ''])
+        ->assertSessionHasNoErrors();
+    expect(MailSetting::first()->password)->toBe('env-app-password');
+
+    // Later blank saves keep the saved password, even if .env changes.
+    config(['mail.mailers.smtp.password' => 'other-env-password']);
+    $this->actingAs($this->admin)->put(route('mail-settings.update'), [...$this->settings, 'password' => '']);
+    expect(MailSetting::first()->password)->toBe('env-app-password');
 });
 
 test('saved settings override the .env mail settings', function () {

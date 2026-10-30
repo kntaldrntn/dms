@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Jobs\SendTrackingCode;
+use App\Models\AuditLog;
 use App\Models\Document;
 use App\Models\DocumentTrail;
 use App\Models\TransactionType;
@@ -9,7 +11,9 @@ use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Throwable;
 
@@ -39,7 +43,9 @@ class DocumentService
                 $version = (int) $data['workflow_version'];
                 unset($data['workflow_version']);
 
-                return $this->workflow->mutate($document, $user, $version, 'update', function (Document $document, User $user) use ($data) {
+                $emailChanged = false;
+                $document = $this->workflow->mutate($document, $user, $version, 'update', function (Document $document, User $user) use ($data, &$emailChanged) {
+                    $emailChanged = array_key_exists('email', $data) && ($data['email'] ?? null) !== $document->email;
                     $target = empty($data['department_id']) ? $document->department_id : (int) $data['department_id'];
                     if ($target !== (int) $document->department_id) {
                         $this->workflow->targets([$target], $document->department_id, 'department_id');
@@ -53,6 +59,12 @@ class DocumentService
                     }
                     $document->fill([...$data, 'department_id' => $target]);
                 });
+                // A client email added or corrected after intake still needs the tracking code.
+                if ($emailChanged) {
+                    $this->sendTrackingCode($document);
+                }
+
+                return $document;
             }
 
             $document = DB::transaction(function () use ($user, $data) {
@@ -100,7 +112,7 @@ class DocumentService
 
                 return $document;
             });
-            $this->workflow->notifyClient($document);
+            $this->sendTrackingCode($document);
 
             return $document;
         } catch (Throwable $exception) {
@@ -108,6 +120,52 @@ class DocumentService
                 Storage::disk('public')->delete($newPath);
             }
             throw $exception;
+        }
+    }
+
+    /**
+     * Change the category; the due date is recomputed from registration like on Edit. The change is audit-logged
+     * because the trail records custody, not field edits.
+     */
+    public function changeCategory(Document $document, User $user, int $version, int $transactionTypeId): Document
+    {
+        return $this->workflow->mutate($document, $user, $version, 'changeCategory', function (Document $document, User $user) use ($transactionTypeId) {
+            if ((int) $document->transaction_type_id === $transactionTypeId) {
+                throw ValidationException::withMessages(['transaction_type_id' => 'The document already has this category.']);
+            }
+            $type = TransactionType::findOrFail($transactionTypeId);
+            $old = $document->only(['transaction_type_id', 'due_date']);
+            $document->transaction_type_id = $type->id;
+            $document->due_date = $document->created_at->copy()->addWeekdays($type->processing_days);
+
+            AuditLog::create([
+                'actor_id' => $user->id,
+                'model_type' => Document::class,
+                'model_id' => $document->id,
+                'action' => 'category_changed',
+                'old_values' => $old,
+                'new_values' => $document->only(['transaction_type_id', 'due_date']),
+            ]);
+        });
+    }
+
+    /**
+     * Queue the client's barcode + access code email. Runs after the document is saved, so a mail problem
+     * never undoes or fails the registration.
+     */
+    private function sendTrackingCode(Document $document): void
+    {
+        if (! $document->email) {
+            return;
+        }
+        try {
+            SendTrackingCode::dispatch($document->id)->afterCommit();
+        } catch (Throwable $exception) {
+            Log::warning('Tracking code email could not be queued.', [
+                'document_id' => $document->id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
         }
     }
 

@@ -76,10 +76,13 @@ const buttonClass =
                     <tbody class="divide-y divide-slate-100">
                         <tr v-for="doc in documents.data" :key="doc.id" class="hover:bg-slate-50">
                             <td class="whitespace-nowrap px-4 py-2.5 font-mono">
-                                <Link :href="route('documents.show', doc.id)" class="text-emerald-700 hover:underline">{{ doc.barcode }}</Link>
+                                <span v-if="doc.details_hidden" class="text-slate-800">{{ doc.barcode }}</span>
+                                <Link v-else :href="route('documents.show', doc.id)" class="text-emerald-700 hover:underline">{{ doc.barcode }}</Link>
                             </td>
                             <td class="px-4 py-2.5">
-                                <p class="line-clamp-2 text-slate-800">{{ doc.subject_matter }}</p>
+                                <!-- Confidential: the server sent no details; work from the paper copy -->
+                                <p v-if="doc.details_hidden" class="font-medium text-amber-800">Confidential document</p>
+                                <p v-else class="line-clamp-2 text-slate-800">{{ doc.subject_matter }}</p>
                                 <p class="mt-0.5 text-xs text-slate-500">
                                     {{ doc.document_type?.document_type }} · {{ doc.route_mode === 'paperless' ? 'Paperless' : 'Paper' }}
                                     <span v-if="doc.is_confidential" class="font-medium text-amber-700">· Confidential</span>

@@ -5,18 +5,23 @@ Rules for working in this repository. Keep this file short; procedures live in t
 
 ## Before you start
 
-1. Read `documentation.md` (architecture, current state, known issues, next steps).
-2. Skim `status.md` (the user-maintained feature/health tracker) for the area you will touch.
-3. Run `git status`. The working tree often contains uncommitted user work — never revert,
+1. Read `documentation.md` (architecture, current state, verified features, known issues, next steps).
+2. Run `git status`. The working tree often contains uncommitted user work — never revert,
    reset, stash, or overwrite it.
-4. For non-trivial work, follow the `/senior-dev-workflow` skill.
+3. For non-trivial work, follow the `/senior-dev-workflow` skill.
 
 ## Project
 
-Internal Document Management / Tracking System (DMS/DTS) for the City of San Fernando:
-barcode intake with AI-assisted extraction, department routing with custody trails,
-City Administrator referral slips, City Mayor (OCM) certificate-signed PDF approvals,
-and an SLA/delinquency dashboard.
+Internal Document Management / Tracking System (DMS/DTS) for the City of San Fernando,
+following the FGD process: barcode intake with AI-assisted extraction, routing to a Primary
+office with view-only copies and custody trails, City Administrator (ADM) and City Mayor (OCM)
+approvals, a receive-first Office Inbox, client tracking by barcode + access code, and an
+SLA/delinquency dashboard.
+
+Approvals run on **two routes**: paper (office staff record the wet-signed approval, optional
+scan) and paperless (each signer's own PNPKI certificate stamps and signs the PDF). Paperless is
+**switched off for now** (`DMS_PAPERLESS_ENABLED`) but remains a required feature: keep its code
+working and tested, and design new approval work for both routes.
 
 Stack: Laravel 12 (PHP ^8.2) + Inertia 2 + Vue 3 (TypeScript, `<script setup>`) +
 Tailwind 3 + radix-vue/shadcn-style UI, Vite 6, Pest 3. MySQL locally; tests use
@@ -63,6 +68,8 @@ in-memory SQLite. Details in `documentation.md`.
 - Signed/sensitive files go on the `local` (private) disk and are served through an
   authorized controller action.
 - Every new route needs `auth` + an explicit policy/role check.
+  **Exception (user-approved 2026-10-30):** the public client lookup `POST /track` (guest) — the barcode + access
+  code pair is the credential, wrong tries are rate limited per IP, and it returns the latest status only.
 
 ## Accessibility (UI)
 
@@ -93,7 +100,8 @@ do not mass-reformat without approval.
   `/compact` on substantial work: what changed, why, files touched, checks run with real
   results, open issues, exact next steps.
 - Record only verified facts; label assumptions. Never claim a check passed without running it.
-- `status.md` is the user's tracker — update it only when asked or when completing an item it lists.
+- `documentation.md` is the single source of project and feature status. `status.md` is outdated (2026-10-09):
+  disregard it and do not update it (user decision 2026-10-30).
 
 ## Git
 

@@ -19,10 +19,12 @@ class AdmApprovalController extends Controller
         $this->authorize('viewAdmApprovals', Document::class);
         $user = $request->user();
 
-        $documents = Document::visibleTo($user)->with(['documentType:id,document_type', 'primaryEntry.receiver:id,name'])
+        // Not visibleTo(): ADM staff record approvals of confidential documents too, without seeing their details.
+        $documents = Document::where('state', 1)->with(['documentType:id,document_type', 'primaryEntry.receiver:id,name'])
             ->inStage([DocumentTrail::STAGE_ADM_APPROVAL])->where('status', '!=', 'Completed')
             ->latest()->paginate(10)->withQueryString()
-            ->through(fn (Document $document) => $document->setAttribute('can_receive', $user->can('receiveAdm', $document))
+            ->through(fn (Document $document) => $document->hideConfidentialDetailsFrom($user)
+                ->setAttribute('can_receive', $user->can('receiveAdm', $document))
                 ->setAttribute('can_approve', $user->can('approveAdm', $document))
                 ->setAttribute('stamp_source_url', $document->stampSourceUrl())
                 ->setAttribute('is_paperless', $document->isPaperless()));

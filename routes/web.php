@@ -55,6 +55,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/transactions/{document}/receive', [TransactionController::class, 'receive'])->name('transactions.receive');
         Route::post('/transactions/{document}/receive-copy', [TransactionController::class, 'receiveCopy'])->name('transactions.receive-copy');
         Route::post('/documents/{document}/primary-office', [TransactionController::class, 'changePrimary'])->name('documents.primary-office');
+        Route::post('/documents/{document}/category', [DocumentController::class, 'changeCategory'])->name('documents.category');
 
     });
 

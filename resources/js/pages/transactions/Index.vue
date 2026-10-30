@@ -183,7 +183,9 @@ function submitProcess() {
                             <tr v-for="doc in documents.data" :key="doc.id" class="transition-colors" :class="focusDocument?.id === doc.id ? 'bg-indigo-50' : 'hover:bg-slate-50'">
                                 <td class="px-4 py-2 font-mono font-semibold text-emerald-600 whitespace-nowrap">{{ doc.barcode }}</td>
                                 <td class="px-4 py-2">
-                                    <p class="text-slate-800 font-medium line-clamp-2" :title="doc.subject_matter">{{ doc.subject_matter }}</p>
+                                    <!-- Confidential: the server sent no details; work from the paper copy -->
+                                    <p v-if="doc.details_hidden" class="font-medium text-amber-800">Confidential document</p>
+                                    <p v-else class="text-slate-800 font-medium line-clamp-2" :title="doc.subject_matter">{{ doc.subject_matter }}</p>
                                     <p class="text-xs text-slate-500 mt-0.5">
                                         {{ doc.document_type?.document_type || 'Unknown Type' }}
                                         <span v-if="doc.is_delayed" class="font-medium text-rose-700" title="Past the category limit (Simple 3 / Complex 7 / Highly Technical 20 days)">· Delayed</span>
@@ -193,7 +195,7 @@ function submitProcess() {
                                 <td class="px-4 py-2 text-slate-600 whitespace-nowrap">{{ doc.source_name }}</td>
                                 <td class="px-4 py-2 whitespace-nowrap text-center">
                                     <div class="flex items-center justify-center gap-2">
-                                        <a :href="route('documents.show', doc.id)" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50">View</a>
+                                        <a v-if="!doc.details_hidden" :href="route('documents.show', doc.id)" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50">View</a>
                                         <template v-if="isReceived(doc)">
                                             <span
                                                 class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700"
@@ -311,7 +313,7 @@ function submitProcess() {
                                     </div>
                                     <div class="sm:col-span-2">
                                         <label class="block text-xs font-medium text-slate-500 mb-1">Subject Matter</label>
-                                        <textarea disabled rows="2" class="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600 cursor-not-allowed opacity-75 resize-none" :value="selectedDocument?.subject_matter"></textarea>
+                                        <textarea disabled rows="2" class="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600 cursor-not-allowed opacity-75 resize-none" :value="selectedDocument?.details_hidden ? 'Confidential document: see the paper copy.' : selectedDocument?.subject_matter"></textarea>
                                     </div>
                                 </div>
                             </div>

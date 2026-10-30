@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Document;
 use App\Http\Requests\AnalyzeDocumentRequest;
+use App\Http\Requests\ChangeCategoryRequest;
 use App\Http\Requests\DispatchDocumentRequest;
 use App\Http\Requests\DocumentMutationRequest;
 use App\Http\Requests\SaveDocumentRequest;
@@ -37,6 +38,13 @@ class DocumentController extends Controller
         }
 
         $documents = $query->latest()->paginate(6)->withQueryString();
+        // Edit and Route show only where they would work: the policy plus an unfinished document (the policy alone
+        // falls back to department_id when no trail entry is open, which is true of every completed document).
+        $documents->getCollection()->each(function (Document $document) use ($request) {
+            $open = $document->status !== 'Completed';
+            $document->setAttribute('can_edit', $open && $request->user()->can('update', $document));
+            $document->setAttribute('can_route', $open && $request->user()->can('dispatch', $document));
+        });
 
         return Inertia::render('documents/Index', [
             'documents' => $documents, 
@@ -116,6 +124,8 @@ class DocumentController extends Controller
             // The Primary office first, then every office holding a view-only copy (pivot.copy_role).
             'holders' => $document->holders()->get(['departments.id', 'departments.code', 'departments.name']),
             'canChangePrimary' => request()->user()->can('changePrimary', $document),
+            'canChangeCategory' => request()->user()->can('changeCategory', $document),
+            'categories' => fn () => TransactionType::where('state', 1)->orderBy('processing_days')->get(['id', 'name', 'processing_days']),
             // Linked barcodes the user may open, so each one links to its document (barcode => id).
             'linkedDocumentIds' => Document::visibleTo(request()->user())
                 ->whereIn('barcode', $this->linkedBarcodes($document))->pluck('id', 'barcode'),
@@ -150,6 +160,13 @@ class DocumentController extends Controller
         $documents->save($document, $request->user(), $request->validated());
 
         return redirect()->route('documents.index')->with('success', 'Document updated successfully.');
+    }
+
+    public function changeCategory(ChangeCategoryRequest $request, Document $document, DocumentService $documents)
+    {
+        $documents->changeCategory($document, $request->user(), $request->validated('workflow_version'), $request->integer('transaction_type_id'));
+
+        return redirect()->back()->with('success', 'Category changed.');
     }
 
     public function destroy(DocumentMutationRequest $request, Document $document, DocumentService $documents)

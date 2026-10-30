@@ -60,9 +60,39 @@ class Document extends Model
         ];
     }
 
+    /** What a confidential document hides from anyone outside Records, the System Administrator and Supervisory. */
+    public const CONFIDENTIAL_FIELDS = [
+        'subject_matter', 'source_name', 'source_location', 'gender', 'contact_no', 'email',
+        'linked_documents', 'attached_file', 'ai_routing_suggestions', 'access_code',
+    ];
+
+    /**
+     * FGD visibility (user decisions 2026-10-30): Records, the System Administrator and the Supervisory Level see
+     * every active document; Workstation staff see documents their office has handled, never confidential ones.
+     */
     public function scopeVisibleTo(Builder $query, User $user): Builder
     {
-        return $query->where('state', 1);
+        return $query->where('state', 1)->unless($user->seesAllDocuments(), fn (Builder $documents) => $documents
+            ->where('is_confidential', false)
+            ->whereHas('trails', fn (Builder $trails) => $trails->where('department_id', $user->department_id)));
+    }
+
+    public function detailsHiddenFrom(User $user): bool
+    {
+        return (bool) $this->is_confidential && ! $user->seesAllDocuments();
+    }
+
+    /**
+     * For lists where an office must still act on a confidential document (inbox, approval queues): keep the
+     * barcode and workflow fields, drop its details from what is sent to the browser. Serialization only.
+     */
+    public function hideConfidentialDetailsFrom(User $user): static
+    {
+        if ($this->detailsHiddenFrom($user)) {
+            $this->makeHidden(self::CONFIDENTIAL_FIELDS)->setAttribute('details_hidden', true);
+        }
+
+        return $this;
     }
 
     /** Documents an office holds the open Primary entry of, i.e. the documents it must act on. */
@@ -70,6 +100,13 @@ class Document extends Model
     {
         return $query->whereHas('trails', fn (Builder $trails) => $trails->where('department_id', $departmentId)
             ->where('copy_role', DocumentTrail::PRIMARY)->whereNull('released_at'));
+    }
+
+    /** Documents the office has ever held as Primary: its own department's data on the dashboard (FGD). */
+    public function scopeHandledBy(Builder $query, int $departmentId): Builder
+    {
+        return $query->whereHas('trails', fn (Builder $trails) => $trails->where('department_id', $departmentId)
+            ->where('copy_role', DocumentTrail::PRIMARY));
     }
 
     /** The open Primary entry: where the document is acted on, and the executive stage it waits on. */

@@ -15,9 +15,6 @@ use Illuminate\Support\Collection;
  */
 class DashboardReportService
 {
-    /** Roles whose alert cards cover every department; other users see their own office only. */
-    public const ALL_DEPARTMENT_ROLES = ['system_administrator', 'city_administrator', 'records_manager'];
-
     public const TRANSACTION_CATEGORIES = ['Simple', 'Complex', 'Highly Technical'];
 
     public const PIPELINES = ['on_time' => 'On-Time', 'on_going' => 'On-Going', 'delayed' => 'Delayed'];
@@ -25,9 +22,16 @@ class DashboardReportService
     /** Office-scoped lists that open from the alert cards. */
     public const ALERT_REPORTS = ['delinquent' => 'Delinquent Documents', 'due_tomorrow' => 'Due Tomorrow', 'todo' => 'To-Do List'];
 
+    /** Same rule as document visibility: Workstation staff see their own department only. */
     public function seesAllDepartments(User $user): bool
     {
-        return in_array($user->role, self::ALL_DEPARTMENT_ROLES, true);
+        return $user->seesAllDocuments();
+    }
+
+    /** Limits a document query to the user's own department unless they see every office. */
+    public function scopeToUser(Builder $documents, User $user): Builder
+    {
+        return $documents->when(! $this->seesAllDepartments($user), fn ($query) => $query->handledBy((int) $user->department_id));
     }
 
     /** Open documents: every active department for oversight roles, otherwise those the user's office holds. */
@@ -82,20 +86,20 @@ class DashboardReportService
             ->all();
     }
 
-    /** Active documents registered in the given month. */
-    public function monthQuery(int $year, int $month): Builder
+    /** Active documents registered in the given month, within what the user may see. */
+    public function monthQuery(int $year, int $month, User $user): Builder
     {
-        return Document::whereYear('created_at', $year)->whereMonth('created_at', $month)->where('state', 1);
+        return $this->scopeToUser(Document::whereYear('created_at', $year)->whereMonth('created_at', $month)->where('state', 1), $user);
     }
 
     /**
      * One pipeline cell: on-time is completed on/before its due date, on-going is still open and within SLA,
      * and delayed has exceeded its due date. Mirrors the dashboard's pipeline counter.
      */
-    public function pipelineQuery(int $year, int $month, string $category, string $pipeline): Builder
+    public function pipelineQuery(int $year, int $month, string $category, string $pipeline, User $user): Builder
     {
         $now = Carbon::now('Asia/Manila');
-        $query = $this->monthQuery($year, $month)->whereIn('transaction_type_id', $this->transactionTypeIds($category));
+        $query = $this->monthQuery($year, $month, $user)->whereIn('transaction_type_id', $this->transactionTypeIds($category));
 
         return match ($pipeline) {
             'on_time' => $query->where('status', 'Completed')

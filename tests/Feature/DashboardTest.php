@@ -235,3 +235,52 @@ test('a report row carries the DTS columns and the footer names who generated it
 test('guests cannot open a dashboard report', function () {
     $this->get(route('dashboard.report', ['report' => 'todo']))->assertRedirect('/login');
 });
+
+test('Workstation staff see only their own department on every card and report; Supervisory and Records see all', function () {
+    $this->travelTo(Carbon::parse('2026-10-20 10:00:00', 'Asia/Manila'));
+    $records = Department::create(['code' => 'REC', 'name' => 'Records', 'state' => 1]);
+    $engineering = Department::create(['code' => 'ENG', 'name' => 'Engineering', 'state' => 1]);
+    $health = Department::create(['code' => 'CHO', 'name' => 'Health', 'state' => 1]);
+    $simple = TransactionType::create(['name' => 'Simple', 'processing_days' => 3, 'state' => 1]);
+    $voucher = DocumentType::create(['document_code' => 'VOU', 'document_type' => 'Voucher', 'state' => 1, 'default_transaction_type_id' => $simple->id]);
+    foreach ([['ENG-DONE', $engineering, 2], ['CHO-DONE', $health, 6]] as [$barcode, $office, $days]) {
+        $document = Document::create([
+            'barcode' => $barcode, 'access_code' => 'ACCESS1', 'department_id' => $office->id, 'document_type_id' => $voucher->id,
+            'transaction_type_id' => $simple->id, 'source_type' => 'External', 'source_name' => 'Test Client', 'subject_matter' => 'Voucher',
+            'due_date' => Carbon::parse('2026-10-30 17:00:00', 'Asia/Manila'),
+        ]);
+        $document->forceFill([
+            'status' => 'Completed',
+            'created_at' => Carbon::parse('2026-10-05 00:00:00', 'UTC'),
+            'completed_at' => Carbon::parse('2026-10-05 08:00:00', 'Asia/Manila')->addDays($days),
+        ])->save();
+        // Registered at Records, then the office held it as Primary.
+        $document->trails()->create(['department_id' => $records->id, 'received_action' => 'Document Scanned & Registered']);
+        $document->trails()->create(['department_id' => $office->id, 'received_action' => 'Dispatched from Records', 'released_at' => now()]);
+    }
+    $report = route('dashboard.report', ['month' => 'October', 'year' => 2026, 'transaction_category' => 'Simple', 'pipeline_status' => 'on_time']);
+
+    $staff = User::factory()->create(['role' => 'staff', 'department_id' => $engineering->id]);
+    $this->actingAs($staff)->get(route('dashboard'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('scope', ['code' => 'ENG', 'name' => 'Engineering'])
+            ->where('summaryCards.0.value', '1')
+            ->where('summaryCards.1.value', '1')
+            ->where('pipeline.0.rows.0.value', 1)
+            ->where('processingTimes.0.value', 2));
+    $this->get($report)->assertInertia(fn (Assert $page) => $page
+        ->where('title', 'On-Time Simple Documents (Your Office)')
+        ->has('rows', 1)->where('rows.0.barcode', 'ENG-DONE'));
+
+    $head = User::factory()->create(['role' => 'department_head', 'department_id' => $engineering->id]);
+    $recordsStaff = User::factory()->create(['role' => 'staff', 'department_id' => $records->id]);
+    foreach ([$head, $recordsStaff] as $user) {
+        $this->actingAs($user)->get(route('dashboard'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('scope', null)
+                ->where('summaryCards.0.value', '2')
+                ->where('pipeline.0.rows.0.value', 2)
+                ->where('processingTimes.0.value', 4));
+        $this->get($report)->assertInertia(fn (Assert $page) => $page->where('title', 'On-Time Simple Documents')->has('rows', 2));
+    }
+});

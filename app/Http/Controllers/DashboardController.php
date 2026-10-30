@@ -18,8 +18,10 @@ class DashboardController extends Controller
         $year = $request->year();
         $monthNumber = $request->monthNumber();
 
-        // Base Query: All active documents created in the selected month
-        $monthQuery = $reports->monthQuery($year, $monthNumber);
+        // Every card follows the same scope: all offices, or the Workstation user's own department (FGD slide 9).
+        $user = $request->user();
+        $seesAllDepartments = $reports->seesAllDepartments($user);
+        $monthQuery = $reports->monthQuery($year, $monthNumber, $user);
 
         // ---------------------------------------------------------
         // 1. TOP SUMMARY CARDS
@@ -31,9 +33,7 @@ class DashboardController extends Controller
         // ---------------------------------------------------------
         // 2. DELINQUENT / DUE TOMORROW / TO-DO
         // ---------------------------------------------------------
-        // Oversight roles see every active department; everyone else sees only documents their office holds.
-        $user = $request->user();
-        $seesAllDepartments = $reports->seesAllDepartments($user);
+        // Workstation users count only documents their office holds now.
         $openDocuments = $reports->openDocuments($user);
 
         // ---------------------------------------------------------
@@ -74,7 +74,8 @@ class DashboardController extends Controller
         $processingCategory = $request->category('processing_category', 'Simple');
         $categoryTransactionTypeIds = $reports->transactionTypeIds($processingCategory);
 
-        $averageDaysByType = Document::where('state', 1)
+        $averageDaysByType = $reports->scopeToUser(Document::query(), $user)
+            ->where('state', 1)
             ->where('status', 'Completed')
             ->whereNotNull('completed_at')
             ->whereYear('completed_at', $year)
@@ -116,6 +117,7 @@ class DashboardController extends Controller
             'years' => $request->years(),
             'transactionCategories' => DashboardReportService::TRANSACTION_CATEGORIES,
             'processingCategory' => $processingCategory,
+            'scope' => $seesAllDepartments ? null : $user->department?->only(['code', 'name']),
             'summaryCards' => [
                 ['label' => 'Monthly Documents', 'value' => number_format($totalDocuments), 'badge' => 'Total', 'badgeColor' => 'emerald'],
                 ['label' => 'External Clients', 'value' => number_format($externalClients), 'suffix' => 'Served'],
