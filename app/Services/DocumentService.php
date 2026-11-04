@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Jobs\SendTrackingCode;
+use App\Jobs\SendTrackingSms;
 use App\Models\AuditLog;
 use App\Models\Document;
 use App\Models\DocumentTrail;
@@ -19,7 +20,7 @@ use Throwable;
 
 class DocumentService
 {
-    public function __construct(private DocumentWorkflow $workflow) {}
+    public function __construct(private DocumentWorkflow $workflow, private SmsService $sms) {}
 
     public function save(?Document $document, User $user, array $data): Document
     {
@@ -44,8 +45,11 @@ class DocumentService
                 unset($data['workflow_version']);
 
                 $emailChanged = false;
-                $document = $this->workflow->mutate($document, $user, $version, 'update', function (Document $document, User $user) use ($data, &$emailChanged) {
+                $mobileChanged = false;
+                $document = $this->workflow->mutate($document, $user, $version, 'update', function (Document $document, User $user) use ($data, &$emailChanged, &$mobileChanged) {
                     $emailChanged = array_key_exists('email', $data) && ($data['email'] ?? null) !== $document->email;
+                    $mobileChanged = array_key_exists('contact_no', $data)
+                        && $this->sms->mobileNumber($data['contact_no'] ?? null) !== $this->sms->mobileNumber($document->contact_no);
                     $target = empty($data['department_id']) ? $document->department_id : (int) $data['department_id'];
                     if ($target !== (int) $document->department_id) {
                         $this->workflow->targets([$target], $document->department_id, 'department_id');
@@ -59,10 +63,8 @@ class DocumentService
                     }
                     $document->fill([...$data, 'department_id' => $target]);
                 });
-                // A client email added or corrected after intake still needs the tracking code.
-                if ($emailChanged) {
-                    $this->sendTrackingCode($document);
-                }
+                // A client email or mobile number added or corrected after intake still needs the tracking code.
+                $this->sendTrackingCode($document, $emailChanged, $mobileChanged);
 
                 return $document;
             }
@@ -112,7 +114,7 @@ class DocumentService
 
                 return $document;
             });
-            $this->sendTrackingCode($document);
+            $this->sendTrackingCode($document, true, true);
 
             return $document;
         } catch (Throwable $exception) {
@@ -150,22 +152,25 @@ class DocumentService
     }
 
     /**
-     * Queue the client's barcode + access code email. Runs after the document is saved, so a mail problem
-     * never undoes or fails the registration.
+     * Queue the client's barcode + access code by email and, for a Philippine mobile number while the SMS gateway
+     * is configured, by text. Runs after the document is saved, so a mail or SMS problem never undoes or fails it.
      */
-    private function sendTrackingCode(Document $document): void
+    private function sendTrackingCode(Document $document, bool $email, bool $sms): void
     {
-        if (! $document->email) {
-            return;
-        }
-        try {
-            SendTrackingCode::dispatch($document->id)->afterCommit();
-        } catch (Throwable $exception) {
-            Log::warning('Tracking code email could not be queued.', [
-                'document_id' => $document->id,
-                'exception' => $exception::class,
-                'message' => $exception->getMessage(),
-            ]);
+        $jobs = array_filter([
+            'email' => $email && $document->email ? new SendTrackingCode($document->id) : null,
+            'SMS' => $sms && $this->sms->isConfigured() && $this->sms->mobileNumber($document->contact_no) ? new SendTrackingSms($document->id) : null,
+        ]);
+        foreach ($jobs as $channel => $job) {
+            try {
+                dispatch($job->afterCommit());
+            } catch (Throwable $exception) {
+                Log::warning("Tracking code {$channel} could not be queued.", [
+                    'document_id' => $document->id,
+                    'exception' => $exception::class,
+                    'message' => $exception->getMessage(),
+                ]);
+            }
         }
     }
 

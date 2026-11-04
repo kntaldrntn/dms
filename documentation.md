@@ -311,6 +311,28 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
 
 ## 10. Change log
 
+### 2026-11-04 — Tracking code by SMS (Smart Messaging Suite) (Claude Code, uncommitted)
+- **Why (user, from their supervisor):** use the Smart Messaging Suite HTTP API (`POST
+  https://messagingsuite.smart.com.ph/cgphttp/servlet/sendmsg`, headers `Accept: text/plain`, `X-MEMS-API-ID`,
+  `X-MEMS-API-KEY`, form fields `destination`, `text`) to text clients their barcode + access code (§8 "SMS").
+- Config `services.smart_sms` (`SMART_SMS_URL` — empty = the URL above —, `SMART_SMS_API_ID`, `SMART_SMS_API_KEY`;
+  empty in `.env.example`, real values in the local `.env` only). SMS is off while the ID or key is empty.
+  `phpunit.xml` blanks both so tests never text real numbers.
+- New `App\Services\SmsService` (`isConfigured()`, `mobileNumber()` → `639XXXXXXXXX` from `09…`, `+63 9…`, `9…`;
+  landlines and anything else → null; `send()` via Laravel `Http`, 15 s timeout, non-2xx → exception with status
+  and the first 200 characters of the reply). New queued `App\Jobs\SendTrackingSms` (3 tries, 60/300 s backoff,
+  logs "Tracking code SMS failed."): "City of San Fernando DMS: We received your document. Barcode: … Access
+  code: …. Track it at {APP_URL}/login?tab=track".
+- `DocumentService::sendTrackingCode($document, $email, $sms)` queues the email and/or SMS after registration, and
+  after an Edit that changes the client email or the (normalized) mobile number; a queueing error is logged and never
+  fails the save.
+- **First real send (2026-11-04, user's own number, user-approved):** destination `639XXXXXXXXX` was accepted; the
+  gateway answered HTTP 200 `0 001 OK` + `Message-ID: …`. `send()` now also treats a reply that does not start with
+  `0 ` as refused (assumption: non-zero first code = error; Smart's error codes are not documented here).
+  **Verified by the user:** the text arrived on their phone.
+- Checks: Pest 218 passed (`TrackingSmsTest` 13 cases with `Http::fake` + `preventStrayRequests`, incl. a refused
+  HTTP 200 reply); Pint ✅. Needs a running queue worker (`php artisan queue:work`) for intake sends.
+
 Newest first. Everything up to 2026-10-29 is committed and pushed (latest `69ff0f8`); the 2026-10-30 entries are
 uncommitted. Older "not checked in the browser" notes are superseded by §5 "Verified by the user in the browser".
 

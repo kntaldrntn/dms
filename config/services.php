@@ -44,6 +44,13 @@ return [
         'max_text_characters' => 9000,
     ],
 
+    // Smart Messaging Suite (MEMS) HTTP API: texts the client their barcode + access code. Off while the ID or key is empty.
+    'smart_sms' => [
+        'url' => env('SMART_SMS_URL') ?: 'https://messagingsuite.smart.com.ph/cgphttp/servlet/sendmsg',
+        'api_id' => env('SMART_SMS_API_ID'),
+        'api_key' => env('SMART_SMS_API_KEY'),
+    ],
+
     // Paperless (PNPKI) route. Off = hybrid paper route like the old DTS: wet signatures, staff record approvals.
     'paperless' => [
         'enabled' => (bool) env('DMS_PAPERLESS_ENABLED', false),
