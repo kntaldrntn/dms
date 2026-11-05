@@ -95,5 +95,5 @@ test('a Workstation dashboard report counts its confidential documents without t
     $this->actingAs($staff)->get(route('dashboard.report', ['report' => 'todo']))->assertInertia(fn (Assert $page) => $page
         ->has('rows', 2)
         ->where('rows', fn ($rows) => collect($rows)->contains(fn ($row) => $row['barcode'] === 'CONF-1' && $row['details_hidden'] === true
-            && $row['subject_matter'] === 'Confidential document' && $row['source_name'] === null && $row['email'] === null)));
+            && $row['subject_matter'] === 'Confidential document' && $row['source_name'] === null && ! array_key_exists('email', $row))));
 });

@@ -259,8 +259,10 @@ const analyzeFile = async (file: File) => {
             directTo.value = 'ADM';
             executiveSuggestion.value = { route: 'City Administrator', reason: data.approval_reason || 'Requires City Administrator approval.' };
         } else {
+            // The AI asks for an executive approval through department_id above, so its department suggestions
+            // never pre-fill ADM/OCM as plain offices.
             const suggested = form.ai_routing_suggestions.filter((suggestion: any) =>
-                intakeOffices.value.some((office) => office.id === Number(suggestion.department_id)),
+                intakeOffices.value.some((office) => office.id === Number(suggestion.department_id) && !['ADM', 'OCM'].includes(office.code)),
             );
             if (suggested.length) {
                 // The Primary comes from the offices that survived the filter, so it is always one of the routed offices.
@@ -297,8 +299,9 @@ watch(directTo, (target) => {
     form.department_id = target === 'ADM' ? cityAdministratorId : target === 'OCM' ? cityMayorId : null;
     if (target === 'departments' && !form.routed_to.length) showOfficePicker.value = true;
 });
-// ADM and OCM are chosen in Direct to (they open an approval stage); Records does not route to itself.
-const intakeOffices = computed(() => props.departments.filter((office) => !['REC', 'ADM', 'OCM'].includes(office.code)));
+// Records does not route to itself. ADM/OCM picked here get it in their Office Inbox with no approval step;
+// Direct to City Administrator / City Mayor is the approval route.
+const intakeOffices = computed(() => props.departments.filter((office) => office.code !== 'REC'));
 const showOfficePicker = ref(false);
 const pickerSuggestions = computed(() =>
     Object.fromEntries(

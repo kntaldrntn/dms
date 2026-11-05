@@ -55,13 +55,33 @@ test('intake can send a document straight to a Primary office with view-only cop
         ->assertInertia(fn (Assert $page) => $page->has('documents.data', 0)->where('copies.data.0.id', $document->id));
 });
 
+test('ADM or OCM picked as a department gets it in its Office Inbox with no approval step', function (string $code) {
+    $office = $code === 'ADM' ? $this->administrator : Department::create(['code' => 'OCM', 'name' => 'City Mayor', 'state' => 1]);
+    registerTo(['routed_to' => [$office->id], 'primary_office_id' => $office->id])->assertSessionHasNoErrors();
+
+    $document = Document::where('barcode', 'DEPT-1')->firstOrFail();
+    expect($document->department_id)->toBe($office->id)->and($document->stage)->toBeNull();
+
+    $officeStaff = User::factory()->create(['role' => 'staff', 'department_id' => $office->id]);
+    $this->actingAs($officeStaff)->get(route('transactions.inbox'))
+        ->assertInertia(fn (Assert $page) => $page->where('documents.data.0.id', $document->id));
+    $this->actingAs($officeStaff)->get(route($code === 'ADM' ? 'adm-approvals.index' : 'ocm-approvals.index'))
+        ->assertInertia(fn (Assert $page) => $page->has('documents.data', 0));
+
+    // Receive, then end it like any office.
+    $this->actingAs($officeStaff)->post(route('transactions.receive', $document))->assertSessionHasNoErrors();
+    $this->actingAs($officeStaff)->post(route('transactions.process', $document), [
+        'workflow_version' => $document->fresh()->workflow_version, 'action' => 'end', 'remarks' => 'Noted',
+    ])->assertSessionHasNoErrors();
+    expect($document->fresh()->status)->toBe('Completed');
+})->with(['ADM', 'OCM']);
+
 test('intake to departments is checked before anything is saved', function (Closure $extra, string $error) {
     registerTo($extra($this))->assertSessionHasErrors($error);
     $this->assertDatabaseCount('documents', 0);
     $this->assertDatabaseCount('document_trails', 0);
 })->with([
     'both an executive office and departments' => [fn ($test) => ['department_id' => $test->administrator->id, 'routed_to' => [$test->ict->id], 'primary_office_id' => $test->ict->id], 'department_id'],
-    'ADM picked as a department' => [fn ($test) => ['routed_to' => [$test->administrator->id], 'primary_office_id' => $test->administrator->id], 'routed_to.0'],
     'Records picked as a department' => [fn ($test) => ['routed_to' => [$test->recordsOffice->id], 'primary_office_id' => $test->recordsOffice->id], 'routed_to.0'],
     'Primary not among the offices' => [fn ($test) => ['routed_to' => [$test->ict->id], 'primary_office_id' => $test->health->id], 'primary_office_id'],
     'no Primary chosen' => [fn ($test) => ['routed_to' => [$test->ict->id]], 'primary_office_id'],

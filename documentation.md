@@ -18,7 +18,8 @@ the FGD process (focus group discussion deck, see §6).
 1. **Records intake:** Records registers each incoming document by barcode, optionally with AI autofill from the
    scanned file (OCR in the browser, extraction on the server). The document-type rulebook sets the category,
    allowed classifications and route (paper/paperless). Records picks **Direct to**: City Administrator (ADM),
-   City Mayor (OCM) or Departments (one **Primary** office + view-only copies).
+   City Mayor (OCM) or Departments (one **Primary** office + view-only copies). ADM/OCM picked under Departments
+   get it in their Office Inbox with **no approval step** (user, 2026-11-05).
 2. **Executive approvals:** ADM and OCM staff **Receive**, then record the executive's approval (paper route: any
    office user records it, optional scan of the wet-signed copy). ADM routes on to OCM or departments; OCM routes
    to departments. Nothing goes back to Records.
@@ -26,8 +27,8 @@ the FGD process (focus group discussion deck, see §6).
    or End Transaction), optionally recording the Department Head's wet signature. Copy offices only receive and view.
 4. **Custody trail:** every hand-off is a `document_trails` row; the trail is never rewritten.
 5. **Monitoring:** dashboard with SLA cards (24 h delinquency per office, delay by category), printable reports.
-6. **Clients:** get one email with the barcode + access code and look up the **latest status only** on the sign-in
-   page (Guest tab). SMS later.
+6. **Clients:** get the barcode + access code by email and/or SMS (whichever was given) and look up the **latest
+   status only** on the sign-in page (Guest tab).
 
 The paperless route (PNPKI per-signer digital signatures, AI stamp placement) is built but **switched off**
 (`DMS_PAPERLESS_ENABLED`) until the paper route is settled. It is still a required feature (user, 2026-10-30): keep
@@ -197,7 +198,7 @@ the Google Sheet "Document Management System Sheets" (`1monsI2DhgNCQoWd9Kuam-KBM
 approval, per-signer PNPKI, referral slips retired, reset command ✅ · 3 OCM routes to departments ✅ (2026-10-29) ·
 4 receiving office: receive-first ✅, Dept Head wet-signature record ✅, Dept Head PNPKI ⏸ (with paperless) ·
 5 monitoring: 24 h per Primary ✅, ADM delinquency tagging ❌, delayed-by-category view ❌ · 6 later: client status
-lookup ✅ (2026-10-30), office-scoped visibility ✅ (2026-10-30), SMS ❌, spreadsheet reports ❌.
+lookup ✅ (2026-10-30), office-scoped visibility ✅ (2026-10-30), SMS ✅ (2026-11-04), spreadsheet reports ❌.
 
 **Decisions (user, 2026-10-21 → 2026-10-30):**
 - City Administrator gives a single approval (no referral slip; removed entirely). ADM/OCM route directly to
@@ -282,8 +283,8 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
 19. **Mixed timestamps:** app timezone is UTC, so `created_at`/`updated_at` are real UTC while workflow timestamps
     (`received_at`, `released_at`, `due_date`, `completed_at`) are Manila wall-clock stored as if UTC. Frontends and SLA
     math treat them differently (`formatUtcDateStr`, `Document::is_delinquent`, `DashboardReportService::totalDays`).
-    Dashboard month filters use `whereMonth('created_at')` in UTC, so a document registered before 8 AM Manila on
-    the 1st counts in the previous month.
+    ~~Dashboard month filters use `whereMonth('created_at')` in UTC~~ — **fixed 2026-11-05**: the dashboard and its
+    reports filter by Manila month bounds (`periodQuery()`, `completedWithin()`). The stored mix itself is unchanged.
 
 ## 8. Next steps (suggested)
 
@@ -293,10 +294,12 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
    `MAIL_FROM_NAME` is "Laravel"), run all migrations, `ziggy:generate` + `npm run build`.
 3. Security: attachments on the private disk behind an authorized download (#1); remove `/register` (#3).
 4. FGD Phase 5: ADM delinquency tagging and the delayed-by-category view.
-5. SMS: choose a provider (e.g. Semaphore or a Globe/Smart gateway) and send the same barcode + access code.
+5. Commit the signing-authority change (2026-11-04) when the user says so.
 6. Small cleanup change with tests: #10–#14, `.gitignore` (#5), tsconfig `types` so `vue-tsc` runs (#16).
 7. Decide the timestamp convention (#19) before further date/SLA work.
 8. Later: spreadsheet export of reports; paperless switch-on (test real PNPKI `.p12` files under OpenSSL 3 first).
+   With paperless (user decision 2026-11-04): department PNPKI signing in Process — the Department Head or an
+   authorized signer (`users.can_sign_for_head`) signs with their own certificate + PIN; record `signed_for_head`.
 
 ## 9. Decisions & assumptions
 
@@ -310,6 +313,111 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
   192.168.4.33.
 
 ## 10. Change log
+
+### 2026-11-05 — PNPKI stamp: signature image optional, signers upload their own (Claude Code, uncommitted)
+- User: User Management asked for a "Digital Signature" as if it were the PNPKI signature; the stamp should be the
+  PNPKI look — signature image left, "Digitally Signed / name / position / date" right (already how
+  `drawVisibleStamp()` draws it).
+- `PdfApprovalStampService::stamp()`: the signature image is **optional**; without one the text block takes the whole
+  stamp box. The PNPKI certificate signs either way (the "Your e-signature is not on file" refusal is gone).
+- Settings → Signing certificate (`settings/Certificate.vue`): new "Signature image (optional)" section with a
+  stamp preview, upload/replace/remove. Routes `POST|DELETE settings/signature-image` (`auth` +
+  `SignatureImageRequest` / `SIGNER_ROLES` check), `SigningCertificateService::storeSignatureImage()` /
+  `removeSignatureImage()` (old file deleted on replace). Same `public` disk + `signatures/` folder as the User
+  Management upload, so the stamp reads one place. `ziggy:generate` run.
+- User Management: field renamed "Signature image for the PNPKI stamp (Optional)" with a hint that the `.p12` is
+  the signer's own upload in Settings.
+- Known risk (pre-existing, unchanged): signature images live on the `public` disk, reachable by URL like
+  attachments (#1); moving them to a private disk belongs with that fix.
+- Checks: Pest 224 passed (2378 assertions; `AdmApprovalTest` "no e-signature image" refusal → text-only stamp
+  still signs; new `SigningCertificateTest` image case incl. replace/remove/non-image/staff 403); Pint ✅; ESLint ✅;
+  build ✅. Not checked in the browser; no real PNPKI file used.
+
+### 2026-11-05 — Users list: signers' PNPKI readiness (Claude Code, uncommitted)
+- User asked how the System Administrator uploads the signers' PNPKI certificates. Answer: they don't — each signer
+  uploads their own `.p12` + PIN in Settings → Signing certificate (the PIN proves the signature is theirs); the
+  System Administrator uploads only the signature image (Users → Edit). Added a status view instead.
+- `UserController::index()` adds `signing_status` for `User::SIGNER_ROLES` (null for other roles): `certificate`
+  none / valid / expiring (≤ 30 days) / expired, `valid_until`, `signature_image` (bool). No file path or PIN.
+- `users/Index.vue`: new **Signing** column — badge "Valid until May 15, 2027" / "Expires soon" (amber) /
+  "Expired …" (red) / "No certificate", plus "Signature image on file" or "No signature image"; "Does not sign" for
+  other roles. Tooltips say who acts (signer uploads; renew within 30 days).
+- Not yet: authorized signatories (`can_sign_for_head`) are not in `SIGNER_ROLES`, so they show "Does not sign" and
+  cannot upload a certificate (part of the on-hold department PNPKI work).
+- Checks: Pest 223 passed (2353 assertions; new `UserSigningStatusTest`); Pint ✅ (new test); ESLint ✅; build ✅.
+  Not checked in the browser.
+
+### 2026-11-05 — Dashboard: From/To month period, Manila-time months (Claude Code, uncommitted)
+- User: a From and To month instead of a single month (quarterly/semestral/yearly reporting).
+- `DashboardFilterRequest::period()`: `from`/`to` as `YYYY-MM` (years limited to `years()`), reversed range swapped,
+  unusable values fall back; old links with `month` + `year` still open that single month.
+- `DashboardReportService`: `monthQuery()` → `periodQuery($start, $end, $user)` (created_at is real UTC, so Manila
+  bounds are converted); `completedWithin()` compares completed_at (Manila wall-clock) with Manila bounds;
+  `pipelineQuery()` takes the period. Fixes known issue #19's month-boundary miscount (before 08:00 on the 1st).
+- `DashboardController`: props `from`, `to`, `periodLabel` ("January – March 2026") replace `selectedMonth` /
+  `selectedYear`; first card renamed "Total Documents". `DashboardReportController`: report date range from the period.
+- `Dashboard.vue`: From (month + year) → To (month + year), Generate (disabled when unchanged or reversed, with an
+  error message), quick ranges This month / This quarter / This year (`aria-pressed`), "Showing {period} · {scope}".
+  Card reports open with the same `from`/`to`. Alert cards (Delinquent, For Due, To-Do) still describe today.
+- Checks: Pest 222 passed (2338 assertions; 2 new `DashboardTest` cases: multi-month range across a year incl. the
+  Manila Jan-1 boundary and report date range; reversed/invalid input); Pint ✅; ESLint ✅; Prettier ✅ (Dashboard.vue,
+  whole file reformatted); build ✅. Not checked in the browser.
+
+### 2026-11-05 — Dashboard reports: modern layout (Claude Code, uncommitted)
+- User: the card reports (Simple / Complex / Highly Technical, Delinquent, For Due, To-Do) "felt so old school".
+- `dashboard/Report.vue` only (same props, no backend change): seal + title header with generated by/date; summary
+  tiles (date range, document count, average and longest total time); screen-only search (count shows "x of y");
+  7 columns instead of 11 — Document (barcode + type badge), Source (name + type · gender), Contact (number +
+  email), Subject, Office badge, Total time; confidential rows show "Confidential document"; "← Dashboard" link.
+  Print: landscape, no shadows/borders around the card, colours kept.
+- Checks: ESLint ✅, Prettier ✅ (file), build ✅, `--filter=Report` 8 passed. Not checked in the browser.
+- Follow-ups (user, same day): all columns centred except Subject matter. **No personal data in reports:** columns
+  are now Date, Document, Source (name only), Subject matter, Office, Total time; `DashboardReportController` no
+  longer sends `source_type`, `gender`, `contact_no`, `email` (tests assert they are absent). When printed, the
+  summary tiles become one line (range · count · average · longest). Pest 220 passed (2260 assertions); Pint ✅;
+  ESLint ✅; build ✅.
+
+### 2026-11-05 — Tracking SMS without a link (Claude Code, uncommitted)
+- **Problem (user):** no text after registering a document with their mobile number. Queue empty, no failed jobs, no
+  log; a re-send was accepted (`0 001 OK`) but never arrived. The same text **without the URL** arrived (verified by
+  the user). Cause: Philippine networks drop texts containing a link even though the gateway answers OK; the
+  2026-11-04 test text had no link.
+- `SendTrackingSms::message()` now ends "Track it on the DMS sign-in page, Guest tab." (no URL); the email keeps the
+  link. `TrackingSmsTest` asserts the text has no `http(s)://` / `www.`.
+- Running `queue:work` processes keep the old message until restarted (two were running on 2026-11-05).
+- Checks: Pest 220 passed (2255 assertions); Pint ✅ on the changed files.
+
+### 2026-11-05 — Intake: ADM/OCM as plain departments, no approval (Claude Code, uncommitted)
+- User: "it should not require approval if it comes from Departments -> OCM/ADM".
+- **Direct to City Administrator / City Mayor** still opens the approval stage (Approvals page: Receive → record
+  approval → route). **Direct to Departments** may now include ADM/OCM: they get it in their **Office Inbox** as
+  Primary or copy (Receive → Route / End), never in the Approvals queue.
+- `SaveDocumentRequest`: `routed_to.*` excludes only `REC`. `documents/Index.vue`: `intakeOffices` hides only Records;
+  AI department suggestions still never pre-fill ADM/OCM (the AI asks for approval through `department_id`).
+- Unchanged: ADM/OCM approvals still route only to departments other than REC/ADM/OCM (ADM uses "City Mayor" for OCM).
+- Checks: Pest 220 passed (2255 assertions; `IntakeToDepartmentsTest` gained ADM + OCM cases, lost "ADM picked as a
+  department" rejection); Pint ✅ on the changed files; ESLint ✅; build ✅. Not checked in the browser.
+
+### 2026-11-04 — Signing authority: staff who may sign for the Department Head (Claude Code, uncommitted)
+- **Why (user, from their supervisor):** some users have the authority to sign without the Department Head.
+  **User decisions:** department offices only (not ADM/OCM); granted by the System Administrator; permanent until
+  removed; the trail shows the real signer "for the Department Head".
+- Migration `2026_11_04_000000_add_signing_authority` (**run locally** with `--path`): `users.can_sign_for_head`
+  (bool, default false), `document_trails.signed_for_head` (bool, default false). Model casts/fillable updated.
+- User Management (`UserController` store/update, `users/Index.vue`): "May sign for the Department Head" checkbox
+  for the Department Staff role; the server clears it for any other role; the list shows "Signs for the Department
+  Head". Only the System Administrator reaches these routes (`role:system_administrator`).
+- **Corrected the same day (user):** the authority is for **PNPKI** signing only — an authorized person signs for
+  the Department Head with their own certificate. **The wet signature stays the Department Head's own.** The
+  "I did, for the Department Head" option first added to Process (wet signature) was removed again
+  (`signed_by_me` request field, `TransactionService` check, inbox radio, 4 tests). Kept: the user flag and its
+  checkbox (hint now says PNPKI / paperless route), `document_trails.signed_for_head`, and the trail line
+  "Signed by {name}" (+ " for the Department Head" when the flag is set).
+- **Not built yet:** department-level PNPKI signing in Process (paperless route); it is where `can_sign_for_head`
+  and `signed_for_head` will be used. Paperless is switched off.
+- Checks: Pest 219 passed (2207 assertions; `DepartmentHeadSignatureTest` keeps the grant test); Pint ✅ on the
+  changed service, request, migration, test (UserController and User model keep their pre-existing style debt);
+  ESLint ✅; build ✅. Not checked in the browser.
 
 ### 2026-11-04 — Tracking code by SMS (Smart Messaging Suite) (Claude Code, uncommitted)
 - **Why (user, from their supervisor):** use the Smart Messaging Suite HTTP API (`POST

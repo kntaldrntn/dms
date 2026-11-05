@@ -41,10 +41,14 @@ class SendTrackingSms implements ShouldQueue
         }
     }
 
-    /** Kept short (no subject): one or two SMS parts. */
+    /**
+     * Kept short (no subject): one or two SMS parts. No link: Philippine networks drop texts that contain a URL
+     * even though the gateway answers "0 001 OK" (seen 2026-11-05), so the client is pointed to the sign-in page
+     * in words; the email carries the link.
+     */
     public static function message(Document $document): string
     {
         return "City of San Fernando DMS: We received your document. Barcode: {$document->barcode} "
-            ."Access code: {$document->access_code}. Track it at ".route('login', ['tab' => 'track']);
+            ."Access code: {$document->access_code}. Track it on the DMS sign-in page, Guest tab.";
     }
 }

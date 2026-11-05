@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { Printer } from 'lucide-vue-next';
+import { ArrowLeft, CalendarRange, Clock, FileText, Lock, Printer, Search } from 'lucide-vue-next';
+import { computed, ref } from 'vue';
 
-defineProps<{
+const props = defineProps<{
     title: string;
     dateRange: string;
     rows: Array<{
@@ -13,11 +14,7 @@ defineProps<{
         barcode: string;
         document_code: string | null;
         document_type: string | null;
-        source_type: string | null;
         source_name: string | null;
-        gender: string | null;
-        contact_no: string | null;
-        email: string | null;
         subject_matter: string | null;
         department: string | null;
         total_days: number;
@@ -26,93 +23,207 @@ defineProps<{
     generatedOn: string;
 }>();
 
-// Fixed column widths and wrapping (like the old DTS report) so all 11 columns fit the page, on screen and on paper.
-const cell = 'border border-slate-400 px-1.5 py-1 align-middle break-words';
-const columns = ['7%', '10%', '8%', '6%', '11%', '6%', '9%', '10%', '21%', '5%', '7%'];
+// Screen-only filter; printing prints what is shown, and the count says so.
+const search = ref('');
+const shownRows = computed(() => {
+    const term = search.value.trim().toLowerCase();
+    if (!term) return props.rows;
+    return props.rows.filter((row) =>
+        [row.barcode, row.subject_matter, row.source_name, row.department, row.document_type, row.document_code].some((value) =>
+            value?.toLowerCase().includes(term),
+        ),
+    );
+});
+
+const averageDays = computed(() =>
+    shownRows.value.length ? shownRows.value.reduce((sum, row) => sum + row.total_days, 0) / shownRows.value.length : 0,
+);
+const longestDays = computed(() => Math.max(0, ...shownRows.value.map((row) => row.total_days)));
+const formatDays = (days: number) => `${days.toFixed(2)} ${days === 1 ? 'day' : 'days'}`;
+
 const printReport = () => window.print();
 </script>
 
 <template>
     <Head :title="title" />
 
-    <!-- Standalone, printable page in the layout of the old DTS report (opened in its own tab). -->
-    <main class="min-h-screen bg-white px-6 py-8 text-slate-900 print:p-0">
+    <!-- Standalone, printable page (opened in its own tab from the dashboard cards). -->
+    <main class="min-h-screen bg-slate-50 px-4 py-6 text-slate-800 sm:px-6 print:bg-white print:p-0">
         <div class="mx-auto max-w-[1400px]">
-            <div class="mb-4 flex justify-end print:hidden">
+            <div class="mb-4 flex items-center justify-between gap-3 print:hidden">
+                <Link
+                    :href="route('dashboard')"
+                    class="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-white hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                >
+                    <ArrowLeft class="h-4 w-4" aria-hidden="true" /> Dashboard
+                </Link>
                 <button
                     type="button"
-                    class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                    class="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
                     @click="printReport"
                 >
                     <Printer class="h-4 w-4" aria-hidden="true" /> Print
                 </button>
             </div>
 
-            <h1 class="mb-6 text-center text-xl font-medium tracking-wide">DOCUMENT MANAGEMENT SYSTEM REPORT</h1>
+            <article
+                class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm print:rounded-none print:border-0 print:shadow-none"
+            >
+                <!-- Header -->
+                <header
+                    class="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 sm:flex-row sm:items-center sm:justify-between print:px-0 print:pt-0"
+                >
+                    <div class="flex items-center gap-4">
+                        <img src="/images/san_fernando_logo.png" alt="City of San Fernando seal" class="h-12 w-12 shrink-0 object-contain" />
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-wider text-emerald-700">
+                                City of San Fernando · Document Management System
+                            </p>
+                            <h1 class="text-xl font-bold text-slate-900">{{ title }}</h1>
+                        </div>
+                    </div>
+                    <div class="text-sm text-slate-500 sm:text-right">
+                        <p>
+                            Generated by <span class="font-medium text-slate-700">{{ generatedBy }}</span>
+                        </p>
+                        <p>{{ generatedOn }}</p>
+                    </div>
+                </header>
 
-            <dl class="mb-5 grid grid-cols-[10rem_1fr] gap-y-1 text-sm">
-                <dt>REPORT TYPE:</dt>
-                <dd>{{ title }}</dd>
-                <dt>DATE RANGE:</dt>
-                <dd>{{ dateRange }}</dd>
-                <dt>NO. OF RESULTS:</dt>
-                <dd>{{ rows.length.toLocaleString() }}</dd>
-            </dl>
+                <!-- Summary: tiles on screen, one line on paper -->
+                <p class="mb-2 mt-3 hidden text-[10px] text-slate-600 print:block">
+                    {{ dateRange }} · {{ shownRows.length.toLocaleString() }} {{ shownRows.length === 1 ? 'document' : 'documents' }} · average
+                    {{ formatDays(averageDays) }} · longest {{ formatDays(longestDays) }}
+                </p>
+                <section
+                    aria-label="Report summary"
+                    class="grid grid-cols-2 gap-3 border-b border-slate-200 bg-slate-50/60 px-6 py-4 lg:grid-cols-4 print:hidden"
+                >
+                    <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <CalendarRange class="h-5 w-5 shrink-0 text-emerald-600" aria-hidden="true" />
+                        <div class="min-w-0">
+                            <p class="text-xs font-medium text-slate-500">Date range</p>
+                            <p class="truncate text-sm font-semibold text-slate-800">{{ dateRange }}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <FileText class="h-5 w-5 shrink-0 text-emerald-600" aria-hidden="true" />
+                        <div>
+                            <p class="text-xs font-medium text-slate-500">Documents</p>
+                            <p class="text-sm font-semibold text-slate-800">
+                                {{ shownRows.length.toLocaleString() }}
+                                <span v-if="shownRows.length !== rows.length" class="font-normal text-slate-500"
+                                    >of {{ rows.length.toLocaleString() }}</span
+                                >
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <Clock class="h-5 w-5 shrink-0 text-emerald-600" aria-hidden="true" />
+                        <div>
+                            <p class="text-xs font-medium text-slate-500">Average total time</p>
+                            <p class="text-sm font-semibold text-slate-800">{{ formatDays(averageDays) }}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <Clock class="h-5 w-5 shrink-0 text-orange-500" aria-hidden="true" />
+                        <div>
+                            <p class="text-xs font-medium text-slate-500">Longest total time</p>
+                            <p class="text-sm font-semibold text-slate-800">{{ formatDays(longestDays) }}</p>
+                        </div>
+                    </div>
+                </section>
 
-            <table class="w-full table-fixed border-collapse text-xs print:text-[9px]">
-                <colgroup>
-                    <col v-for="(width, index) in columns" :key="index" :style="{ width }" />
-                </colgroup>
-                <thead class="text-[11px] font-semibold print:text-[9px]">
-                    <tr class="text-center">
-                        <th scope="col" :class="cell">DATE</th>
-                        <th scope="col" :class="cell">BARCODE</th>
-                        <th scope="col" :class="cell">DOCUMENT TYPE</th>
-                        <th scope="col" :class="cell">SOURCE TYPE</th>
-                        <th scope="col" :class="cell">SOURCE</th>
-                        <th scope="col" :class="cell">GENDER</th>
-                        <th scope="col" :class="cell">CONTACT NUMBER</th>
-                        <th scope="col" :class="cell">EMAIL ADDRESS</th>
-                        <th scope="col" :class="cell">SUBJECT MATTER</th>
-                        <th scope="col" :class="cell">DEPT</th>
-                        <th scope="col" :class="cell">TOTAL TIME</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="row in rows" :key="row.id" class="break-inside-avoid">
-                        <td :class="[cell, 'text-center']">{{ row.date }}</td>
-                        <td :class="[cell, 'text-center']">
-                            <span v-if="row.details_hidden">{{ row.barcode }}</span>
-                            <Link v-else :href="route('documents.show', row.id)" class="text-blue-600 hover:underline">{{ row.barcode }}</Link>
-                        </td>
-                        <td :class="[cell, 'text-center']" :title="row.document_type ?? undefined">{{ row.document_code || row.document_type }}</td>
-                        <td :class="[cell, 'text-center']">{{ row.source_type }}</td>
-                        <td :class="cell">{{ row.source_name }}</td>
-                        <td :class="[cell, 'text-center']">{{ row.gender }}</td>
-                        <td :class="cell">{{ row.contact_no }}</td>
-                        <td :class="[cell, 'break-all']">{{ row.email }}</td>
-                        <td :class="cell">{{ row.subject_matter }}</td>
-                        <td :class="cell">{{ row.department }}</td>
-                        <td :class="[cell, 'text-right']">{{ row.total_days.toFixed(2) }} days</td>
-                    </tr>
-                    <tr v-if="rows.length === 0">
-                        <td colspan="11" :class="[cell, 'py-6 text-center text-slate-500']">No documents match this report.</td>
-                    </tr>
-                </tbody>
-            </table>
+                <!-- Search (screen only) -->
+                <div class="px-6 pt-4 print:hidden">
+                    <label for="report_search" class="sr-only">Search this report</label>
+                    <div class="relative max-w-sm">
+                        <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                        <input
+                            id="report_search"
+                            v-model="search"
+                            type="search"
+                            placeholder="Search barcode, subject, source, office…"
+                            class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm placeholder-slate-400 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                        />
+                    </div>
+                </div>
 
-            <footer class="mt-6 text-sm">
-                <p>Generated By: {{ generatedBy }}</p>
-                <p>Date: {{ generatedOn }}</p>
-            </footer>
+                <!-- Table -->
+                <div class="overflow-x-auto px-6 py-4 print:overflow-visible print:px-0">
+                    <table class="min-w-[800px]border-separate w-full border-spacing-0 text-sm print:min-w-0 print:text-[9px]">
+                        <thead>
+                            <tr class="text-center text-xs font-semibold uppercase tracking-wide text-slate-500 print:text-[8px]">
+                                <th scope="col" class="rounded-l-lg border-y border-l border-slate-200 bg-slate-50 px-3 py-2.5">Date</th>
+                                <th scope="col" class="border-y border-slate-200 bg-slate-50 px-3 py-2.5">Document</th>
+                                <th scope="col" class="border-y border-slate-200 bg-slate-50 px-3 py-2.5">Source</th>
+                                <th scope="col" class="w-2/5 border-y border-slate-200 bg-slate-50 px-3 py-2.5 text-left">Subject matter</th>
+                                <th scope="col" class="border-y border-slate-200 bg-slate-50 px-3 py-2.5">Office</th>
+                                <th scope="col" class="rounded-r-lg border-y border-r border-slate-200 bg-slate-50 px-3 py-2.5">Total time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="row in shownRows" :key="row.id" class="break-inside-avoid align-middle transition hover:bg-slate-50/70">
+                                <td class="whitespace-nowrap border-b border-slate-100 px-3 py-3 text-center text-slate-600">{{ row.date }}</td>
+                                <td class="border-b border-slate-100 px-3 py-3 text-center">
+                                    <span v-if="row.details_hidden" class="font-mono font-semibold text-slate-700">{{ row.barcode }}</span>
+                                    <Link
+                                        v-else
+                                        :href="route('documents.show', row.id)"
+                                        class="font-mono font-semibold text-emerald-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                                    >
+                                        {{ row.barcode }}
+                                    </Link>
+                                    <span
+                                        v-if="row.document_code || row.document_type"
+                                        :title="row.document_type ?? undefined"
+                                        class="mx-auto mt-1 block w-fit rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 print:bg-transparent print:p-0"
+                                    >
+                                        {{ row.document_code || row.document_type }}
+                                    </span>
+                                </td>
+                                <td class="border-b border-slate-100 px-3 py-3 text-center font-medium text-slate-800">{{ row.source_name }}</td>
+                                <td class="border-b border-slate-100 px-3 py-3 text-slate-700">
+                                    <span v-if="row.details_hidden" class="inline-flex items-center gap-1 italic text-slate-500">
+                                        <Lock class="h-3.5 w-3.5" aria-hidden="true" /> Confidential document
+                                    </span>
+                                    <template v-else>{{ row.subject_matter }}</template>
+                                </td>
+                                <td class="border-b border-slate-100 px-3 py-3 text-center">
+                                    <span
+                                        v-if="row.department"
+                                        class="rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 print:bg-transparent print:p-0"
+                                    >
+                                        {{ row.department }}
+                                    </span>
+                                </td>
+                                <td class="whitespace-nowrap border-b border-slate-100 px-3 py-3 text-center font-semibold text-slate-800">
+                                    {{ formatDays(row.total_days) }}
+                                </td>
+                            </tr>
+                            <tr v-if="shownRows.length === 0">
+                                <td colspan="6" class="px-3 py-12 text-center text-sm text-slate-500">
+                                    {{ rows.length ? 'No documents match your search.' : 'No documents match this report.' }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </article>
         </div>
     </main>
 </template>
 
 <style>
-/* Landscape with narrow margins, as the old DTS report printed. */
+/* Landscape with narrow margins; keep the light row and badge colours when printed. */
 @page {
     size: landscape;
     margin: 10mm;
+}
+@media print {
+    * {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
 }
 </style>

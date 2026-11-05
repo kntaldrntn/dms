@@ -74,3 +74,21 @@ test('an office without an active Department Head cannot record one, and nothing
     expect($this->document->fresh()->status)->not->toBe('Completed');
     expect(Storage::disk('local')->allFiles())->toBe([]);
 });
+
+test('only the System Administrator grants the authority, and only to department staff', function () {
+    $admin = User::factory()->create(['role' => 'system_administrator', 'department_id' => $this->health->id]);
+    $fields = fn (User $user, array $changes) => [
+        'name' => $user->name, 'email' => $user->email, 'role' => $user->role, 'state' => 1,
+        'department_id' => $user->department_id, ...$changes,
+    ];
+
+    $this->actingAs($this->head)->put(route('users.update', $this->staff), $fields($this->staff, ['can_sign_for_head' => true]))
+        ->assertForbidden();
+    $this->actingAs($admin)->put(route('users.update', $this->staff), $fields($this->staff, ['can_sign_for_head' => true]))
+        ->assertSessionHasNoErrors();
+    expect($this->staff->fresh()->can_sign_for_head)->toBeTrue();
+
+    // A role change away from staff removes it; heads, executives and Records sign as themselves.
+    $this->actingAs($admin)->put(route('users.update', $this->staff), $fields($this->staff, ['role' => 'department_head']));
+    expect($this->staff->fresh()->can_sign_for_head)->toBeFalse();
+});

@@ -6,6 +6,7 @@ use App\Models\Document;
 use App\Models\TransactionType;
 use App\Models\User;
 use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -86,20 +87,29 @@ class DashboardReportService
             ->all();
     }
 
-    /** Active documents registered in the given month, within what the user may see. */
-    public function monthQuery(int $year, int $month, User $user): Builder
+    /**
+     * Active documents registered in the period (Manila bounds), within what the user may see. created_at is
+     * real UTC, so the bounds are converted; a document registered at 07:00 Manila on the 1st counts in that month.
+     */
+    public function periodQuery(CarbonImmutable $start, CarbonImmutable $end, User $user): Builder
     {
-        return $this->scopeToUser(Document::whereYear('created_at', $year)->whereMonth('created_at', $month)->where('state', 1), $user);
+        return $this->scopeToUser(Document::whereBetween('created_at', [$start->utc(), $end->utc()])->where('state', 1), $user);
+    }
+
+    /** completed_at is saved as Manila wall-clock time, so it is compared with the Manila bounds as written. */
+    public function completedWithin(Builder $documents, CarbonImmutable $start, CarbonImmutable $end): Builder
+    {
+        return $documents->whereBetween('completed_at', [$start->format('Y-m-d H:i:s'), $end->format('Y-m-d H:i:s')]);
     }
 
     /**
      * One pipeline cell: on-time is completed on/before its due date, on-going is still open and within SLA,
      * and delayed has exceeded its due date. Mirrors the dashboard's pipeline counter.
      */
-    public function pipelineQuery(int $year, int $month, string $category, string $pipeline, User $user): Builder
+    public function pipelineQuery(CarbonImmutable $start, CarbonImmutable $end, string $category, string $pipeline, User $user): Builder
     {
         $now = Carbon::now('Asia/Manila');
-        $query = $this->monthQuery($year, $month, $user)->whereIn('transaction_type_id', $this->transactionTypeIds($category));
+        $query = $this->periodQuery($start, $end, $user)->whereIn('transaction_type_id', $this->transactionTypeIds($category));
 
         return match ($pipeline) {
             'on_time' => $query->where('status', 'Completed')

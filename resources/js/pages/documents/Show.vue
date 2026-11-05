@@ -566,7 +566,7 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                                         <span
                                             v-else-if="trail.signature_mode === 'physical'"
                                             class="inline-flex items-center rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-[10px] font-bold text-slate-700"
-                                            :title="trail.signer ? `Signed by hand by ${trail.signer.name}` : 'Signed by hand'"
+                                            :title="trail.signer ? `Signed by hand by ${trail.signer.name}${trail.signed_for_head ? ' for the Department Head' : ''}` : 'Signed by hand'"
                                         >
                                             <FileSignature class="mr-1 h-3 w-3" aria-hidden="true" /> Wet Signature
                                         </span>
@@ -577,6 +577,9 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                                             <ArrowLeftRight class="mr-1 h-3 w-3" aria-hidden="true" /> Returned
                                         </span>
                                     </div>
+                                    <p v-if="trail.signature_mode === 'physical' && trail.signer" class="mt-0.5 text-[11px] text-slate-500">
+                                        Signed by {{ trail.signer.name }}<template v-if="trail.signed_for_head"> for the Department Head</template>
+                                    </p>
                                 </td>
                                 <!-- One badge per receiving office (a dispatch can release to many). -->
                                 <td class="break-words border-r border-slate-200 px-2 py-2.5">

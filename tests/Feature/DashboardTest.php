@@ -36,6 +36,9 @@ test('clicking a dashboard category opens that category report', function () {
             'transaction_type_id' => $transactionType->id,
             'department_id' => $department->id,
             'source_name' => 'Test Client',
+            'contact_no' => '09171234567',
+            'email' => 'client@example.com',
+            'gender' => 'Female',
             'subject_matter' => 'Dashboard report test',
         ]);
     }
@@ -52,7 +55,12 @@ test('clicking a dashboard category opens that category report', function () {
             ->where('title', 'On-Going Simple Documents')
             ->where('dateRange', '10/01/2026 to 10/31/2026')
             ->has('rows', 1)
-            ->where('rows.0.barcode', 'DB-SIMPLE'));
+            ->where('rows.0.barcode', 'DB-SIMPLE')
+            ->where('rows.0.source_name', 'Test Client')
+            // Reports get printed: the client's personal data never reaches the page.
+            ->missing('rows.0.contact_no')
+            ->missing('rows.0.email')
+            ->missing('rows.0.gender'));
 
     $this->get(route('dashboard.report', [
         'month' => 'October',
@@ -170,11 +178,11 @@ test('the year picker reports a past year and ignores years without documents', 
     $this->actingAs($user)->get(route('dashboard', ['month' => 'March', 'year' => 2025]))
         ->assertInertia(fn (Assert $page) => $page
             ->where('years', [2026, 2025])
-            ->where('selectedYear', 2025)
+            ->where('from', '2025-03')->where('to', '2025-03')
             ->where('summaryCards.0.value', '1'));
 
     $this->get(route('dashboard', ['month' => 'March', 'year' => 2019]))
-        ->assertInertia(fn (Assert $page) => $page->where('selectedYear', 2026)->where('summaryCards.0.value', '0'));
+        ->assertInertia(fn (Assert $page) => $page->where('from', '2026-03')->where('summaryCards.0.value', '0'));
 });
 
 test('processing times list every document type of the chosen category, with zero days when none completed', function () {
@@ -211,7 +219,7 @@ test('processing times list every document type of the chosen category, with zer
             ->where('processingTimes.0.label', 'Project Proposal')->where('processingTimes.0.value', 0));
 });
 
-test('a report row carries the DTS columns and the footer names who generated it, in Manila time', function () {
+test('a report row carries its columns, no personal data, and the footer names who generated it, in Manila time', function () {
     $this->travelTo(Carbon::parse('2026-10-23 23:30:00', 'Asia/Manila'));
     $records = Department::create(['code' => 'REC', 'name' => 'Records', 'state' => 1]);
     $user = User::factory()->create(['name' => 'Kent Aldrin Tan', 'role' => 'records_manager', 'department_id' => $records->id]);
@@ -226,8 +234,8 @@ test('a report row carries the DTS columns and the footer names who generated it
         ->assertInertia(fn (Assert $page) => $page
             ->component('dashboard/Report')
             ->where('rows.0', fn ($row) => $row['date'] === 'Oct. 22, 2026' && $row['document_code'] === 'AOC'
-                && $row['source_type'] === 'EXT' && $row['gender'] === 'Male' && $row['contact_no'] === '09170000000'
-                && $row['email'] === 'astro@example.com' && $row['department'] === 'REC' && $row['total_days'] == 1.0)
+                && $row['source_name'] === 'Astro Alley' && $row['department'] === 'REC' && $row['total_days'] == 1.0
+                && collect(['source_type', 'gender', 'contact_no', 'email'])->every(fn ($key) => ! array_key_exists($key, $row->toArray())))
             ->where('generatedBy', 'Kent Aldrin Tan')
             ->where('generatedOn', 'Oct 23, 2026'));
 });
@@ -283,4 +291,46 @@ test('Workstation staff see only their own department on every card and report; 
                 ->where('processingTimes.0.value', 4));
         $this->get($report)->assertInertia(fn (Assert $page) => $page->where('title', 'On-Time Simple Documents')->has('rows', 2));
     }
+});
+
+test('a From/To period covers several months, even across a year, on the cards and the report', function () {
+    $this->travelTo(Carbon::parse('2026-03-20 10:00:00', 'Asia/Manila'));
+    $records = Department::create(['code' => 'REC', 'name' => 'Records', 'state' => 1]);
+    $user = User::factory()->create(['role' => 'records_manager', 'department_id' => $records->id]);
+    $simple = TransactionType::create(['name' => 'Simple', 'processing_days' => 3, 'state' => 1]);
+    // created_at is real UTC: 2025-12-31 23:00 UTC is already January 1 in Manila.
+    foreach (['2025-11-15 02:00:00' => 'NOV', '2025-12-31 23:00:00' => 'JAN', '2026-02-10 02:00:00' => 'FEB', '2026-03-05 02:00:00' => 'MAR'] as $utc => $barcode) {
+        Document::create([
+            'barcode' => $barcode, 'access_code' => 'ACCESS1', 'department_id' => $records->id, 'transaction_type_id' => $simple->id,
+            'source_type' => 'External', 'source_name' => 'Client', 'subject_matter' => 'Range',
+            'due_date' => Carbon::parse('2026-12-31 17:00:00', 'Asia/Manila'),
+        ])->forceFill(['created_at' => Carbon::parse($utc, 'UTC')])->save();
+    }
+
+    $this->actingAs($user)->get(route('dashboard', ['from' => '2025-12', 'to' => '2026-02']))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('from', '2025-12')->where('to', '2026-02')
+            ->where('periodLabel', 'December 2025 – February 2026')
+            ->where('summaryCards.0.value', '2'));
+
+    $this->get(route('dashboard.report', ['from' => '2025-12', 'to' => '2026-02', 'transaction_category' => 'Simple', 'pipeline_status' => 'on_going']))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('dateRange', '12/01/2025 to 02/28/2026')
+            ->where('rows', fn ($rows) => collect($rows)->pluck('barcode')->sort()->values()->all() === ['FEB', 'JAN']));
+
+    // The January boundary follows Manila time: JAN counts in January, not December.
+    $this->get(route('dashboard', ['from' => '2025-12', 'to' => '2025-12']))
+        ->assertInertia(fn (Assert $page) => $page->where('periodLabel', 'December 2025')->where('summaryCards.0.value', '0'));
+    $this->get(route('dashboard', ['from' => '2026-01', 'to' => '2026-03']))
+        ->assertInertia(fn (Assert $page) => $page->where('periodLabel', 'January – March 2026')->where('summaryCards.0.value', '3'));
+});
+
+test('a reversed period is swapped and an unusable one falls back to this month', function () {
+    $this->travelTo(Carbon::parse('2026-03-20 10:00:00', 'Asia/Manila'));
+    $user = User::factory()->create();
+
+    $this->actingAs($user)->get(route('dashboard', ['from' => '2026-03', 'to' => '2026-01']))
+        ->assertInertia(fn (Assert $page) => $page->where('from', '2026-01')->where('to', '2026-03'));
+    $this->get(route('dashboard', ['from' => '1999-01', 'to' => 'nonsense']))
+        ->assertInertia(fn (Assert $page) => $page->where('from', '2026-03')->where('to', '2026-03'));
 });

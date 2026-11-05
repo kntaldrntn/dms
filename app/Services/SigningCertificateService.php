@@ -44,6 +44,33 @@ class SigningCertificateService
     }
 
     /**
+     * The signer's own handwritten-signature image, drawn on the left of the PNPKI stamp. Same disk and folder as
+     * the System Administrator's upload in User Management (PdfApprovalStampService reads it from there).
+     */
+    public function storeSignatureImage(User $user, UploadedFile $image): void
+    {
+        $path = $image->store('signatures', 'public');
+        if (! $path) {
+            throw ValidationException::withMessages(['signature_image' => 'The signature image could not be saved. Try again.']);
+        }
+        $previous = $user->signature_path;
+        $user->forceFill(['signature_path' => $path])->save();
+        if ($previous && $previous !== $path) {
+            Storage::disk('public')->delete($previous);
+        }
+        Log::info('Signature image uploaded by the signer.', ['user_id' => $user->id]);
+    }
+
+    public function removeSignatureImage(User $user): void
+    {
+        if ($user->signature_path) {
+            Storage::disk('public')->delete($user->signature_path);
+        }
+        $user->forceFill(['signature_path' => null])->save();
+        Log::info('Signature image removed by the signer.', ['user_id' => $user->id]);
+    }
+
+    /**
      * Open the signer's certificate for one signing.
      *
      * @return array{cert:string, pkey:string, extracerts:list<string>, subject:string}

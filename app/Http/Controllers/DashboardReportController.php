@@ -27,13 +27,11 @@ class DashboardReportController extends Controller
                 ? 'Due '.Carbon::tomorrow('Asia/Manila')->format('m/d/Y')
                 : 'As of '.$today->format('m/d/Y');
         } elseif ($category && array_key_exists($pipeline, DashboardReportService::PIPELINES)) {
-            $year = $request->year();
-            $month = $request->monthNumber();
-            $documents = $reports->pipelineQuery($year, $month, $category, $pipeline, $request->user())->with($with)->latest()->get();
+            [$start, $end] = $request->period();
+            $documents = $reports->pipelineQuery($start, $end, $category, $pipeline, $request->user())->with($with)->latest()->get();
             $title = DashboardReportService::PIPELINES[$pipeline].' '.$category.' Documents'
                 .($reports->seesAllDepartments($request->user()) ? '' : ' (Your Office)');
-            $start = Carbon::create($year, $month, 1, 0, 0, 0, 'Asia/Manila');
-            $dateRange = $start->format('m/d/Y').' to '.$start->copy()->endOfMonth()->format('m/d/Y');
+            $dateRange = $start->format('m/d/Y').' to '.$end->format('m/d/Y');
         } else {
             abort(404);
         }
@@ -53,11 +51,8 @@ class DashboardReportController extends Controller
                     'barcode' => $document->barcode,
                     'document_code' => $document->documentType?->document_code,
                     'document_type' => $document->documentType?->document_type,
-                    'source_type' => ['External' => 'EXT', 'Internal' => 'INT'][$document->source_type] ?? $document->source_type,
+                    // No contact number, email or gender (user, 2026-11-05): reports get printed and passed around.
                     'source_name' => $hidden ? null : $document->source_name,
-                    'gender' => $hidden ? null : $document->gender,
-                    'contact_no' => $hidden ? null : $document->contact_no,
-                    'email' => $hidden ? null : $document->email,
                     'subject_matter' => $hidden ? 'Confidential document' : $document->subject_matter,
                     'department' => $document->department?->code,
                     'total_days' => round($reports->totalDays($document), 2),

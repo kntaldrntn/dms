@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\Document;
 use App\Models\User;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use setasign\Fpdi\Tcpdf\Fpdi;
 
@@ -21,17 +20,18 @@ class PdfApprovalStampService
     public function __construct(private SigningCertificateService $certificates) {}
 
     /**
-     * Stamp the signer's e-signature on the PDF and sign it with the signer's own PNPKI certificate (FGD Phase 2c-2).
-     * The PIN opens the certificate in memory for this signing only.
+     * Sign the PDF with the signer's own PNPKI certificate (FGD Phase 2c-2) and draw the visible stamp: the
+     * signature image on the left when one is on file, "Digitally Signed / name / title / date" on the right.
+     * The image is optional; the certificate is what signs. The PIN opens the certificate in memory only.
      *
      * @param  array{page:int,x:float,y:float,width:float,height:float}  $placement
      * @param  array{code:string,title:string,location:string,reason:string}  $office
      */
     public function stamp(Document $document, User $signer, array $placement, array $office, string $pin): string
     {
-        if (! $signer->signature_path || ! Storage::disk('public')->exists($signer->signature_path)) {
-            throw ValidationException::withMessages(['stamp_placement' => 'Your e-signature is not on file. Ask the System Administrator to upload it in User Management, then approve again.']);
-        }
+        $signatureImage = $signer->signature_path && Storage::disk('public')->exists($signer->signature_path)
+            ? Storage::disk('public')->path($signer->signature_path)
+            : null;
         $credentials = $this->certificates->credentials($signer, $pin);
         $sourcePath = $this->sourcePath($document);
         if (! is_string($sourcePath) || ! is_file($sourcePath) || ! is_readable($sourcePath)) {
@@ -47,7 +47,7 @@ class PdfApprovalStampService
         // TCPDF reads intermediate certificates (the PNPKI chain) from a file, so it lives in a temp file briefly.
         $chainFile = null;
         try {
-            $cleanSignature = $this->cleanSignatureImage(Storage::disk('public')->path($signer->signature_path));
+            $cleanSignature = $signatureImage ? $this->cleanSignatureImage($signatureImage) : null;
             if ($credentials['extracerts'] !== []) {
                 $chainFile = tempnam(sys_get_temp_dir(), 'chain-');
                 if ($chainFile === false || file_put_contents($chainFile, implode("\n", $credentials['extracerts'])) === false) {
@@ -165,9 +165,10 @@ class PdfApprovalStampService
         return $temporaryPath;
     }
 
-    private function drawVisibleStamp(Fpdi $pdf, string $signaturePath, float $x, float $y, float $width, float $height, string $name, string $title): void
+    private function drawVisibleStamp(Fpdi $pdf, ?string $signaturePath, float $x, float $y, float $width, float $height, string $name, string $title): void
     {
-        $signatureWidth = $width * 0.48;
+        // Without a signature image the text block takes the whole stamp box.
+        $signatureWidth = $signaturePath ? $width * 0.48 : 0;
         $textX = $x + $signatureWidth + ($width * 0.03);
         $textY = $y + ($height * 0.16);
         $textWidth = $width - ($textX - $x) - ($width * 0.03);
@@ -189,7 +190,9 @@ class PdfApprovalStampService
         $scale = $widest > $textWidth ? max(0.6, $textWidth / $widest) : 1;
         $lineHeight = 3.5 * $scale;
 
-        $pdf->Image($signaturePath, $x, $signatureY, $signatureWidth, $signatureHeight, 'PNG');
+        if ($signaturePath) {
+            $pdf->Image($signaturePath, $x, $signatureY, $signatureWidth, $signatureHeight, 'PNG');
+        }
         $pdf->SetTextColor(0, 0, 0);
         $pdf->SetFont('helvetica', 'B', 7.5 * $scale);
         $pdf->Text($textX, $textY, 'Digitally Signed');

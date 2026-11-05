@@ -42,6 +42,7 @@ class DocumentTrail extends Model
         'trail_type',
         'is_digitally_signed',
         'signed_by',
+        'signed_for_head',
         'signature_mode',
         'signed_file_path',
     ];
@@ -52,6 +53,7 @@ class DocumentTrail extends Model
             'received_at' => 'datetime',
             'released_at' => 'datetime',
             'is_digitally_signed' => 'boolean', // Ensures clean JSON boolean outputs
+            'signed_for_head' => 'boolean',
             'required_actions' => 'array',
             'released_to_offices' => 'array',
         ];

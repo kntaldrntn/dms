@@ -22,6 +22,8 @@ class User extends Authenticatable
         'name',
         'email',
         'role',
+        // System Administrator only: a staff member who may sign in place of their Department Head.
+        'can_sign_for_head',
         'sex',            // Added: Exists in your migration
         'signature_path',
         'password',
@@ -55,6 +57,7 @@ class User extends Authenticatable
             'password' => 'hashed',
             'two_factor_confirmed_at' => 'datetime',
             'state' => 'integer', // Cast to ensure strict 0/1 output
+            'can_sign_for_head' => 'boolean',
             'certificate_valid_until' => 'datetime',
         ];
     }

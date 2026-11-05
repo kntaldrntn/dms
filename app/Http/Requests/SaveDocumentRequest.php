@@ -56,10 +56,11 @@ class SaveDocumentRequest extends FormRequest
             'classification_id' => ['nullable', 'integer', Rule::exists('document_classifications', 'id')->where('state', 1)],
             'is_confidential' => ['required', 'boolean'],
             'route_mode' => ['required', Rule::in(['paperless', 'paper'])],
-            // Intake goes either to ADM/OCM (department_id, opens their approval stage) or straight to departments.
+            // Intake goes either to ADM/OCM for approval (department_id, opens their approval stage) or straight to
+            // departments. ADM/OCM picked as departments get it in their Office Inbox with no approval step.
             'department_id' => ['nullable', 'integer', Rule::exists('departments', 'id')->where('state', 1), 'prohibits:routed_to'],
             'routed_to' => $document ? ['prohibited'] : ['nullable', 'array', 'max:100'],
-            'routed_to.*' => ['integer', 'distinct', Rule::exists('departments', 'id')->where('state', 1)->whereNotIn('code', ['REC', 'ADM', 'OCM'])],
+            'routed_to.*' => ['integer', 'distinct', Rule::exists('departments', 'id')->where('state', 1)->whereNot('code', 'REC')],
             'primary_office_id' => $document ? ['prohibited'] : ['nullable', 'integer', Rule::in((array) $this->input('routed_to', [])), 'required_with:routed_to'],
             'access_code' => ['required', 'string', 'max:20'],
             'ai_routing_suggestions' => ['nullable', 'array', 'max:10'],
@@ -75,7 +76,7 @@ class SaveDocumentRequest extends FormRequest
     {
         return [
             'department_id.prohibits' => 'Send the document either to an executive office or to departments, not both.',
-            'routed_to.*.exists' => 'Choose active departments. The City Administrator and City Mayor are chosen in Direct to.',
+            'routed_to.*.exists' => 'Choose active departments other than Records.',
             'primary_office_id.in' => 'Choose the Primary office from the selected offices.',
             'primary_office_id.required_with' => 'Choose the Primary office.',
         ];

@@ -70,3 +70,31 @@ test('only approvers upload certificates, and a signer can remove theirs', funct
     expect($this->signer->fresh()->certificate_path)->toBeNull();
     Storage::disk('certificates')->assertMissing($path);
 });
+
+test('a signer uploads, replaces and removes their own signature image; other roles cannot', function () {
+    Storage::fake('public');
+
+    $this->actingAs($this->signer)->post(route('signature-image.update'), ['signature_image' => UploadedFile::fake()->image('sign.png', 300, 120)])
+        ->assertRedirect()->assertSessionHasNoErrors();
+    $first = $this->signer->fresh()->signature_path;
+    Storage::disk('public')->assertExists($first);
+    $this->get(route('certificate.edit'))->assertInertia(fn (Assert $page) => $page
+        ->where('hasSignatureImage', true)->where('signatureImageUrl', Storage::disk('public')->url($first)));
+
+    // Replacing deletes the old file.
+    $this->post(route('signature-image.update'), ['signature_image' => UploadedFile::fake()->image('new.jpg', 300, 120)])->assertSessionHasNoErrors();
+    $second = $this->signer->fresh()->signature_path;
+    expect($second)->not->toBe($first);
+    Storage::disk('public')->assertMissing($first);
+
+    $this->post(route('signature-image.update'), ['signature_image' => UploadedFile::fake()->create('notes.pdf', 10, 'application/pdf')])
+        ->assertSessionHasErrors('signature_image');
+
+    $this->delete(route('signature-image.destroy'))->assertRedirect();
+    expect($this->signer->fresh()->signature_path)->toBeNull();
+    Storage::disk('public')->assertMissing($second);
+
+    $staff = User::factory()->create(['role' => 'staff']);
+    $this->actingAs($staff)->post(route('signature-image.update'), ['signature_image' => UploadedFile::fake()->image('s.png')])->assertForbidden();
+    $this->actingAs($staff)->delete(route('signature-image.destroy'))->assertForbidden();
+});

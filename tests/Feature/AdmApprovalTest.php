@@ -187,7 +187,18 @@ test('a paperless approval is signed with the City Administrator own certificate
     expect($this->document->fresh()->stampSourceUrl())->toBe(route('documents.signed-pdf', $this->document));
 });
 
-test('a wrong PIN or a missing certificate or e-signature stops a paperless approval', function (Closure $setUp, array $data, string $error) {
+test('without a signature image the PNPKI signature still signs, with a text-only stamp', function () {
+    paperlessAtAdm($this);
+    $this->cityAdministrator->update(['signature_path' => null]);
+
+    approveAtAdm($this, ['target' => 'ocm', 'stamp_placement' => STAMP, 'certificate_pin' => '2468'])->assertSessionHasNoErrors();
+
+    $approval = DocumentTrail::where('document_id', $this->document->id)->where('released_action', 'Approved by City Administrator')->firstOrFail();
+    expect($approval->is_digitally_signed)->toBeTrue()
+        ->and(Storage::disk('local')->get($approval->signed_file_path))->toContain('/ByteRange')->toContain('/Type /Sig');
+});
+
+test('a wrong PIN or a missing certificate stops a paperless approval', function (Closure $setUp, array $data, string $error) {
     paperlessAtAdm($this);
     $setUp($this);
 
@@ -198,7 +209,6 @@ test('a wrong PIN or a missing certificate or e-signature stops a paperless appr
     'wrong PIN' => [fn () => null, ['certificate_pin' => '0000'], 'certificate_pin'],
     'no PIN' => [fn () => null, [], 'certificate_pin'],
     'no certificate' => [fn ($test) => app(SigningCertificateService::class)->remove($test->cityAdministrator), ['certificate_pin' => '2468'], 'certificate_pin'],
-    'no e-signature image' => [fn ($test) => $test->cityAdministrator->update(['signature_path' => null]), ['certificate_pin' => '2468'], 'stamp_placement'],
 ]);
 
 test('the signed PDF preview shows the newest signed version', function () {

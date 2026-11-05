@@ -55,7 +55,8 @@ class TransactionService
 
     /**
      * Paper route: the Department Head's wet signature is recorded on the release (signer + "physical"), with an
-     * optional scan of the signed page. No e-signature image is applied.
+     * optional scan of the signed page. No e-signature image is applied. The wet signature is the Department Head's
+     * only; authorized signatories (users.can_sign_for_head) sign for the head with PNPKI on the paperless route.
      */
     private function headSignature(User $user, array $data, ?string &$signedFile): array
     {

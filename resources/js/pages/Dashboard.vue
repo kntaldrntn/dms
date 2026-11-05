@@ -2,7 +2,7 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -13,9 +13,11 @@ const breadcrumbs: BreadcrumbItem[] = [
 
 // Receive the live data from our new DashboardController
 const props = defineProps<{
-    selectedMonth: string;
+    /** Reporting period as YYYY-MM (Manila months); the alert cards ignore it. */
+    from: string;
+    to: string;
+    periodLabel: string;
     months: string[];
-    selectedYear: number;
     years: number[];
     transactionCategories: string[];
     processingCategory: string;
@@ -27,17 +29,41 @@ const props = defineProps<{
     processingTimes: Array<any>;
 }>();
 
-const currentMonth = ref(props.selectedMonth);
-const currentYear = ref(props.selectedYear);
+// From / To month pickers: month as 1-12, year as a number.
+const monthPart = (value: string) => ({ year: Number(value.slice(0, 4)), month: Number(value.slice(5, 7)) });
+const fromMonth = ref(monthPart(props.from).month);
+const fromYear = ref(monthPart(props.from).year);
+const toMonth = ref(monthPart(props.to).month);
+const toYear = ref(monthPart(props.to).year);
+const yearMonth = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`;
+const pickedFrom = computed(() => yearMonth(fromYear.value, fromMonth.value));
+const pickedTo = computed(() => yearMonth(toYear.value, toMonth.value));
+const rangeReversed = computed(() => pickedFrom.value > pickedTo.value);
+const rangeUnchanged = computed(() => pickedFrom.value === props.from && pickedTo.value === props.to);
 
-// Refetches data from the controller when they click generate
-function generateReport() {
-    router.get(route('dashboard'), { month: currentMonth.value, year: currentYear.value, processing_category: props.processingCategory }, { preserveState: true });
+function loadPeriod(from: string, to: string) {
+    router.get(route('dashboard'), { from, to, processing_category: props.processingCategory }, { preserveScroll: true });
 }
 
-// Card reports open in their own tab (they can run to thousands of rows), for the generated month and year.
+function generateReport() {
+    loadPeriod(pickedFrom.value, pickedTo.value);
+}
+
+// Quick ranges from today's month.
+const today = new Date();
+const thisYear = today.getFullYear();
+const thisMonth = today.getMonth() + 1;
+const quarterStart = Math.floor((thisMonth - 1) / 3) * 3 + 1;
+const presets = [
+    { label: 'This month', from: yearMonth(thisYear, thisMonth), to: yearMonth(thisYear, thisMonth) },
+    { label: 'This quarter', from: yearMonth(thisYear, quarterStart), to: yearMonth(thisYear, quarterStart + 2) },
+    { label: 'This year', from: yearMonth(thisYear, 1), to: yearMonth(thisYear, 12) },
+];
+const isActivePreset = (preset: { from: string; to: string }) => preset.from === props.from && preset.to === props.to;
+
+// Card reports open in their own tab (they can run to thousands of rows), for the loaded period.
 function reportUrl(filters: Record<string, string>) {
-    return route('dashboard.report', { month: props.selectedMonth, year: props.selectedYear, ...filters });
+    return route('dashboard.report', { from: props.from, to: props.to, ...filters });
 }
 
 function categoryReportUrl(row: any) {
@@ -46,7 +72,7 @@ function categoryReportUrl(row: any) {
 
 function changeProcessingCategory(event: Event) {
     router.get(
-        route('dashboard', { month: props.selectedMonth, year: props.selectedYear, processing_category: (event.target as HTMLSelectElement).value }),
+        route('dashboard', { from: props.from, to: props.to, processing_category: (event.target as HTMLSelectElement).value }),
         {},
         { preserveScroll: true },
     );
@@ -55,15 +81,42 @@ function changeProcessingCategory(event: Event) {
 const scopeLabel = props.delinquent.scope === 'all' ? 'All departments' : 'Your office';
 const scopeText = props.delinquent.scope === 'all' ? 'across all departments' : 'held by your office';
 const alertCards = [
-    { report: 'delinquent', title: 'Delinquent', badge: 'Action Req', value: props.delinquent.value, suffix: props.delinquent.label, empty: 'No delinquent documents', tone: 'red' },
-    { report: 'due_tomorrow', title: 'For Due', badge: 'Tomorrow', value: props.delinquent.dueTomorrow, suffix: 'Documents', empty: 'Nothing is due tomorrow', tone: 'orange' },
-    { report: 'todo', title: 'To-Do List', badge: 'Open', value: props.delinquent.todo, suffix: 'Documents', empty: 'Nothing to do', tone: 'emerald' },
+    {
+        report: 'delinquent',
+        title: 'Delinquent',
+        badge: 'Action Req',
+        value: props.delinquent.value,
+        suffix: props.delinquent.label,
+        empty: 'No delinquent documents',
+        tone: 'red',
+    },
+    {
+        report: 'due_tomorrow',
+        title: 'For Due',
+        badge: 'Tomorrow',
+        value: props.delinquent.dueTomorrow,
+        suffix: 'Documents',
+        empty: 'Nothing is due tomorrow',
+        tone: 'orange',
+    },
+    {
+        report: 'todo',
+        title: 'To-Do List',
+        badge: 'Open',
+        value: props.delinquent.todo,
+        suffix: 'Documents',
+        empty: 'Nothing to do',
+        tone: 'emerald',
+    },
 ];
 const alertTone: Record<string, { value: string; badge: string; hover: string }> = {
     red: { value: 'text-red-600', badge: 'bg-red-50 text-red-600', hover: 'hover:border-red-200 hover:bg-red-50/30' },
     orange: { value: 'text-orange-600', badge: 'bg-orange-50 text-orange-600', hover: 'hover:border-orange-200 hover:bg-orange-50/30' },
     emerald: { value: 'text-slate-800', badge: 'bg-emerald-50 text-emerald-600', hover: 'hover:border-emerald-200 hover:bg-emerald-50/30' },
 };
+
+const pickerClass =
+    'cursor-pointer rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-3 pr-8 text-sm font-semibold text-slate-800 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600';
 
 // Static class strings (not interpolated) so Tailwind's JIT scanner can detect them
 const toneClass: Record<string, string> = {
@@ -80,32 +133,68 @@ const toneClass: Record<string, string> = {
     <Head title="Dashboard" />
 
     <AppLayout :breadcrumbs="breadcrumbs">
-        <div class="flex w-full min-h-screen flex-col gap-6 bg-slate-50/50 p-6">
-            
-            <!-- Header & Filters -->
-            <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-                <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
-                    <span class="pl-3 text-sm font-medium text-slate-500">Dashboard Report:</span>
-                    
-                    <!-- Dynamic Month Dropdown -->
-                    <select v-model="currentMonth" aria-label="Report month" class="cursor-pointer rounded-lg border-none bg-slate-50 py-1.5 pl-3 pr-8 text-sm font-semibold focus:ring-0">
-                        <option v-for="month in months" :key="month" :value="month">{{ month }}</option>
-                    </select>
-                    <select v-model="currentYear" aria-label="Report year" class="cursor-pointer rounded-lg border-none bg-slate-50 py-1.5 pl-3 pr-8 text-sm font-semibold focus:ring-0">
-                        <option v-for="year in years" :key="year" :value="year">{{ year }}</option>
-                    </select>
-
-                    <button @click="generateReport" :disabled="currentMonth === selectedMonth && currentYear === selectedYear" class="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50">
+        <div class="flex min-h-screen w-full flex-col gap-6 bg-slate-50/50 p-6">
+            <!-- Period: From / To month, with quick ranges -->
+            <section aria-label="Reporting period" class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div class="flex flex-wrap items-end gap-x-4 gap-y-3">
+                    <fieldset class="flex items-end gap-2">
+                        <legend class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">From</legend>
+                        <select v-model.number="fromMonth" aria-label="From month" :class="pickerClass">
+                            <option v-for="(month, index) in months" :key="month" :value="index + 1">{{ month }}</option>
+                        </select>
+                        <select v-model.number="fromYear" aria-label="From year" :class="pickerClass">
+                            <option v-for="year in years" :key="year" :value="year">{{ year }}</option>
+                        </select>
+                    </fieldset>
+                    <span class="pb-2 text-slate-400" aria-hidden="true">&rarr;</span>
+                    <fieldset class="flex items-end gap-2">
+                        <legend class="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">To</legend>
+                        <select v-model.number="toMonth" aria-label="To month" :class="pickerClass">
+                            <option v-for="(month, index) in months" :key="month" :value="index + 1">{{ month }}</option>
+                        </select>
+                        <select v-model.number="toYear" aria-label="To year" :class="pickerClass">
+                            <option v-for="year in years" :key="year" :value="year">{{ year }}</option>
+                        </select>
+                    </fieldset>
+                    <button
+                        type="button"
+                        :disabled="rangeUnchanged || rangeReversed"
+                        :aria-describedby="rangeReversed ? 'period_error' : undefined"
+                        class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 disabled:opacity-50"
+                        @click="generateReport"
+                    >
                         Generate
                     </button>
+
+                    <div class="flex flex-wrap items-center gap-2 lg:ml-auto" role="group" aria-label="Quick ranges">
+                        <button
+                            v-for="preset in presets"
+                            :key="preset.label"
+                            type="button"
+                            :aria-pressed="isActivePreset(preset)"
+                            class="rounded-full border px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                            :class="
+                                isActivePreset(preset)
+                                    ? 'border-emerald-600 bg-emerald-50 text-emerald-700'
+                                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                            "
+                            @click="loadPeriod(preset.from, preset.to)"
+                        >
+                            {{ preset.label }}
+                        </button>
+                    </div>
                 </div>
-                <p class="text-sm text-slate-500">
-                    <template v-if="scope">
-                        Showing <span class="font-semibold text-slate-700">{{ scope.name }}</span> only
-                    </template>
-                    <template v-else>Showing all offices</template>
+                <p v-if="rangeReversed" id="period_error" role="alert" class="mt-2 text-sm text-red-600">
+                    The From month must come before the To month.
                 </p>
-            </div>
+                <p class="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-500">
+                    Showing <span class="font-semibold text-slate-800">{{ periodLabel }}</span> ·
+                    <template v-if="scope"
+                        ><span class="font-semibold text-slate-700">{{ scope.name }}</span> only</template
+                    >
+                    <template v-else>all offices</template>
+                </p>
+            </section>
 
             <!-- Top Summary Cards -->
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
@@ -190,8 +279,15 @@ const toneClass: Record<string, string> = {
                             :target="row.value > 0 ? '_blank' : undefined"
                             :rel="row.value > 0 ? 'noopener' : undefined"
                             class="flex items-end justify-between rounded-md transition"
-                            :class="[idx !== stage.rows.length - 1 ? 'border-b border-slate-100 pb-2' : '', row.value > 0 ? 'hover:bg-slate-50 hover:px-2' : 'cursor-default opacity-60']"
-                            :title="row.value > 0 ? `Open the ${stage.title} ${row.label} report for ${selectedMonth} ${selectedYear} in a new tab` : `No ${stage.title} ${row.label} documents`"
+                            :class="[
+                                idx !== stage.rows.length - 1 ? 'border-b border-slate-100 pb-2' : '',
+                                row.value > 0 ? 'hover:bg-slate-50 hover:px-2' : 'cursor-default opacity-60',
+                            ]"
+                            :title="
+                                row.value > 0
+                                    ? `Open the ${stage.title} ${row.label} report for ${periodLabel} in a new tab`
+                                    : `No ${stage.title} ${row.label} documents`
+                            "
                         >
                             <span class="text-sm text-slate-500">{{ row.label }}</span>
                             <span class="text-xl font-bold text-slate-800">{{ row.value }}</span>
@@ -206,7 +302,12 @@ const toneClass: Record<string, string> = {
                     <div class="flex items-center gap-3">
                         <div class="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50">
                             <svg class="h-4 w-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
                             </svg>
                         </div>
                         <h3 class="text-lg font-bold text-slate-800">Average Processing Times (Completed)</h3>
@@ -219,25 +320,33 @@ const toneClass: Record<string, string> = {
                             <option v-for="category in transactionCategories" :key="category" :value="category">{{ category }}</option>
                         </select>
                     </div>
-                    <Link :href="route('documents.index')" class="cursor-pointer text-xs font-medium text-slate-400 hover:text-slate-600 transition">View Full Registry &rarr;</Link>
+                    <Link :href="route('documents.index')" class="cursor-pointer text-xs font-medium text-slate-400 transition hover:text-slate-600"
+                        >View Full Registry &rarr;</Link
+                    >
                 </div>
 
                 <div v-if="processingTimes.length > 0" class="grid grid-cols-2 gap-x-6 gap-y-8 md:grid-cols-4 lg:grid-cols-6">
                     <div v-for="item in processingTimes" :key="item.label">
-                        <span class="mb-1 block truncate text-xs font-semibold uppercase tracking-wider text-slate-400" :title="item.label">{{ item.label }}</span>
+                        <span class="mb-1 block truncate text-xs font-semibold uppercase tracking-wider text-slate-400" :title="item.label">{{
+                            item.label
+                        }}</span>
                         <div class="flex items-baseline gap-1">
                             <span class="text-2xl font-bold text-slate-800">{{ Number(item.value).toFixed(2) }}</span>
                             <span class="text-xs text-slate-400">days</span>
                         </div>
                         <div class="mt-2 h-1.5 w-full rounded-full bg-slate-100">
-                            <div class="h-1.5 rounded-full transition-all duration-1000" :class="toneClass[item.tone]" :style="`width: ${item.width}%`"></div>
+                            <div
+                                class="h-1.5 rounded-full transition-all duration-1000"
+                                :class="toneClass[item.tone]"
+                                :style="`width: ${item.width}%`"
+                            ></div>
                         </div>
                     </div>
                 </div>
-                
-                <div v-else class="text-center py-10">
+
+                <div v-else class="py-10 text-center">
                     <p class="text-sm font-semibold text-slate-600">No {{ processingCategory }} document types are registered.</p>
-                    <p class="text-xs text-slate-400 mt-1">Add document types in the Document Type registry.</p>
+                    <p class="mt-1 text-xs text-slate-400">Add document types in the Document Type registry.</p>
                 </div>
             </div>
         </div>

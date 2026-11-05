@@ -15,6 +15,7 @@ const props = defineProps<{
             name: string;
             email: string;
             role: string;
+            can_sign_for_head: boolean;
             sex: string | null;
             state: number;
             department_id: number | null;
@@ -30,6 +31,12 @@ const props = defineProps<{
             }>;
             is_online?: boolean;
             audit_logs?: Array<any>;
+            /** Paperless readiness; null for roles that do not sign. Status only, never the certificate itself. */
+            signing_status: {
+                certificate: 'none' | 'valid' | 'expiring' | 'expired';
+                valid_until: string | null;
+                signature_image: boolean;
+            } | null;
         }>;
         current_page: number;
         last_page: number;
@@ -141,6 +148,7 @@ const form = useForm({
     sex: '',
     department_id: '' as number | string,
     state: 1,
+    can_sign_for_head: false,
     signature: null as File | null,
     password: '',
     password_confirmation: '',
@@ -169,6 +177,7 @@ function openEditDialog(user: any) {
     form.sex = user.sex || '';
     form.department_id = user.department_id || '';
     form.state = user.state;
+    form.can_sign_for_head = Boolean(user.can_sign_for_head);
     form.signature = null; // Don't pre-fill file inputs for security
     form.password = ''; 
     form.password_confirmation = '';
@@ -219,6 +228,26 @@ function submitForm() {
 }
 
 // Format Role for display
+// Signing column: PNPKI certificate readiness (each signer uploads their own in Settings → Signing certificate).
+type SigningStatus = NonNullable<(typeof props.users.data)[number]['signing_status']>;
+const certificateBadge: Record<SigningStatus['certificate'], { label: string; class: string }> = {
+    valid: { label: 'Certificate valid', class: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
+    expiring: { label: 'Expires soon', class: 'bg-amber-50 text-amber-700 border-amber-200' },
+    expired: { label: 'Certificate expired', class: 'bg-red-50 text-red-700 border-red-100' },
+    none: { label: 'No certificate', class: 'bg-slate-100 text-slate-600 border-slate-200' },
+};
+const formatExpiry = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const certificateLabel = (status: SigningStatus) =>
+    status.valid_until && status.certificate !== 'none'
+        ? `${status.certificate === 'expired' ? 'Expired' : 'Valid until'} ${formatExpiry(status.valid_until)}`
+        : certificateBadge[status.certificate].label;
+const certificateTitle = (status: SigningStatus) =>
+    status.certificate === 'none'
+        ? 'No PNPKI certificate yet: the signer uploads it in Settings → Signing certificate.'
+        : status.certificate === 'expiring'
+          ? 'Expires within 30 days: ask the signer to renew and upload the new certificate.'
+          : certificateBadge[status.certificate].label;
+
 const formatRole = (role: string) => {
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 };
@@ -305,6 +334,7 @@ const formatRelativeTime = (dateString: string) => {
                                 <th class="px-4 py-2.5 font-bold">User Details</th>
                                 <th class="px-4 py-2.5 font-bold">Role</th>
                                 <th class="px-4 py-2.5 font-bold">Department</th>
+                                <th class="px-4 py-2.5 font-bold">Signing</th>
                                 <th class="px-4 py-2.5 font-bold">Last Active</th>
                                 <th class="px-4 py-2.5 font-bold">Status</th>
                                 <th class="px-4 py-2.5 text-center font-bold">Actions</th>
@@ -324,9 +354,25 @@ const formatRelativeTime = (dateString: string) => {
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
                                         {{ formatRole(user.role) }}
                                     </span>
+                                    <span v-if="user.can_sign_for_head" class="mt-1 block text-[11px] text-amber-700">Signs for the Department Head</span>
                                 </td>
                                 <td class="px-4 py-2 text-slate-600">
                                     {{ user.department?.name || 'No Department' }}
+                                </td>
+                                <td class="px-4 py-2">
+                                    <template v-if="user.signing_status">
+                                        <span
+                                            class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border"
+                                            :class="certificateBadge[user.signing_status.certificate].class"
+                                            :title="certificateTitle(user.signing_status)"
+                                        >
+                                            {{ certificateLabel(user.signing_status) }}
+                                        </span>
+                                        <span class="mt-1 block text-[11px]" :class="user.signing_status.signature_image ? 'text-slate-500' : 'text-amber-700'">
+                                            {{ user.signing_status.signature_image ? 'Signature image on file' : 'No signature image' }}
+                                        </span>
+                                    </template>
+                                    <span v-else class="text-xs text-slate-400">Does not sign</span>
                                 </td>
                                 <td class="px-4 py-2">
                                     <!-- If they clicked something in the last 5 minutes -->
@@ -462,6 +508,20 @@ const formatRelativeTime = (dateString: string) => {
                                         <option value="system_administrator">System Administrator</option>
                                     </select>
                                     <p v-if="form.errors.role" class="mt-1 text-xs text-red-500">{{ form.errors.role }}</p>
+                                    <!-- Signing authority: a staff member (e.g. OIC) who may sign in place of the Department Head -->
+                                    <label v-if="form.role === 'staff'" class="mt-2 flex items-start gap-2 text-sm text-slate-700">
+                                        <input
+                                            v-model="form.can_sign_for_head"
+                                            type="checkbox"
+                                            aria-describedby="can_sign_for_head_hint"
+                                            class="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                        />
+                                        <span>
+                                            May sign for the Department Head
+                                            <span id="can_sign_for_head_hint" class="block text-xs text-slate-500">e.g. OIC or authorized signatory: signs for the head with their own PNPKI certificate (paperless route). Wet signatures stay the head's own.</span>
+                                        </span>
+                                    </label>
+                                    <p v-if="form.errors.can_sign_for_head" class="mt-1 text-xs text-red-500">{{ form.errors.can_sign_for_head }}</p>
                                 </div>
 
                                 <!-- Department -->
@@ -487,19 +547,23 @@ const formatRelativeTime = (dateString: string) => {
                                     <p v-if="form.errors.sex" class="mt-1 text-xs text-red-500">{{ form.errors.sex }}</p>
                                 </div>
                                 
-                                <!-- NEW: Signature Upload -->
+                                <!-- Signature image: only the picture on the PNPKI stamp; the certificate is the signer's own upload -->
                                 <div class="col-span-1 md:col-span-2">
                                     <label class="mb-1.5 block text-sm font-medium text-slate-700" for="signature">
-                                        Digital Signature (Optional)
-                                        <span class="text-xs text-slate-400 font-normal ml-1">For Approving Officers</span>
+                                        Signature image for the PNPKI stamp (Optional)
                                     </label>
-                                    <input 
+                                    <input
                                         @change="e => form.signature = (e.target as HTMLInputElement).files?.[0] || null"
-                                        id="signature" 
-                                        type="file" 
+                                        id="signature"
+                                        type="file"
+                                        aria-describedby="signature_hint"
                                         accept="image/png, image/jpeg, image/jpg"
                                         class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100" 
                                     />
+                                    <p id="signature_hint" class="mt-1 text-xs text-slate-500">
+                                        A picture of the handwritten signature, shown on the left of the stamp. The PNPKI certificate (.p12) is not uploaded here:
+                                        each signer uploads it with their PIN in Settings → Signing certificate, where they can also upload this image themselves.
+                                    </p>
                                     <p v-if="form.errors.signature" class="mt-1 text-xs text-red-500">{{ form.errors.signature }}</p>
                                 </div>
                             </div>

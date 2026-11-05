@@ -53,7 +53,9 @@ test('the client gets their barcode and access code by SMS through the Smart gat
         && $request['destination'] === '639171234567'
         && str_contains($request['text'], 'Barcode: C000000001')
         && str_contains($request['text'], 'Access code: ABC123')
-        && str_contains($request['text'], route('login', ['tab' => 'track'])));
+        && str_contains($request['text'], 'DMS sign-in page, Guest tab')
+        // Networks drop texts with a link, so the SMS never carries one.
+        && ! preg_match('~https?://|www\.~i', $request['text']));
 });
 
 test('landlines, missing numbers and an unconfigured gateway send nothing', function (?string $contact, bool $configured) {

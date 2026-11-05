@@ -38,6 +38,7 @@ class UserController extends Controller
 
         $users->getCollection()->transform(function ($user) {
             $user->is_online = Cache::has('user-is-online-' . $user->id);
+            $user->signing_status = $this->signingStatus($user);
             return $user;
         });
 
@@ -54,6 +55,31 @@ class UserController extends Controller
         ]);
     }
 
+    /**
+     * Whether a signer is ready for the paperless route: certificate state + expiry and whether a signature image
+     * is on file. Status only: the .p12 file and the PIN are never sent; signers upload their own certificate.
+     * Null for roles that do not sign.
+     */
+    private function signingStatus(User $user): ?array
+    {
+        if (! in_array($user->role, User::SIGNER_ROLES, true)) {
+            return null;
+        }
+        $validUntil = $user->certificate_path ? $user->certificate_valid_until : null;
+        $certificate = match (true) {
+            $validUntil === null => 'none',
+            ! $validUntil->isFuture() => 'expired',
+            $validUntil->lessThanOrEqualTo(now()->addDays(30)) => 'expiring',
+            default => 'valid',
+        };
+
+        return [
+            'certificate' => $certificate,
+            'valid_until' => $validUntil?->toDateString(),
+            'signature_image' => (bool) $user->signature_path,
+        ];
+    }
+
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -65,6 +91,7 @@ class UserController extends Controller
             'department_id' => 'nullable|exists:departments,id',
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
             'signature' => ['nullable', 'image', 'mimes:png,jpg,jpeg', 'max:2048'], // 2MB max limit
+            'can_sign_for_head' => ['sometimes', 'boolean'],
         ]);
 
         $signaturePath = null;
@@ -79,6 +106,8 @@ class UserController extends Controller
             'sex' => $validated['sex'] ?? null,
             'state' => $validated['state'] ?? 1,
             'department_id' => $validated['department_id'],
+            // Signing for the head is a department staff authority; other roles sign as themselves.
+            'can_sign_for_head' => $validated['role'] === 'staff' && ($validated['can_sign_for_head'] ?? false),
             'signature_path' => $signaturePath, // Save the path to DB
             'password' => Hash::make($validated['password']),
             'email_verified_at' => now(),
@@ -97,6 +126,7 @@ class UserController extends Controller
             'state' => ['required', 'in:0,1'],
             'department_id' => 'nullable|exists:departments,id',
             'signature' => ['nullable', 'image', 'mimes:png,jpg,jpeg', 'max:2048'],
+            'can_sign_for_head' => ['sometimes', 'boolean'],
         ]);
 
         if ($request->filled('password')) {
@@ -107,6 +137,9 @@ class UserController extends Controller
         }
 
         $user->fill($validated);
+        if ($user->role !== 'staff') {
+            $user->can_sign_for_head = false;
+        }
 
         // Handle signature upload and replace old file if it exists
         if ($request->hasFile('signature')) {

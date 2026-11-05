@@ -8,20 +8,19 @@ use App\Models\DocumentType;
 use App\Models\TransactionType;
 use App\Services\DashboardReportService;
 use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use Inertia\Inertia;
 
 class DashboardController extends Controller
 {
     public function __invoke(DashboardFilterRequest $request, DashboardReportService $reports)
     {
-        $selectedMonthName = $request->monthName();
-        $year = $request->year();
-        $monthNumber = $request->monthNumber();
+        [$start, $end] = $request->period();
 
         // Every card follows the same scope: all offices, or the Workstation user's own department (FGD slide 9).
         $user = $request->user();
         $seesAllDepartments = $reports->seesAllDepartments($user);
-        $monthQuery = $reports->monthQuery($year, $monthNumber, $user);
+        $monthQuery = $reports->periodQuery($start, $end, $user);
 
         // ---------------------------------------------------------
         // 1. TOP SUMMARY CARDS
@@ -74,12 +73,9 @@ class DashboardController extends Controller
         $processingCategory = $request->category('processing_category', 'Simple');
         $categoryTransactionTypeIds = $reports->transactionTypeIds($processingCategory);
 
-        $averageDaysByType = $reports->scopeToUser(Document::query(), $user)
+        $averageDaysByType = $reports->completedWithin($reports->scopeToUser(Document::query(), $user), $start, $end)
             ->where('state', 1)
             ->where('status', 'Completed')
-            ->whereNotNull('completed_at')
-            ->whereYear('completed_at', $year)
-            ->whereMonth('completed_at', $monthNumber)
             ->whereIn('transaction_type_id', $categoryTransactionTypeIds)
             ->get(['id', 'document_type_id', 'created_at', 'completed_at'])
             ->groupBy('document_type_id')
@@ -112,14 +108,15 @@ class DashboardController extends Controller
         }
 
         return Inertia::render('Dashboard', [
-            'selectedMonth' => $selectedMonthName,
-            'selectedYear' => $year,
+            'from' => $start->format('Y-m'),
+            'to' => $end->format('Y-m'),
+            'periodLabel' => $this->periodLabel($start, $end),
             'years' => $request->years(),
             'transactionCategories' => DashboardReportService::TRANSACTION_CATEGORIES,
             'processingCategory' => $processingCategory,
             'scope' => $seesAllDepartments ? null : $user->department?->only(['code', 'name']),
             'summaryCards' => [
-                ['label' => 'Monthly Documents', 'value' => number_format($totalDocuments), 'badge' => 'Total', 'badgeColor' => 'emerald'],
+                ['label' => 'Total Documents', 'value' => number_format($totalDocuments), 'badge' => 'Total', 'badgeColor' => 'emerald'],
                 ['label' => 'External Clients', 'value' => number_format($externalClients), 'suffix' => 'Served'],
                 ['label' => 'Internal Clients', 'value' => number_format($internalClients), 'suffix' => 'Served'],
             ],
@@ -134,5 +131,17 @@ class DashboardController extends Controller
             'processingTimes' => $processingTimes,
             'months' => DashboardFilterRequest::MONTHS,
         ]);
+    }
+
+    /** "November 2026", "January – March 2026" or "November 2025 – February 2026". */
+    private function periodLabel(CarbonImmutable $start, CarbonImmutable $end): string
+    {
+        if ($start->format('Y-m') === $end->format('Y-m')) {
+            return $start->format('F Y');
+        }
+
+        return $start->year === $end->year
+            ? $start->format('F').' – '.$end->format('F Y')
+            : $start->format('F Y').' – '.$end->format('F Y');
     }
 }
