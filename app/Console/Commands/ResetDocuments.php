@@ -25,17 +25,17 @@ class ResetDocuments extends Command
 
     protected $description = 'Delete all documents, their trails and uploaded/signed files for a fresh start (keeps offices, users and registries)';
 
-    /** Directories that hold only document files: intake scans (public) and approval scans/stamped PDFs (local). */
-    private const FILE_DIRECTORIES = ['public' => 'documents', 'local' => 'signed-documents'];
+    /** Private-disk directories that hold only document files: intake scans and approval scans/stamped PDFs. */
+    private const FILE_DIRECTORIES = ['documents', 'signed-documents'];
 
     public function handle(): int
     {
-        $files = collect(self::FILE_DIRECTORIES)->map(fn (string $directory, string $disk) => collect(Storage::disk($disk)->allFiles($directory)));
+        $files = collect(self::FILE_DIRECTORIES)->mapWithKeys(fn (string $directory) => [$directory => Storage::disk('local')->allFiles($directory)]);
         $counts = [
             'documents' => Document::query()->count(),
             'document trail entries' => DocumentTrail::query()->count(),
-            'uploaded scans (storage/app/public/documents)' => $files['public']->count(),
-            'signed files (storage/app/private/signed-documents)' => $files['local']->count(),
+            'uploaded scans (storage/app/private/documents)' => count($files['documents']),
+            'signed files (storage/app/private/signed-documents)' => count($files['signed-documents']),
         ];
 
         $this->warn('This permanently deletes:');
@@ -66,8 +66,7 @@ class ResetDocuments extends Command
             DB::statement('ALTER TABLE document_trails AUTO_INCREMENT = 1');
             DB::statement('ALTER TABLE documents AUTO_INCREMENT = 1');
         }
-        $failed = $files->flatMap(fn ($paths, string $disk) => collect($paths)->reject(fn (string $path) => Storage::disk($disk)->delete($path))
-            ->map(fn (string $path) => "{$disk}:{$path}"));
+        $failed = $files->flatten()->reject(fn (string $path) => Storage::disk('local')->delete($path));
 
         Log::warning('All document data was reset.', [...$counts, 'files_not_deleted' => $failed->values()->all()]);
         if ($failed->isNotEmpty()) {

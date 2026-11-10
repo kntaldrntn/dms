@@ -11,7 +11,6 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
-    Storage::fake('public');
     Storage::fake('local');
     Storage::fake('certificates');
     $this->office = Department::create(['code' => 'REC', 'name' => 'Records', 'state' => 1]);
@@ -28,8 +27,8 @@ beforeEach(function () {
         'document_id' => $document->id, 'department_id' => $this->office->id, 'signed_file_path' => 'signed-documents/old.pdf',
         'received_at' => now('Asia/Manila'), 'received_action' => 'Registered',
     ]);
-    Storage::disk('public')->put('documents/scan.pdf', 'scan');
-    Storage::disk('public')->put('signatures/records.png', 'signature');
+    Storage::disk('local')->put('documents/scan.pdf', 'scan');
+    Storage::disk('local')->put('signatures/records.png', 'signature');
     Storage::disk('local')->put('signed-documents/old.pdf', 'signed');
     Storage::disk('certificates')->put('users/1.p12', 'certificate');
 });
@@ -37,7 +36,7 @@ beforeEach(function () {
 function documentDataIsIntact(): void
 {
     expect(Document::count())->toBe(1)->and(DocumentTrail::count())->toBe(1);
-    Storage::disk('public')->assertExists('documents/scan.pdf');
+    Storage::disk('local')->assertExists('documents/scan.pdf');
     Storage::disk('local')->assertExists('signed-documents/old.pdf');
 }
 
@@ -46,7 +45,7 @@ test('a dry run lists what would be deleted and changes nothing', function () {
         ->expectsOutputToContain('This permanently deletes')
         ->expectsTable(['What', 'Count'], [
             ['documents', 1], ['document trail entries', 1],
-            ['uploaded scans (storage/app/public/documents)', 1], ['signed files (storage/app/private/signed-documents)', 1],
+            ['uploaded scans (storage/app/private/documents)', 1], ['signed files (storage/app/private/signed-documents)', 1],
         ])
         ->expectsOutput('Dry run: nothing was changed.')
         ->assertSuccessful()
@@ -73,7 +72,7 @@ test('a confirmed reset deletes documents, trails and their files and keeps ever
     $command->expectsOutput('Done: all document data was deleted.')->assertSuccessful()->run();
 
     expect(Document::count())->toBe(0)->and(DocumentTrail::count())->toBe(0);
-    Storage::disk('public')->assertMissing('documents/scan.pdf');
+    Storage::disk('local')->assertMissing('documents/scan.pdf');
     Storage::disk('local')->assertMissing('signed-documents/old.pdf');
 
     // Kept: offices, users, registries, People Directory, e-signatures, certificates.
@@ -81,7 +80,7 @@ test('a confirmed reset deletes documents, trails and their files and keeps ever
         ->and(User::count())->toBe(1)
         ->and(DocumentType::count())->toBe(1)
         ->and(Person::count())->toBe(1);
-    Storage::disk('public')->assertExists('signatures/records.png');
+    Storage::disk('local')->assertExists('signatures/records.png');
     Storage::disk('certificates')->assertExists('users/1.p12');
 })->with([
     'typed confirmation' => [[], 'RESET'],

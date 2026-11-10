@@ -1,19 +1,15 @@
 <?php
 
-test('registration screen can be rendered', function () {
-    $response = $this->get('/register');
+use App\Models\User;
 
-    $response->assertStatus(200);
-});
+// Accounts are created by the System Administrator in User Management only (FGD access matrix).
+test('there is no self-registration page', function () {
+    $this->get('/register')->assertNotFound();
+    $this->post('/register', [
+        'name' => 'Test User', 'email' => 'test@example.com',
+        'password' => 'password', 'password_confirmation' => 'password',
+    ])->assertNotFound();
 
-test('new users can register', function () {
-    $response = $this->post('/register', [
-        'name' => 'Test User',
-        'email' => 'test@example.com',
-        'password' => 'password',
-        'password_confirmation' => 'password',
-    ]);
-
-    $this->assertAuthenticated();
-    $response->assertRedirect(route('dashboard', absolute: false));
+    $this->assertGuest();
+    expect(User::where('email', 'test@example.com')->exists())->toBeFalse();
 });

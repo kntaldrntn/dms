@@ -142,7 +142,7 @@ class Document extends Model
             return route('documents.signed-pdf', $this);
         }
 
-        return $this->attached_file ? '/storage/'.$this->attached_file : null;
+        return $this->attached_file ? route('documents.attachment', $this) : null;
     }
 
     /**

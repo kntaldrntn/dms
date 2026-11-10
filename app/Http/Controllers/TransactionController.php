@@ -6,6 +6,7 @@ use App\Http\Requests\ChangePrimaryOfficeRequest;
 use App\Http\Requests\ProcessDocumentRequest;
 use App\Http\Requests\ReceiveCopyRequest;
 use App\Http\Requests\ReceiveDocumentRequest;
+use App\Http\Requests\ReceivePaperDocumentRequest;
 use App\Models\Department;
 use App\Models\Document;
 use App\Models\DocumentTrail;
@@ -37,14 +38,17 @@ class TransactionController extends Controller
             $query->where('barcode', 'LIKE', "%{$request->barcode}%");
         }
 
-        $documents = $query->latest()->paginate(10)->withQueryString()
-            ->through(fn (Document $document) => $document->hideConfidentialDetailsFrom($request->user()));
+        // Paper documents are received by scanning the barcode on the physical copy, not with a button.
+        $forInbox = fn (Document $document) => $document->setAttribute('receive_by_scan', ! $document->isPaperless())
+            ->hideConfidentialDetailsFrom($request->user());
+        $documents = $query->latest()->paginate(10)->withQueryString()->through($forInbox);
 
         // Opened from the notification bell: preload that document so its Receive modal opens directly,
         // even when it is not on the current page. Null once the office has acted on it.
         $focusDocument = $request->integer('document')
-            ? $inbox()->whereKey($request->integer('document'))->first()?->hideConfidentialDetailsFrom($request->user())
+            ? $inbox()->whereKey($request->integer('document'))->first()
             : null;
+        $focusDocument = $focusDocument ? $forInbox($focusDocument) : null;
 
         // View-only copies sent to this office: it can receive and view them but not act on them.
         $office = (int) $request->user()->department_id;
@@ -84,6 +88,13 @@ class TransactionController extends Controller
         $transactions->receive($document, $request->user());
 
         return redirect()->back()->with('success', 'Document received. Process it once your office has acted on it.');
+    }
+
+    public function receivePaper(ReceivePaperDocumentRequest $request, TransactionService $transactions)
+    {
+        $document = $transactions->receivePaper($request->user(), $request->validated('barcode'));
+
+        return redirect()->back()->with('success', "Paper document {$document->barcode} received. Process it once your office has acted on it.");
     }
 
     public function receiveCopy(ReceiveCopyRequest $request, Document $document, TransactionService $transactions)

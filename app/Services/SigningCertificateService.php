@@ -49,14 +49,14 @@ class SigningCertificateService
      */
     public function storeSignatureImage(User $user, UploadedFile $image): void
     {
-        $path = $image->store('signatures', 'public');
+        $path = $image->store('signatures', 'local');
         if (! $path) {
             throw ValidationException::withMessages(['signature_image' => 'The signature image could not be saved. Try again.']);
         }
         $previous = $user->signature_path;
         $user->forceFill(['signature_path' => $path])->save();
         if ($previous && $previous !== $path) {
-            Storage::disk('public')->delete($previous);
+            Storage::disk('local')->delete($previous);
         }
         Log::info('Signature image uploaded by the signer.', ['user_id' => $user->id]);
     }
@@ -64,7 +64,7 @@ class SigningCertificateService
     public function removeSignatureImage(User $user): void
     {
         if ($user->signature_path) {
-            Storage::disk('public')->delete($user->signature_path);
+            Storage::disk('local')->delete($user->signature_path);
         }
         $user->forceFill(['signature_path' => null])->save();
         Log::info('Signature image removed by the signer.', ['user_id' => $user->id]);

@@ -29,8 +29,8 @@ class PdfApprovalStampService
      */
     public function stamp(Document $document, User $signer, array $placement, array $office, string $pin): string
     {
-        $signatureImage = $signer->signature_path && Storage::disk('public')->exists($signer->signature_path)
-            ? Storage::disk('public')->path($signer->signature_path)
+        $signatureImage = $signer->signature_path && Storage::disk('local')->exists($signer->signature_path)
+            ? Storage::disk('local')->path($signer->signature_path)
             : null;
         $credentials = $this->certificates->credentials($signer, $pin);
         $sourcePath = $this->sourcePath($document);
@@ -111,7 +111,7 @@ class PdfApprovalStampService
             return Storage::disk('local')->path($signed);
         }
 
-        return $document->attached_file ? Storage::disk('public')->path($document->attached_file) : null;
+        return $document->attached_file ? Storage::disk('local')->path($document->attached_file) : null;
     }
 
     private function cleanSignatureImage(string $path): string

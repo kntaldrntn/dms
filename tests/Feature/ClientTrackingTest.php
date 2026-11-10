@@ -56,7 +56,7 @@ test('registration emails the client the barcode and access code once; later wor
     });
 
     $healthStaff = User::factory()->create(['role' => 'staff', 'department_id' => $this->health->id]);
-    $this->actingAs($healthStaff)->post(route('transactions.receive', $document))->assertSessionHasNoErrors();
+    $this->actingAs($healthStaff)->post(route('transactions.receive-paper'), ['barcode' => $document->barcode])->assertSessionHasNoErrors();
     $this->post(route('transactions.process', $document), [
         'action' => 'end', 'remarks' => 'Released to client', 'workflow_version' => $document->fresh()->workflow_version,
     ])->assertSessionHasNoErrors();

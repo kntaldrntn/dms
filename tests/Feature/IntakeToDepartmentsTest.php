@@ -69,7 +69,7 @@ test('ADM or OCM picked as a department gets it in its Office Inbox with no appr
         ->assertInertia(fn (Assert $page) => $page->has('documents.data', 0));
 
     // Receive, then end it like any office.
-    $this->actingAs($officeStaff)->post(route('transactions.receive', $document))->assertSessionHasNoErrors();
+    $this->actingAs($officeStaff)->post(route('transactions.receive-paper'), ['barcode' => $document->barcode])->assertSessionHasNoErrors();
     $this->actingAs($officeStaff)->post(route('transactions.process', $document), [
         'workflow_version' => $document->fresh()->workflow_version, 'action' => 'end', 'remarks' => 'Noted',
     ])->assertSessionHasNoErrors();

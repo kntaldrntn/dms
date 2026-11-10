@@ -36,7 +36,7 @@ class IncomingDocumentService
             ->whereHas('document', fn ($documents) => $documents->where('state', 1)->where('status', '!=', 'Completed'));
 
         $items = (clone $query)
-            ->with('document:id,barcode,subject_matter,is_confidential')
+            ->with('document:id,barcode,subject_matter,is_confidential,route_mode')
             ->latest('received_at')->latest('id')->take(5)->get()
             ->map(fn (DocumentTrail $trail) => [
                 'id' => $trail->id,
@@ -47,7 +47,10 @@ class IncomingDocumentService
                 'action' => match ($trail->received_by ? $trail->stage : null) {
                     DocumentTrail::STAGE_ADM_APPROVAL => 'Ready for City Administrator approval',
                     DocumentTrail::STAGE_OCM_APPROVAL => 'Ready for City Mayor approval',
-                    default => $trail->received_action,
+                    // A paper document for the Office Inbox: a notice only, received by scanning it on arrival.
+                    default => $this->awaitsPaper($trail)
+                        ? 'Incoming paper: scan its barcode when it arrives'
+                        : $trail->received_action,
                 },
                 'received_at' => $trail->received_at,
                 'url' => $trail->copy_role === DocumentTrail::COPY
@@ -56,6 +59,12 @@ class IncomingDocumentService
             ])->all();
 
         return ['count' => $query->count(), 'items' => $items];
+    }
+
+    private function awaitsPaper(DocumentTrail $trail): bool
+    {
+        return $trail->copy_role === DocumentTrail::PRIMARY && $trail->stage === null && $trail->received_by === null
+            && ! $trail->document->isPaperless();
     }
 
     /** The page where the receiving office acts on this document. */

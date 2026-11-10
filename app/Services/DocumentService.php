@@ -30,7 +30,7 @@ class DocumentService
 
         try {
             if ($upload instanceof UploadedFile) {
-                $newPath = $upload->store('documents', 'public');
+                $newPath = $upload->store('documents', 'local');
                 if (! $newPath) {
                     throw new RuntimeException('The attachment could not be saved.');
                 }
@@ -119,7 +119,7 @@ class DocumentService
             return $document;
         } catch (Throwable $exception) {
             if ($newPath) {
-                Storage::disk('public')->delete($newPath);
+                Storage::disk('local')->delete($newPath);
             }
             throw $exception;
         }

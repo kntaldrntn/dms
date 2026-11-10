@@ -7,6 +7,7 @@ use App\Models\Document;
 use App\Models\DocumentTrail;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
@@ -88,6 +89,25 @@ class TransactionService
             // received_action keeps how it arrived (e.g. "Routed from ADM"); received_at becomes the actual receipt time.
             $entry->fill(['received_by' => $user->id, 'received_at' => now('Asia/Manila')])->save();
         });
+    }
+
+    /**
+     * Paper route: the Primary office receives by scanning the barcode on the physical document, so a receipt
+     * always means the paper arrived. Only a document waiting at the user's own office is found.
+     */
+    public function receivePaper(User $user, string $barcode): Document
+    {
+        $document = Document::where('barcode', $barcode)->where('state', 1)->where('status', '!=', 'Completed')
+            ->heldBy((int) $user->department_id)->first();
+        if (! $document) {
+            throw ValidationException::withMessages(['barcode' => "No document with barcode {$barcode} is waiting at your office. Check the barcode, or whether it was routed to your office."]);
+        }
+        if (Gate::forUser($user)->denies('receive', $document)) {
+            throw ValidationException::withMessages(['barcode' => "Document {$barcode} cannot be received here: your office already received it, or it waits on the City Administrator / City Mayor approval page."]);
+        }
+        $this->receive($document, $user);
+
+        return $document;
     }
 
     /** A copy office records that it received its view-only copy; the copy stays open until the document closes. */

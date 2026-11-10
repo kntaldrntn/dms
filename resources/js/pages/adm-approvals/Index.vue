@@ -96,7 +96,7 @@ const buttonClass =
                                 <div class="flex flex-wrap items-center justify-center gap-1.5">
                                     <a
                                         v-if="doc.attached_file"
-                                        :href="`/storage/${doc.attached_file}`"
+                                        :href="route('documents.attachment', doc.id)"
                                         target="_blank"
                                         rel="noopener"
                                         :class="buttonClass"

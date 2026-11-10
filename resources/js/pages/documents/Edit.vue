@@ -247,7 +247,7 @@ function updateDocument() {
                                     <p class="text-xs text-slate-500">You can upload a new one to replace it.</p>
                                 </div>
                             </div>
-                            <a :href="`/storage/${document.attached_file}`" target="_blank" class="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-200 transition">
+                            <a :href="route('documents.attachment', document.id)" target="_blank" class="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-200 transition">
                                 <Download class="w-3.5 h-3.5" /> View File
                             </a>
                         </div>

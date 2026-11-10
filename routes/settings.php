@@ -20,6 +20,7 @@ Route::middleware('auth')->group(function () {
     Route::post('settings/certificate', [SigningCertificateController::class, 'update'])->name('certificate.update');
     Route::delete('settings/certificate', [SigningCertificateController::class, 'destroy'])->name('certificate.destroy');
     // Signers only (SignatureImageRequest / SIGNER_ROLES check): the image on the left of their PNPKI stamp.
+    Route::get('settings/signature-image', [SigningCertificateController::class, 'showSignatureImage'])->name('signature-image.show');
     Route::post('settings/signature-image', [SigningCertificateController::class, 'updateSignatureImage'])->name('signature-image.update');
     Route::delete('settings/signature-image', [SigningCertificateController::class, 'destroySignatureImage'])->name('signature-image.destroy');
 

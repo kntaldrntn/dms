@@ -13,7 +13,7 @@ use Inertia\Testing\AssertableInertia as Assert;
 beforeEach(function () {
     // Inside working hours: intake routes use the working_hours middleware.
     $this->travelTo(now('Asia/Manila')->setDate(2026, 10, 21)->setTime(10, 0));
-    Storage::fake('public');
+    Storage::fake('local');
     // These tests cover the paperless rulebook; the hybrid paper-only default has its own test below.
     config(['services.paperless.enabled' => true]);
 
@@ -54,7 +54,7 @@ test('a digitally signed type goes paperless with its scan attached', function (
 
     $document = Document::where('barcode', 'INTAKE-1')->firstOrFail();
     expect($document->route_mode)->toBe('paperless')->and($document->is_confidential)->toBeFalse();
-    Storage::disk('public')->assertExists($document->attached_file);
+    Storage::disk('local')->assertExists($document->attached_file);
 });
 
 test('paperless needs the scan and a digitally signed type', function () {
@@ -66,7 +66,7 @@ test('paperless needs the scan and a digitally signed type', function () {
     ])->assertSessionHasErrors(['route_mode' => 'Purchase Request needs a handwritten signature, so it takes the paper route.']);
 
     expect(Document::count())->toBe(0);
-    expect(Storage::disk('public')->allFiles())->toBeEmpty();
+    expect(Storage::disk('local')->allFiles())->toBeEmpty();
 });
 
 test('confidential documents take the paper route with no upload and no AI results', function () {

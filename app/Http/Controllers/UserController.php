@@ -96,7 +96,7 @@ class UserController extends Controller
 
         $signaturePath = null;
         if ($request->hasFile('signature')) {
-            $signaturePath = $request->file('signature')->store('signatures', 'public');
+            $signaturePath = $request->file('signature')->store('signatures', 'local');
         }
 
         User::create([
@@ -143,10 +143,10 @@ class UserController extends Controller
 
         // Handle signature upload and replace old file if it exists
         if ($request->hasFile('signature')) {
-            if ($user->signature_path && Storage::disk('public')->exists($user->signature_path)) {
-                Storage::disk('public')->delete($user->signature_path);
+            if ($user->signature_path && Storage::disk('local')->exists($user->signature_path)) {
+                Storage::disk('local')->delete($user->signature_path);
             }
-            $user->signature_path = $request->file('signature')->store('signatures', 'public');
+            $user->signature_path = $request->file('signature')->store('signatures', 'local');
         }
 
         // --- AUDIT TRAIL LOGIC ---

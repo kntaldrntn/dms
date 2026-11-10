@@ -13,15 +13,10 @@ use App\Http\Controllers\DocumentClassificationController;
 use App\Http\Controllers\Settings\MailSettingController;
 use App\Http\Controllers\Settings\PerformanceStandardController;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
 Route::get('/', function () {
     return redirect()->route('login');
 })->name('home');
-
-Route::get('dashboard', function () {
-    return Inertia::render('Dashboard');
-})->middleware(['auth', 'verified'])->name('dashboard');
 
 // CORE DOCUMENT ROUTES
 Route::middleware(['auth', 'verified'])->group(function () {
@@ -52,7 +47,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         
         Route::get('/transactions/inbox', [TransactionController::class, 'index'])->name('transactions.inbox');
         Route::post('/transactions/{document}/process', [TransactionController::class, 'process'])->name('transactions.process');
-        Route::post('/transactions/{document}/receive', [TransactionController::class, 'receive'])->name('transactions.receive');
+        // Paper route: the Primary office receives by scanning the physical document's barcode.
+        Route::post('/transactions/receive-paper', [TransactionController::class, 'receivePaper'])->name('transactions.receive-paper');
+        Route::post('/transactions/{document}/receive',[TransactionController::class, 'receive'])->name('transactions.receive');
         Route::post('/transactions/{document}/receive-copy', [TransactionController::class, 'receiveCopy'])->name('transactions.receive-copy');
         Route::post('/documents/{document}/primary-office', [TransactionController::class, 'changePrimary'])->name('documents.primary-office');
         Route::post('/documents/{document}/category', [DocumentController::class, 'changeCategory'])->name('documents.category');
@@ -62,6 +59,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // 2. READ-ONLY ROUTES (Must go LAST)
     Route::get('documents', [DocumentController::class, 'index'])->name('documents.index');
     Route::get('documents/{document}', [DocumentController::class, 'show'])->name('documents.show');
+    Route::get('documents/{document}/attachment', [DocumentController::class, 'attachment'])->name('documents.attachment');
     Route::get('documents/{document}/signed-pdf', [App\Http\Controllers\OcmApprovalController::class, 'previewSigned'])->name('documents.signed-pdf');
 
     // 3. DASHBOARD

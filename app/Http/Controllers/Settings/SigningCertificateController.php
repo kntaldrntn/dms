@@ -27,8 +27,10 @@ class SigningCertificateController extends Controller
                 'is_valid' => $user->hasValidCertificate(),
             ] : null,
             'hasSignatureImage' => (bool) $user->signature_path,
-            // Preview of the signer's own image (public disk, like the User Management upload).
-            'signatureImageUrl' => $user->signature_path ? Storage::disk('public')->url($user->signature_path) : null,
+            // Private disk, served only to its owner; the version busts the browser cache after a replacement.
+            'signatureImageUrl' => $user->signature_path
+                ? route('signature-image.show', ['v' => substr(md5($user->signature_path), 0, 8)])
+                : null,
             'status' => $request->session()->get('status'),
         ]);
     }
@@ -46,6 +48,17 @@ class SigningCertificateController extends Controller
         $certificates->remove($request->user());
 
         return back()->with('status', 'certificate-removed');
+    }
+
+    /** The signer's own signature image only: no user can open another's. */
+    public function showSignatureImage(Request $request)
+    {
+        $path = $request->user()->signature_path;
+        abort_unless($path && Storage::disk('local')->exists($path), 404);
+
+        return Storage::disk('local')->response($path, 'signature.'.pathinfo($path, PATHINFO_EXTENSION), [
+            'Cache-Control' => 'private, max-age=3600',
+        ], 'inline');
     }
 
     public function updateSignatureImage(SignatureImageRequest $request, SigningCertificateService $certificates): RedirectResponse

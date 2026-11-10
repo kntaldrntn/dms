@@ -18,6 +18,7 @@ use App\Models\DeliveryMethod;
 use App\Models\Department;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Illuminate\Support\Str;
 
@@ -63,23 +64,14 @@ class DocumentController extends Controller
         ]);
     }
 
-    public function create()
+    /** The scanned copy, from the private disk, for whoever may view the document (same rule as its page). */
+    public function attachment(Document $document)
     {
-        $recentDocuments = Document::with('documentType')
-            ->where('state', 1)
-            ->latest()
-            ->take(5)
-            ->get();
+        $this->authorize('view', $document);
+        abort_unless($document->attached_file && Storage::disk('local')->exists($document->attached_file), 404);
+        $extension = strtolower(pathinfo($document->attached_file, PATHINFO_EXTENSION));
 
-        return Inertia::render('documents/Create', [
-            'transactionTypes' => TransactionType::where('state', 1)->get(),
-            'documentTypes' => DocumentType::where('state', 1)->get(),
-            'classifications' => DocumentClassification::where('state', 1)->get(),
-            'deliveryMethods' => DeliveryMethod::where('state', 1)->get(),
-            'departments' => Department::where('state', 1)->get(),
-            'generatedAccessCode' => strtoupper(Str::random(6)),
-            'recentDocuments' => $recentDocuments,
-        ]);
+        return Storage::disk('local')->response($document->attached_file, "{$document->barcode}.{$extension}", [], 'inline');
     }
 
     public function store(SaveDocumentRequest $request, DocumentService $documents)

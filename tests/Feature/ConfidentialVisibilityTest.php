@@ -54,7 +54,7 @@ test('Workstation staff never see a confidential document their office holds, bu
             && ! array_key_exists('subject_matter', $row) && ! array_key_exists('source_name', $row)
             && ! array_key_exists('email', $row) && ! array_key_exists('access_code', $row))
             && collect($rows)->contains(fn ($row) => $row['barcode'] === 'OPEN-1' && $row['subject_matter'] === 'Sensitive personnel complaint')));
-    $this->post(route('transactions.receive', $this->secret))->assertSessionHasNoErrors();
+    $this->post(route('transactions.receive-paper'), ['barcode' => $this->secret->barcode])->assertSessionHasNoErrors();
 
     $bell = collect(app(IncomingDocumentService::class)->forUser($staff)['items'])->pluck('subject_matter', 'barcode');
     expect($bell->get('OPEN-1'))->toBe('Sensitive personnel complaint');

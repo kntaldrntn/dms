@@ -41,7 +41,8 @@ test('a dispatched document pings the receiving office until it receives it, the
     $this->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page
         ->where('incoming.count', 1)
         ->where('incoming.items.0.barcode', 'IN-001')
-        ->where('incoming.items.0.action', 'Dispatched from Records')
+        // A paper document: the bell is a notice; the office receives it by scanning the paper.
+        ->where('incoming.items.0.action', 'Incoming paper: scan its barcode when it arrives')
         ->where('incoming.items.0.url', route('transactions.inbox', ['document' => $this->document->id])));
     // The sender's office is not pinged.
     $this->actingAs($this->records)->get(route('dashboard'))->assertInertia(fn (Assert $page) => $page->where('incoming.count', 0));
@@ -55,8 +56,9 @@ test('a dispatched document pings the receiving office until it receives it, the
     $this->postJson(route('transactions.process', $this->document), [
         'workflow_version' => 1, 'action' => 'end', 'remarks' => 'Too early',
     ])->assertForbidden();
-    $this->post(route('transactions.receive', $this->document))->assertRedirect()->assertSessionHasNoErrors();
-    $this->post(route('transactions.receive', $this->document))->assertForbidden();
+    $this->post(route('transactions.receive-paper'), ['barcode' => $this->document->barcode])->assertRedirect()->assertSessionHasNoErrors();
+    // A second scan is refused with a message next to the scan field.
+    $this->post(route('transactions.receive-paper'), ['barcode' => $this->document->barcode])->assertSessionHasErrors('barcode');
     $entry = DocumentTrail::where('document_id', $this->document->id)->where('department_id', $this->target->id)->whereNull('released_at')->firstOrFail();
     expect($entry->received_by)->toBe($this->staff->id)->and($entry->received_action)->toBe('Dispatched from Records');
 
@@ -97,8 +99,8 @@ test('executive steps ping only the role that acts on them and stay out of the o
 test('receiving shows a confirmation toast on the inbox', function () {
     app(DispatchService::class)->dispatch($this->document, $this->records, ['workflow_version' => 0, 'routed_to' => [$this->target->id]]);
 
-    $this->actingAs($this->staff)->from(route('transactions.inbox'))->post(route('transactions.receive', $this->document))
+    $this->actingAs($this->staff)->from(route('transactions.inbox'))->post(route('transactions.receive-paper'), ['barcode' => $this->document->barcode])
         ->assertRedirect(route('transactions.inbox'));
     $this->get(route('transactions.inbox'))->assertInertia(fn (Assert $page) => $page
-        ->where('flash.success', 'Document received. Process it once your office has acted on it.'));
+        ->where('flash.success', "Paper document {$this->document->barcode} received. Process it once your office has acted on it."));
 });

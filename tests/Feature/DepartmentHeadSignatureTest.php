@@ -27,7 +27,7 @@ beforeEach(function () {
         'document_type_id' => DocumentType::create(['document_code' => 'COM', 'document_type' => 'Communications', 'state' => 1])->id,
     ])->assertSessionHasNoErrors();
     $this->document = Document::where('barcode', 'SIG-1')->firstOrFail();
-    $this->actingAs($this->staff)->post(route('transactions.receive', $this->document))->assertSessionHasNoErrors();
+    $this->actingAs($this->staff)->post(route('transactions.receive-paper'), ['barcode' => $this->document->barcode])->assertSessionHasNoErrors();
 });
 
 function endAtHealth($test, array $extra = [])

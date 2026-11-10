@@ -15,7 +15,7 @@ beforeEach(function () {
     // Inside working hours: approval routes use the working_hours middleware.
     $this->travelTo(now('Asia/Manila')->setDate(2026, 10, 23)->setTime(10, 0));
     Storage::fake('local');
-    Storage::fake('public');
+    Storage::fake('local');
     $this->recordsOffice = Department::create(['code' => 'REC', 'name' => 'Records', 'state' => 1]);
     $this->adm = Department::create(['code' => 'ADM', 'name' => 'City Administrator', 'state' => 1]);
     $this->ocm = Department::create(['code' => 'OCM', 'name' => 'City Mayor', 'state' => 1]);
@@ -156,8 +156,8 @@ function paperlessAtAdm($test): void
     $pdf = new TCPDF;
     $pdf->AddPage();
     $pdf->Write(0, 'Letter for approval');
-    Storage::disk('public')->put('documents/scan.pdf', $pdf->Output('scan.pdf', 'S'));
-    $test->cityAdministrator->update(['signature_path' => UploadedFile::fake()->image('signature.png', 300, 120)->store('signatures', 'public')]);
+    Storage::disk('local')->put('documents/scan.pdf', $pdf->Output('scan.pdf', 'S'));
+    $test->cityAdministrator->update(['signature_path' => UploadedFile::fake()->image('signature.png', 300, 120)->store('signatures', 'local')]);
     app(SigningCertificateService::class)->store($test->cityAdministrator,
         UploadedFile::fake()->createWithContent('ca.p12', testCertificate('2468', 'ATTY. TEST ADMINISTRATOR')), '2468');
     $test->document->update(['route_mode' => 'paperless', 'attached_file' => 'documents/scan.pdf']);
@@ -204,7 +204,7 @@ test('a wrong PIN or a missing certificate stops a paperless approval', function
 
     approveAtAdm($this, ['target' => 'ocm', 'stamp_placement' => STAMP, ...$data])->assertSessionHasErrors($error);
     expect($this->document->fresh()->stage)->toBe(DocumentTrail::STAGE_ADM_APPROVAL);
-    expect(Storage::disk('local')->allFiles())->toBe([]);
+    expect(Storage::disk('local')->allFiles('signed-documents'))->toBe([]);
 })->with([
     'wrong PIN' => [fn () => null, ['certificate_pin' => '0000'], 'certificate_pin'],
     'no PIN' => [fn () => null, [], 'certificate_pin'],

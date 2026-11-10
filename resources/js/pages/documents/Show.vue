@@ -450,7 +450,7 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                             <dd class="mt-1 flex flex-col items-start gap-1.5">
                                 <a
                                     v-if="document.attached_file"
-                                    :href="`/storage/${document.attached_file}`"
+                                    :href="route('documents.attachment', document.id)"
                                     target="_blank"
                                     rel="noopener"
                                     class="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100"

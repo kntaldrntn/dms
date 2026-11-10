@@ -62,7 +62,7 @@ Request flow: **route → middleware (`auth`, `verified`, `role:`, `working_hour
 | Path | Responsibility |
 | --- | --- |
 | `routes/web.php` | Documents, transactions (Office Inbox), ADM/OCM approvals, dashboard + report, registries, settings. Processing routes sit in `working_hours` (Mon–Fri 08:00–17:00 Asia/Manila; system admins bypass). `users` and Email Settings: `role:system_administrator`; other registries: `role:system_administrator,records_manager`. |
-| `routes/auth.php` | Login/password routes (guest) + the **public** `POST /track` client lookup (user-approved exception, see CLAUDE.md). `/register` still exists (known issue). |
+| `routes/auth.php` | Login/password routes (guest) + the **public** `POST /track` client lookup (user-approved exception, see CLAUDE.md). Self-registration (`/register`) removed 2026-11-10. |
 | `app/Services/DocumentWorkflow.php` | Core concurrency/custody engine. `mutate()` locks document + user, authorizes via policy, rejects inactive/completed docs (409), checks `workflow_version`, increments it, retries deadlocks up to 3×. Also `targets()`, `office(code)`, `release()`, `receive()`, `distribute()` (Primary + copies), `openOffices()`, `closeCopies()`, `executiveStageFor()`, `departmentHeadSigner()`. |
 | `app/Services/DocumentService.php` | Create/update/deactivate. Create: ADM/OCM target → custody moves there with the approval stage; Departments → `distribute()`; queues the tracking-code email. Update queues it again when the client email is added/changed. Deletes the uploaded file on failure. |
 | `app/Services/TransactionService.php`, `DispatchService.php` | Office Inbox: `receive()` (Primary must receive before acting), `process()` (route/end, wet-signature record), `receiveCopy()`, `changePrimary()`. Records' Route button uses `dispatch`. |
@@ -75,7 +75,6 @@ Request flow: **route → middleware (`auth`, `verified`, `role:`, `working_hour
 | `app/Services/MailSettingsService.php` | Email Settings: applies the saved SMTP row (encrypted password) over `.env` per request and in mail jobs; a blank first save takes `MAIL_PASSWORD` from `.env`. |
 | `app/Services/DashboardReportService.php` | Dashboard card sets + printable reports (`dashboard.report`). |
 | `app/Console/Commands/ResetDocuments.php` | `php artisan dms:reset-documents [--dry-run] [--force]` — deletes all documents, trails and their files (run once on 2026-10-30). |
-| `app/Services/DocumentAnalysisService.php` | **Unused** older copy of the intake prompt (known issue). |
 | `app/Policies/DocumentPolicy.php` | `viewAny`, `view`, `create`, `update`, `delete`, `dispatch`, `process`, `receive`, `receiveCopy`, `changePrimary`, `changeCategory`, `viewAdmApprovals`, `receiveAdm`, `approveAdm`, `viewOcmApprovals`, `receiveOcm`, `approveOcm`. Ownership = the office holding the open **Primary** trail entry. `view` uses `Document::visibleTo()` (Workstation: own office's documents, never confidential); `changePrimary`/`changeCategory`: Records roles any document, Supervisory endorsed only. Who sees everything: `User::seesAllDocuments()`. |
 | `app/Http/Middleware` | `HandleRoles` (`role:`), `CheckWorkingHours`, `TrackUserActivity`, `HandleInertiaRequests` (shares `auth.user`, `auth.canViewAdmApprovals`, `auth.canViewOcmApprovals`, `features.paperless`, lazy `incoming`). |
 | `app/Models` | `Document` (`is_delayed`, `is_delinquent`, `stage`, `primaryEntry()`, `holders()`, `scopeHeldBy`, `scopeCopiedTo`, `isPaperless()`), `DocumentTrail` (`stage`, `copy_role`, `STAGE_*`), `Department`, `User` (`certificate_*`), `MailSetting`, `Person`, registries (`DocumentType` + rulebook, `TransactionType`, `DocumentClassification`, `DeliveryMethod`, `PerformanceStandard`), `AuditLog`, `LoginHistory`. Active/inactive = integer `state` (1/0). |
@@ -144,7 +143,7 @@ in-app preview `.claude/launch.json` (`dms-local`) serves on 127.0.0.1:8001.
 | Tests | `./vendor/bin/pest` | ✅ 205 passed, 2170 assertions (re-run after the visibility rules) |
 | ESLint | `npx eslint .` | ✅ no errors |
 | Prettier | `npx prettier --check resources/` | ❌ 20 files need formatting (pre-existing) |
-| Type check | `npx vue-tsc --noEmit` | ❌ TS2688: cannot find type definition `./resources/js/types` (tsconfig `compilerOptions.types`) |
+| Type check | `npx vue-tsc --noEmit` | ❌ runs since 2026-11-10 (tsconfig fixed); 48 pre-existing type errors in 25 files, ~20 of them `route(name, id)` Ziggy typing |
 | Pint | `./vendor/bin/pint --test` | ❌ 65 files (10 of them only CRLF line endings in the working copy; git normalizes on commit) |
 | Build | `npm run build` | ✅ |
 
@@ -253,15 +252,16 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
 ## 7. Known issues, risks & technical debt
 
 **Security**
-1. Document attachments are stored on the `public` disk (`storage/app/public/documents`) and are reachable by URL
-   without signing in.
+1. ~~Document attachments are on the `public` disk and reachable by URL without signing in.~~ **Resolved 2026-11-10:**
+   intake scans and signature images are on the private `local` disk, served by `documents.attachment` (policy `view`)
+   and `signature-image.show` (owner only).
 2. ~~Every active user could see every active document, including confidential ones.~~ **Resolved 2026-10-30:**
    `Document::scopeVisibleTo()` + `hideConfidentialDetailsFrom()` (see the change log). The signed-scan preview
    (`documents.signed-pdf`) authorizes with `view`, so it follows the same rule.
-3. `/register` and `Register.vue` still exist, so anyone can self-register by URL.
+3. ~~`/register` lets anyone self-register.~~ **Resolved 2026-11-10:** route, controller and page removed.
 4. `HandleInertiaRequests` shares the full `User` model to the browser (password/2FA/certificate path hidden;
    other columns such as `signature_path` exposed — last reviewed 2026-10-13).
-5. `.gitignore` contains merge-conflict markers; `/public/certificates` is not ignored (the folder was deleted).
+5. ~~`.gitignore` merge-conflict markers.~~ **Resolved 2026-11-10** (one clean list; `/public/certificates` ignored).
 6. Public `/track` is limited per IP: offices behind one shared public IP share the 5-tries limit.
 
 **Operations**
@@ -270,14 +270,15 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
 9. `.env.example` defaults to SQLite and `MAIL_MAILER=log`, while local dev uses MySQL + SMTP.
 
 **Maintainability**
-10. `DocumentController::create()` renders a non-existent `documents/Create` page and has no route (dead code).
-11. `app/Models/User.php` imports `Laravel\Fortify\TwoFactorAuthenticatable` but Fortify is not installed.
-12. `routes/web.php` declares `dashboard` twice (closure and `DashboardController`); the later one wins.
+10. ~~`DocumentController::create()` dead code.~~ **Removed 2026-11-10.**
+11. ~~Unused Fortify import in `User.php`.~~ **Removed 2026-11-10.**
+12. ~~Duplicate `dashboard` route.~~ **Removed 2026-11-10** (the closure; `DashboardController` stays).
 13. `findStampPlacement` calls OpenAI from the controller; `gpt-4o-mini` hard-coded (4 places).
-14. `DocumentAnalysisService` is unused.
+14. ~~`DocumentAnalysisService` unused.~~ **Deleted 2026-11-10.**
 15. Migrations add → remove → re-add `signed_file_path` on `document_trails`; trail columns used only by the retired
     referral slips (`required_actions`, …) remain for history.
-16. `vue-tsc` broken via tsconfig `types`; Pint/Prettier debt (§4); no `typecheck` npm script.
+16. `vue-tsc` now runs (tsconfig `types` fixed 2026-11-10) but reports 48 pre-existing type errors; Pint/Prettier
+    debt (§4); no `typecheck` npm script.
 17. `README.md` still begins with the Laravel starter-kit text; `composer.json` name is `laravel/vue-starter-kit`.
 18. Vite warns about a >500 kB chunk (OCR/PDF libs).
 19. **Mixed timestamps:** app timezone is UTC, so `created_at`/`updated_at` are real UTC while workflow timestamps
@@ -292,10 +293,11 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
    tracking-code email to see the seal in Gmail.
 2. Production readiness: permanent queue worker, public `APP_URL`, a real sender name in Email Settings (local
    `MAIL_FROM_NAME` is "Laravel"), run all migrations, `ziggy:generate` + `npm run build`.
-3. Security: attachments on the private disk behind an authorized download (#1); remove `/register` (#3).
+3. ~~Security: private attachments (#1), remove `/register` (#3).~~ Done 2026-11-10.
 4. FGD Phase 5: ADM delinquency tagging and the delayed-by-category view.
 5. Commit the signing-authority change (2026-11-04) when the user says so.
-6. Small cleanup change with tests: #10–#14, `.gitignore` (#5), tsconfig `types` so `vue-tsc` runs (#16).
+6. Cleanup: #10–#12, #14, `.gitignore` and tsconfig done 2026-11-10. Left: #13 (OpenAI call in the controller,
+   hard-coded model) and the 48 `vue-tsc` errors (#16).
 7. Decide the timestamp convention (#19) before further date/SLA work.
 8. Later: spreadsheet export of reports; paperless switch-on (test real PNPKI `.p12` files under OpenSSL 3 first).
    With paperless (user decision 2026-11-04): department PNPKI signing in Process — the Department Head or an
@@ -313,6 +315,53 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
   192.168.4.33.
 
 ## 10. Change log
+
+### 2026-11-10 — Private files, no self-registration, cleanup (Claude Code, uncommitted)
+- User: "Let's do 2. and 6. Cleanup" (security before go-live, plus the cleanup list).
+- **Private files.** Intake scans (`documents/`) and signature images (`signatures/`) are now stored on the private
+  `local` disk (`storage/app/private`) instead of `public`, so a URL no longer opens them without signing in.
+  - `GET documents/{document}/attachment` (`documents.attachment`, `DocumentController::attachment`): `auth` +
+    policy `view` (same visibility rule as the document page), served inline as `{barcode}.{ext}`; 404 without a scan.
+  - `GET settings/signature-image` (`signature-image.show`): serves the signed-in user's own image only.
+    The Certificate page preview uses it with a `?v=` hash so a replaced image is not cached.
+  - `Document::stampSourceUrl()` and the four `/storage/…` links (ADM/OCM queues, document Show and Edit) use the route.
+  - Writers/readers switched: `DocumentService`, `SigningCertificateService`, `UserController`,
+    `PdfApprovalStampService`, `ResetDocuments` (both directories now on `local`).
+  - Migration `2026_11_10_000000_move_scans_and_signature_images_to_private_storage` moves existing files
+    (copy, then delete the source; throws and logs if a copy fails; `down()` moves them back). Paths are unchanged,
+    so no rows change. Ran locally: `storage/app/public/documents` and `/signatures` were already empty.
+- **Self-registration removed:** `/register` routes, `RegisteredUserController`, `auth/Register.vue`; also the unused
+  `Welcome.vue` (its only link was to register; `/` redirects to login). `RegistrationTest` now asserts 404.
+- **Cleanup:** `DocumentController::create()` (dead), duplicate `dashboard` closure route and the unused `Inertia`
+  import in `routes/web.php`, unused Fortify import in `User.php`, `DocumentAnalysisService` deleted, `.gitignore`
+  conflict markers resolved into one list, tsconfig `types` reduced to `vite/client` so `vue-tsc` runs.
+- Tests: new `PrivateFilesTest` (scan stored privately; viewer 200 / other office 403 / guest to login; no scan 404;
+  migration moves only `documents/` and `signatures/`); `SigningCertificateTest` checks the owner-only image route;
+  disk fakes switched to `local` in the affected tests.
+- Checks (2026-11-10): Pest **229 passed (2435 assertions)**; ESLint on changed Vue files ✅; `npm run build` ✅;
+  Pint ✅ on new/cleanly formatted files (DocumentController, UserController, Document, User, web.php keep their
+  pre-existing violations); `ziggy:generate` run; `vue-tsc` runs with 48 pre-existing errors. Not browser-tested.
+- **Production:** run `php artisan migrate` on the server so existing scans move; the public `storage` link is no
+  longer needed for scans or signatures.
+
+### 2026-11-06 — Office Inbox: paper documents are received by scanning their barcode (Claude Code, uncommitted)
+- User: on the paper route the office could click Receive before the paper physically arrived, so everything
+  behaved as paperless. Decision (user): receive paper by **scanning the barcode on the physical document**; applies
+  to the **Office Inbox Primary** only (ADM/OCM approvals and view-only copies unchanged).
+- New `POST /transactions/receive-paper` (`transactions.receive-paper`, `auth` + `working_hours`,
+  `ReceivePaperDocumentRequest`) → `TransactionService::receivePaper()`: finds the barcode among documents waiting at
+  the user's own office (`heldBy`), checks the `receive` policy (clear message when already received or in an
+  ADM/OCM approval stage), then the usual `receive()`. Unknown/other-office barcodes → error on `barcode`.
+- `ReceiveDocumentRequest` (one-click Receive) now refuses paper documents ("receive it by scanning the barcode…");
+  paperless documents keep the one-click Receive.
+- Inbox (`transactions/Index.vue`): "Receive a paper document" scan box (autofocused, Enter submits, error next to
+  the field); unreceived paper rows show an amber **Incoming paper** notice instead of a Receive button
+  (`receive_by_scan` set per row by `TransactionController`); the barcode search box stays, now labelled.
+- Bell (`IncomingDocumentService`): an unreceived paper Primary entry reads "Incoming paper: scan its barcode when
+  it arrives".
+- Checks: Pest 227 passed (2418 assertions; new `PaperReceivingTest` 3 cases; 7 existing test files now receive by
+  scan); Pint ✅; ESLint ✅; Prettier ✅ (inbox page reformatted); build ✅; `ziggy:generate` run. Not checked in the
+  browser.
 
 ### 2026-11-05 — PNPKI stamp: signature image optional, signers upload their own (Claude Code, uncommitted)
 - User: User Management asked for a "Digital Signature" as if it were the PNPKI signature; the stamp should be the

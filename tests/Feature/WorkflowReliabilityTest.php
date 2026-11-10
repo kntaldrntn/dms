@@ -192,7 +192,7 @@ test('destination and user state are rechecked inside the service', function () 
 });
 
 test('document creation cleans uploaded files and rows if its initial trail fails', function () {
-    Storage::fake('public');
+    Storage::fake('local');
     $event = 'eloquent.creating: '.DocumentTrail::class;
     app('events')->listen($event, fn () => throw new RuntimeException('Trail failed'));
     try {
@@ -204,7 +204,7 @@ test('document creation cleans uploaded files and rows if its initial trail fail
     }
     $this->assertDatabaseCount('documents', 1);
     $this->assertDatabaseCount('document_trails', 1);
-    expect(Storage::disk('public')->allFiles())->toBe([]);
+    expect(Storage::disk('local')->allFiles())->toBe([]);
 });
 
 test('reassignment appends custody history without rewriting the original office', function () {
@@ -251,8 +251,8 @@ test('deactivation closes custody and increments the version exactly once', func
 });
 
 test('reassignment failure preserves metadata history and the previous attachment', function () {
-    Storage::fake('public');
-    Storage::disk('public')->put('documents/original.pdf', 'existing attachment');
+    Storage::fake('local');
+    Storage::disk('local')->put('documents/original.pdf', 'existing attachment');
     $this->document->update(['attached_file' => 'documents/original.pdf']);
     $event = 'eloquent.updating: '.Document::class;
     app('events')->listen($event, fn () => throw new RuntimeException('Update failed'));
@@ -264,7 +264,7 @@ test('reassignment failure preserves metadata history and the previous attachmen
     } finally {
         app('events')->forget($event);
     }
-    expect(Storage::disk('public')->allFiles())->toBe(['documents/original.pdf']);
+    expect(Storage::disk('local')->allFiles())->toBe(['documents/original.pdf']);
     expect($this->document->fresh()->attached_file)->toBe('documents/original.pdf');
     expect($this->document->fresh()->department_id)->toBe($this->recordsOffice->id);
     expect($this->trail->fresh()->released_at)->toBeNull();
@@ -358,7 +358,7 @@ test('a multi-office dispatch makes one office Primary and gives the others view
 
     // The Primary office routes it on: the target becomes Primary and an extra office gets a copy.
     $fourth = Department::create(['code' => 'FTH', 'name' => 'Fourth Office', 'state' => 1]);
-    $this->actingAs($secondStaff)->postJson(route('transactions.receive', $this->document))->assertRedirect();
+    $this->actingAs($secondStaff)->postJson(route('transactions.receive-paper'), ['barcode' => $this->document->barcode])->assertRedirect();
     $this->postJson(route('transactions.process', $this->document), [
         'workflow_version' => 1, 'action' => 'route', 'remarks' => 'For action', 'routed_to' => [$third->id, $fourth->id], 'primary_office_id' => $third->id,
     ])->assertRedirect()->assertSessionHasNoErrors();
@@ -369,7 +369,7 @@ test('a multi-office dispatch makes one office Primary and gives the others view
         ->assertInertia(fn (Assert $page) => $page->has('documents.data', 1)->has('copies.data', 0));
 
     // Ending the transaction completes the document and closes every copy.
-    $this->postJson(route('transactions.receive', $this->document))->assertRedirect();
+    $this->postJson(route('transactions.receive-paper'), ['barcode' => $this->document->barcode])->assertRedirect();
     $this->postJson(route('transactions.process', $this->document), [
         'workflow_version' => 2, 'action' => 'end', 'remarks' => 'Done',
     ])->assertRedirect()->assertSessionHasNoErrors();
