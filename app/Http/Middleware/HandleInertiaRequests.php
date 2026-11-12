@@ -50,6 +50,8 @@ class HandleInertiaRequests extends Middleware
                 'canViewAdmApprovals' => (bool) $request->user()?->can('viewAdmApprovals', Document::class),
                 // OCM Approvals: every OCM user records the Mayor's paper approvals.
                 'canViewOcmApprovals' => (bool) $request->user()?->can('viewOcmApprovals', Document::class),
+                // Delinquency Monitor (FGD Phase 5): the City Administrator's office.
+                'canMonitorDelinquency' => (bool) $request->user()?->can('monitorDelinquency', Document::class),
             ],
             'features' => ['paperless' => (bool) config('services.paperless.enabled')],
             // Lazy so the bell's polling can request it alone (`only: ['incoming']`).

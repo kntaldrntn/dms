@@ -47,6 +47,21 @@ function receivePaper() {
 }
 const awaitsPaper = (doc: any) => !isReceived(doc) && doc.receive_by_scan;
 
+// The office confirms it has seen the City Administrator's delinquency tag; the bell stops pinging.
+const acknowledgingTag = ref<number | null>(null);
+function acknowledgeTag(doc: any) {
+    acknowledgingTag.value = doc.delinquency_tag.id;
+    router.post(
+        route('delinquency.acknowledge', { document: doc.id, tag: doc.delinquency_tag.id }),
+        {},
+        {
+            preserveScroll: true,
+            onError: (errors) => notyf.error(String(Object.values(errors)[0] ?? 'The tag could not be marked as noted.')),
+            onFinish: () => (acknowledgingTag.value = null),
+        },
+    );
+}
+
 const receivingCopy = ref<number | null>(null);
 function receiveCopy(doc: any) {
     receivingCopy.value = doc.id;
@@ -272,6 +287,29 @@ function submitProcess() {
                                             >· Delinquent</span
                                         >
                                     </p>
+                                    <!-- FGD Phase 5: the City Administrator's follow-up on a delinquent document -->
+                                    <div
+                                        v-if="doc.delinquency_tag"
+                                        class="mt-1.5 rounded-md border px-2 py-1.5 text-xs"
+                                        :class="doc.delinquency_tag.acknowledged ? 'border-slate-200 bg-slate-50' : 'border-rose-200 bg-rose-50'"
+                                    >
+                                        <p class="font-semibold text-slate-800">ADM: {{ doc.delinquency_tag.label }}</p>
+                                        <p class="text-slate-700">{{ doc.delinquency_tag.note }}</p>
+                                        <p class="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                                            {{ doc.delinquency_tag.tagged_by }} · {{ doc.delinquency_tag.tagged_at }}
+                                            <span v-if="doc.delinquency_tag.acknowledged" class="text-emerald-700">· Noted</span>
+                                            <button
+                                                v-else
+                                                type="button"
+                                                :disabled="acknowledgingTag === doc.delinquency_tag.id"
+                                                class="rounded border border-rose-300 bg-white px-2 py-0.5 font-semibold text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-400/50 disabled:opacity-50"
+                                                :aria-label="`Mark the City Administrator's tag on ${doc.barcode} as noted`"
+                                                @click="acknowledgeTag(doc)"
+                                            >
+                                                Noted
+                                            </button>
+                                        </p>
+                                    </div>
                                 </td>
                                 <td class="whitespace-nowrap px-4 py-2 text-slate-600">{{ doc.source_name }}</td>
                                 <td class="whitespace-nowrap px-4 py-2 text-center">

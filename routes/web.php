@@ -43,6 +43,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/ocm-approvals', [App\Http\Controllers\OcmApprovalController::class, 'index'])->name('ocm-approvals.index');
         Route::post('/ocm-approvals/{document}/receive', [App\Http\Controllers\OcmApprovalController::class, 'receive'])->name('ocm-approvals.receive');
         Route::post('/ocm-approvals/{document}/approve', [App\Http\Controllers\OcmApprovalController::class, 'approve'])->name('ocm-approvals.approve');
+        // --- Delinquency monitoring (FGD Phase 5): ADM tags, the holding office notes the tag ---
+        Route::post('/documents/{document}/delinquency-tags', [App\Http\Controllers\DelinquencyMonitorController::class, 'tag'])->name('delinquency.tag');
+        Route::post('/documents/{document}/delinquency-tags/{tag}/acknowledge', [App\Http\Controllers\DelinquencyMonitorController::class, 'acknowledge'])->name('delinquency.acknowledge');
         Route::post('/approvals/{document}/stamp-placement', [App\Http\Controllers\OcmApprovalController::class, 'findStampPlacement'])->name('approvals.stamp-placement');
         
         Route::get('/transactions/inbox', [TransactionController::class, 'index'])->name('transactions.inbox');
@@ -65,6 +68,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // 3. DASHBOARD
     Route::get('dashboard', DashboardController::class)->name('dashboard');
     Route::get('dashboard/report', App\Http\Controllers\DashboardReportController::class)->name('dashboard.report');
+    Route::get('delinquency-monitor', [App\Http\Controllers\DelinquencyMonitorController::class, 'index'])->name('delinquency.index');
 });
 
 // User management: System Administrator only (FGD access matrix, slide 9).

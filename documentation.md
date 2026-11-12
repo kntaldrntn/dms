@@ -69,7 +69,9 @@ Request flow: **route → middleware (`auth`, `verified`, `role:`, `working_hour
 | `app/Services/AdmApprovalService.php`, `OcmApprovalService.php` | Receive + approve for each executive stage; paper: optional signed scan (`local` disk); paperless: `PdfApprovalStampService`. ADM → OCM or departments; OCM → departments. |
 | `app/Services/PdfApprovalStampService.php`, `SigningCertificateService.php` | Paperless only: stamp + PNPKI-sign with the **signer's own** `.p12` (`certificates` disk, `users/{id}.p12`; PIN typed at each signing, never stored). Output in `storage/app/private/signed-documents`. |
 | `app/Services/DocumentIntakeAnalyzer.php` | Intake AI (called by `DocumentController::analyze()`): OCR text of pages 1, 2, last → strict JSON with registry ids + rulebook; re-checked server-side; People Directory name match. |
-| `app/Services/IncomingDocumentService.php` | Notification bell: open trail entries not yet received at the user's office, per stage/role. Shared lazily as `incoming`. |
+| `app/Services/IncomingDocumentService.php` | Notification bell: open trail entries not yet received at the user's office, per stage/role, plus ADM delinquency tags the office has not noted. Shared lazily as `incoming`. |
+| `app/Services/DelinquencyTagService.php` | FGD Phase 5: ADM tags a delinquent document (`delinquency_tags`), the holding office acknowledges. Not via `mutate()` (see the class comment). |
+| `app/Services/ReportSpreadsheetService.php` | Dashboard reports as `.xlsx` (openspout). |
 | `app/Services/ClientStatusService.php` | The one status a client may see (`latest()`), and `track(barcode, access code)` for the public lookup (constant-time code compare; never the trail). |
 | `app/Jobs/SendTrackingCode.php`, `app/Mail/DocumentTrackingCode.php` | Queued email with barcode + access code (+ subject unless confidential) and a link to `/login?tab=track`; the city seal is embedded inline. `resources/views/vendor/mail/html/{header,message}.blade.php` override the framework's email header/footer for every email (city name instead of the Laravel logo). |
 | `app/Services/MailSettingsService.php` | Email Settings: applies the saved SMTP row (encrypted password) over `.env` per request and in mail jobs; a blank first save takes `MAIL_PASSWORD` from `.env`. |
@@ -196,8 +198,8 @@ the Google Sheet "Document Management System Sheets" (`1monsI2DhgNCQoWd9Kuam-KBM
 **Phases:** 0 rulebook + 24 h delinquency ✅ · 1 confidential + route mode ✅ · 2 stages, intake Direct to, ADM single
 approval, per-signer PNPKI, referral slips retired, reset command ✅ · 3 OCM routes to departments ✅ (2026-10-29) ·
 4 receiving office: receive-first ✅, Dept Head wet-signature record ✅, Dept Head PNPKI ⏸ (with paperless) ·
-5 monitoring: 24 h per Primary ✅, ADM delinquency tagging ❌, delayed-by-category view ❌ · 6 later: client status
-lookup ✅ (2026-10-30), office-scoped visibility ✅ (2026-10-30), SMS ✅ (2026-11-04), spreadsheet reports ❌.
+5 monitoring: 24 h per Primary ✅, ADM delinquency tagging ✅, delayed-by-category/office view ✅ (2026-11-12) · 6 later: client status
+lookup ✅ (2026-10-30), office-scoped visibility ✅ (2026-10-30), SMS ✅ (2026-11-04), spreadsheet reports ✅ (2026-11-12).
 
 **Decisions (user, 2026-10-21 → 2026-10-30):**
 - City Administrator gives a single approval (no referral slip; removed entirely). ADM/OCM route directly to
@@ -294,12 +296,12 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
 2. Production readiness: permanent queue worker, public `APP_URL`, a real sender name in Email Settings (local
    `MAIL_FROM_NAME` is "Laravel"), run all migrations, `ziggy:generate` + `npm run build`.
 3. ~~Security: private attachments (#1), remove `/register` (#3).~~ Done 2026-11-10.
-4. FGD Phase 5: ADM delinquency tagging and the delayed-by-category view.
+4. ~~FGD Phase 5: ADM delinquency tagging and the delayed-by-category view.~~ Built 2026-11-12 (not yet browser-tested).
 5. Commit the signing-authority change (2026-11-04) when the user says so.
 6. Cleanup: #10–#12, #14, `.gitignore` and tsconfig done 2026-11-10. Left: #13 (OpenAI call in the controller,
    hard-coded model) and the 48 `vue-tsc` errors (#16).
 7. Decide the timestamp convention (#19) before further date/SLA work.
-8. Later: spreadsheet export of reports; paperless switch-on (test real PNPKI `.p12` files under OpenSSL 3 first).
+8. Later: ~~spreadsheet export of reports~~ (built 2026-11-12); paperless switch-on (test real PNPKI `.p12` files under OpenSSL 3 first).
    With paperless (user decision 2026-11-04): department PNPKI signing in Process — the Department Head or an
    authorized signer (`users.can_sign_for_head`) signs with their own certificate + PIN; record `signed_for_head`.
 
@@ -315,6 +317,47 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
   192.168.4.33.
 
 ## 10. Change log
+
+### 2026-11-12 — FGD Phase 5: ADM delinquency tagging, delays by office, Excel reports (Claude Code, uncommitted)
+- User: "We can do 2 for now" (Phase 5). Answers: **Tag + note**; **By office table**; **Excel .xlsx**; Claude enabled
+  PHP zip ("You enable it").
+- **Environment:** `extension=zip` uncommented in `C:\xampp\php\php.ini` (line 962; backup in the session
+  scratchpad). Restart `php artisan serve`. **The production server needs ext-zip too.** New dependency
+  `openspout/openspout` ^4.28 (reads/writes XLSX, no other extensions; not in `composer audit` advisories; the 16
+  existing advisories are in laravel/framework, symfony/*, league/* — pre-existing).
+- **Delinquency tags.** Migration `2026_11_12_000000_create_delinquency_tags_table` (ran locally): document, the
+  office holding the Primary copy, its trail entry, tag (`followed_up` Followed up / `justified` Delay justified /
+  `escalated` Escalated), note (required, ≤ 500), tagged by/at, acknowledged by/at. Model `DelinquencyTag`;
+  `Document::delinquencyTags()`, `latestDelinquencyTag()`, and `heldSince()` / `allowedMinutes()` (extracted from
+  `is_delinquent`, same math).
+  - Policy: `monitorDelinquency` (same users as ADM Approvals: ADM office users + system administrators),
+    `tagDelinquency` (open and delinquent right now), `acknowledgeDelinquencyTag` (users of the tagged office).
+  - `DelinquencyTagService`: tag under a document row lock, re-checks delinquency; acknowledge under a tag row lock,
+    a second "Noted" gets a `tag` error. Does not bump `workflow_version` (a note must not make the office's open
+    Process form stale).
+  - Routes (`working_hours`): `POST documents/{document}/delinquency-tags` (`delinquency.tag`),
+    `POST documents/{document}/delinquency-tags/{tag}/acknowledge` (`delinquency.acknowledge`);
+    `GET delinquency-monitor` (`delinquency.index`). Requests `TagDelinquencyRequest`, `AcknowledgeDelinquencyTagRequest`.
+  - Page `delinquency/Index.vue` (sidebar "Monitoring → Delinquency Monitor", shared `auth.canMonitorDelinquency`):
+    every office's delinquent documents, longest held first; held since, over by, allowed time, current tag and
+    whether the office noted it; search / office / tagged filters; Tag dialog (radio tags, note, field errors).
+  - Office side: Office Inbox row shows "ADM: {tag}", the note, who/when and a **Noted** button; the bell lists
+    un-noted tags first ("Delinquent, tagged by ADM: …") while the office still holds the document; the document
+    page shows all tags as history ("ADM Delinquency Tags"). Trail rows are untouched.
+  - `dms:reset-documents` also deletes tags (new count row).
+- **Delayed & Delinquent by Office** (Dashboard, under the pipeline cards): per office, Delayed per category for the
+  selected period (by the office now holding the Primary copy) and Delinquent now; worst first; numbers open the
+  report filtered by `office` (new `DashboardFilterRequest::office()`; titles end with the office code).
+- **Excel export:** every dashboard report page has **Download Excel** (`?format=xlsx`, same rows and columns as the
+  printable page, no personal data); file `{title-slug}-{YYYYMMDD}.xlsx`. Written to a temp file, deleted after send.
+- Tests: `DelinquencyTagTest` (3), `DashboardOfficeDelaysTest` (4: office table, office-filtered report, xlsx read
+  back, download link); `ResetDocumentsTest` expects the tags row.
+- Checks (2026-11-12): Pest **236 passed (2590 assertions)**; Pint ✅ on all changed/new PHP files; ESLint ✅ on the
+  changed Vue files; Prettier ✅ on the new page, Dashboard, Report, inbox and sidebar; `ziggy:generate` run;
+  `npm run build` ✅. **Not browser-tested.**
+- Known limits: the monitor and the dashboard compute delinquency per document in PHP (2 queries each), fine for
+  now, slow with thousands of open documents. "Delayed by office" uses the current Primary office, not the office
+  that caused the delay.
 
 ### 2026-11-10 — Private files, no self-registration, cleanup (Claude Code, uncommitted)
 - User: "Let's do 2. and 6. Cleanup" (security before go-live, plus the cleanup list).

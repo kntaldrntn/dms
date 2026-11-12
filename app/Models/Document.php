@@ -34,6 +34,17 @@ class Document extends Model
     // NEW: Links the document directly to the exact person responsible right now
     public function currentAssignee() { return $this->belongsTo(User::class, 'current_assignee_id'); }
 
+    /** ADM delinquency tags, newest first (FGD Phase 5). */
+    public function delinquencyTags()
+    {
+        return $this->hasMany(DelinquencyTag::class)->latest('tagged_at')->latest('id');
+    }
+
+    public function latestDelinquencyTag()
+    {
+        return $this->hasOne(DelinquencyTag::class)->latestOfMany();
+    }
+
     /**
      * Every office currently holding an open entry, Primary first. `pivot.copy_role` says whether the
      * office is the Primary (acts on the document) or holds a view-only copy. `department_id` is the Primary.
@@ -198,20 +209,27 @@ class Document extends Model
             return false;
         }
 
+        return $this->heldSince()->diffInMinutes(Carbon::now('Asia/Manila'), true) > $this->allowedMinutes();
+    }
+
+    /** When the Primary office got the document: the clock its delinquency is measured from (real Manila time). */
+    public function heldSince(): Carbon
+    {
         $latestTrail = $this->trails()->where('released_to', $this->department_id)->latest()->first();
         // released_at is Manila wall-clock stored as if UTC, while created_at is true UTC
-        // (documentation.md §6 #15), so each is converted to a real Manila time before diffing.
-        $startTime = $latestTrail?->released_at
+        // (documentation.md §7 #19), so each is converted to a real Manila time before diffing.
+        return $latestTrail?->released_at
             ? Carbon::parse($latestTrail->released_at->format('Y-m-d H:i:s'), 'Asia/Manila')
             : ($latestTrail?->created_at ?? $this->created_at)->copy()->setTimezone('Asia/Manila');
+    }
 
-        $standard = \App\Models\PerformanceStandard::where('department_id', $this->department_id)
+    /** The Primary office's allowed holding time for this document type (24 h unless calibrated). */
+    public function allowedMinutes(): int
+    {
+        $standard = PerformanceStandard::where('department_id', $this->department_id)
             ->where('document_type_id', $this->document_type_id)
             ->first();
 
-        $allocatedMinutes = $standard ? $standard->allocated_minutes : \App\Models\PerformanceStandard::DEFAULT_ALLOCATED_MINUTES;
-        $minutesSpent = $startTime->diffInMinutes(Carbon::now('Asia/Manila'), true);
-
-        return $minutesSpent > $allocatedMinutes;
+        return $standard ? (int) $standard->allocated_minutes : PerformanceStandard::DEFAULT_ALLOCATED_MINUTES;
     }
 }

@@ -9,7 +9,7 @@ import { ref, computed } from 'vue';
 import { usePage, usePoll, Link } from '@inertiajs/vue3';
 import { User, LogOut, ChevronRight, Bell, Inbox } from 'lucide-vue-next';
 
-type IncomingItem = { id: number; barcode: string; subject_matter: string; action: string | null; received_at: string | null; url: string };
+type IncomingItem = { id: number | string; barcode: string; subject_matter: string; action: string | null; received_at: string | null; url: string };
 
 interface Props {
     breadcrumbs?: BreadcrumbItemType[];

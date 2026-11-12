@@ -44,7 +44,7 @@ test('a dry run lists what would be deleted and changes nothing', function () {
     $this->artisan('dms:reset-documents', ['--dry-run' => true])
         ->expectsOutputToContain('This permanently deletes')
         ->expectsTable(['What', 'Count'], [
-            ['documents', 1], ['document trail entries', 1],
+            ['documents', 1], ['document trail entries', 1], ['ADM delinquency tags', 0],
             ['uploaded scans (storage/app/private/documents)', 1], ['signed files (storage/app/private/signed-documents)', 1],
         ])
         ->expectsOutput('Dry run: nothing was changed.')

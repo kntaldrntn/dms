@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\DashboardFilterRequest;
+use App\Models\Department;
 use App\Models\Document;
 use App\Models\DocumentType;
 use App\Models\TransactionType;
@@ -42,6 +43,9 @@ class DashboardController extends Controller
         $pipelineData = array_fill_keys(DashboardReportService::PIPELINES, array_fill_keys(DashboardReportService::TRANSACTION_CATEGORIES, 0));
         $now = Carbon::now('Asia/Manila');
 
+        // FGD Phase 5: the same Delayed counts per Primary office, so a category's delays can be traced to an office.
+        $delayedByOffice = [];
+
         foreach ($monthQuery->get() as $doc) {
             $bucket = DashboardReportService::category($transactionTypes[$doc->transaction_type_id] ?? 'Simple');
 
@@ -51,7 +55,11 @@ class DashboardController extends Controller
                 $stage = $doc->due_date && $now->greaterThan($doc->due_date) ? 'Delayed' : 'On-Going';
             }
             $pipelineData[$stage][$bucket]++;
+            if ($stage === 'Delayed' && $doc->department_id) {
+                $delayedByOffice[$doc->department_id][$bucket] = ($delayedByOffice[$doc->department_id][$bucket] ?? 0) + 1;
+            }
         }
+        $delinquentDocuments = $reports->delinquent($openDocuments);
 
         $stageStyles = [
             'on_time' => ['status' => 'Healthy', 'statusColor' => 'emerald'],
@@ -121,19 +129,47 @@ class DashboardController extends Controller
                 ['label' => 'Internal Clients', 'value' => number_format($internalClients), 'suffix' => 'Served'],
             ],
             'delinquent' => [
-                'value' => $reports->delinquent($openDocuments)->count(),
+                'value' => $delinquentDocuments->count(),
                 'label' => 'Transactions',
                 'todo' => $openDocuments->count(),
                 'dueTomorrow' => $reports->dueTomorrow($openDocuments)->count(),
                 'scope' => $seesAllDepartments ? 'all' : 'office',
             ],
             'pipeline' => $pipeline,
+            'officeDelays' => $this->officeDelays($delayedByOffice, $delinquentDocuments->countBy('department_id')->all()),
             'processingTimes' => $processingTimes,
             'months' => DashboardFilterRequest::MONTHS,
         ]);
     }
 
     /** "November 2026", "January – March 2026" or "November 2025 – February 2026". */
+    /**
+     * One row per office with anything late: Delayed per category (documents of the period, by the office now
+     * holding the Primary copy) and Delinquent (held over its allowed time right now). Worst offices first.
+     *
+     * @param  array<int, array<string, int>>  $delayed
+     * @param  array<int, int>  $delinquent
+     */
+    private function officeDelays(array $delayed, array $delinquent): array
+    {
+        $officeIds = array_unique([...array_keys($delayed), ...array_keys($delinquent)]);
+
+        return Department::whereIn('id', $officeIds)->get(['id', 'code', 'name'])
+            ->map(function (Department $office) use ($delayed, $delinquent) {
+                $byCategory = collect(DashboardReportService::TRANSACTION_CATEGORIES)
+                    ->mapWithKeys(fn ($category) => [$category => $delayed[$office->id][$category] ?? 0])->all();
+
+                return [
+                    'id' => $office->id, 'code' => $office->code, 'name' => $office->name,
+                    'delayed' => $byCategory,
+                    'delayed_total' => array_sum($byCategory),
+                    'delinquent' => $delinquent[$office->id] ?? 0,
+                ];
+            })
+            ->sortBy([['delayed_total', 'desc'], ['delinquent', 'desc'], ['code', 'asc']])
+            ->values()->all();
+    }
+
     private function periodLabel(CarbonImmutable $start, CarbonImmutable $end): string
     {
         if ($start->format('Y-m') === $end->format('Y-m')) {

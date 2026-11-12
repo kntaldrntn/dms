@@ -12,6 +12,18 @@ const props = defineProps<{
     // Primary office first; the others hold view-only copies.
     holders: Array<{ id: number; code: string; name: string; pivot?: { copy_role: 'primary' | 'copy' } }>;
     canChangePrimary: boolean;
+    /** The City Administrator's delinquency tags, newest first (FGD Phase 5). */
+    delinquencyTags: Array<{
+        id: number;
+        tag: string;
+        label: string;
+        note: string;
+        office: string | null;
+        tagged_by: string | null;
+        tagged_at: string;
+        acknowledged_by: string | null;
+        acknowledged_at: string | null;
+    }>;
     /** Records, the System Administrator and the Supervisory Level may change the category. */
     canChangeCategory: boolean;
     categories?: Array<{ id: number; name: string; processing_days: number }>;
@@ -413,6 +425,32 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                             </dd>
                         </div>
                     </dl>
+                </section>
+
+                <!-- Delinquency tags from the City Administrator's office (history, newest first) -->
+                <section
+                    v-if="delinquencyTags.length"
+                    aria-labelledby="delinquency-tags-heading"
+                    class="overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-sm"
+                >
+                    <div class="flex items-center gap-2 border-b border-rose-200 bg-rose-50 px-4 py-3">
+                        <AlertCircle class="h-4 w-4 text-rose-600" aria-hidden="true" />
+                        <h2 id="delinquency-tags-heading" class="text-base font-bold tracking-tight text-slate-800">ADM Delinquency Tags</h2>
+                    </div>
+                    <ol class="divide-y divide-slate-100 text-sm">
+                        <li v-for="tag in delinquencyTags" :key="tag.id" class="px-4 py-3">
+                            <p class="font-semibold text-slate-800">
+                                {{ tag.label }} <span class="font-normal text-slate-500">· {{ tag.office }}</span>
+                            </p>
+                            <p class="mt-0.5 text-slate-700">{{ tag.note }}</p>
+                            <p class="mt-1 text-xs text-slate-500">
+                                {{ tag.tagged_by }} · {{ tag.tagged_at }} ·
+                                <span :class="tag.acknowledged_at ? 'text-emerald-700' : 'text-amber-700'">
+                                    {{ tag.acknowledged_at ? `Noted by ${tag.acknowledged_by}, ${tag.acknowledged_at}` : 'Not yet noted' }}
+                                </span>
+                            </p>
+                        </li>
+                    </ol>
                 </section>
 
                 <!-- Panel 3: Linked Documents & Attachments -->

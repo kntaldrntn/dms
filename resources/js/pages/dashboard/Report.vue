@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { ArrowLeft, CalendarRange, Clock, FileText, Lock, Printer, Search } from 'lucide-vue-next';
+import { ArrowLeft, CalendarRange, Clock, FileSpreadsheet, FileText, Lock, Printer, Search } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
 const props = defineProps<{
@@ -21,6 +21,8 @@ const props = defineProps<{
     }>;
     generatedBy: string;
     generatedOn: string;
+    /** The same report as an .xlsx download. */
+    downloadUrl: string;
 }>();
 
 // Screen-only filter; printing prints what is shown, and the count says so.
@@ -57,13 +59,22 @@ const printReport = () => window.print();
                 >
                     <ArrowLeft class="h-4 w-4" aria-hidden="true" /> Dashboard
                 </Link>
-                <button
-                    type="button"
-                    class="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
-                    @click="printReport"
-                >
-                    <Printer class="h-4 w-4" aria-hidden="true" /> Print
-                </button>
+                <div class="flex items-center gap-2">
+                    <!-- The whole report as an Excel file (the search box filters the screen only). -->
+                    <a
+                        :href="downloadUrl"
+                        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
+                    >
+                        <FileSpreadsheet class="h-4 w-4 text-emerald-700" aria-hidden="true" /> Download Excel
+                    </a>
+                    <button
+                        type="button"
+                        class="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
+                        @click="printReport"
+                    >
+                        <Printer class="h-4 w-4" aria-hidden="true" /> Print
+                    </button>
+                </div>
             </div>
 
             <article

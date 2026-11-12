@@ -26,7 +26,7 @@ class TransactionController extends Controller
         $this->authorize('viewAny', Document::class);
         // Documents waiting on an executive step belong to the ADM / OCM Approvals queues instead.
         // Not visibleTo(): the office must act on confidential documents it holds, so their details are hidden instead.
-        $inbox = fn () => Document::with(['documentType', 'transactionType', 'primaryEntry.receiver:id,name'])
+        $inbox = fn () => Document::with(['documentType', 'transactionType', 'primaryEntry.receiver:id,name', 'latestDelinquencyTag.tagger:id,name'])
             ->heldBy((int) $request->user()->department_id)
             ->outsideExecutiveStages()
             ->where('status', '!=', 'Completed')
@@ -39,7 +39,10 @@ class TransactionController extends Controller
         }
 
         // Paper documents are received by scanning the barcode on the physical copy, not with a button.
+        $office = (int) $request->user()->department_id;
         $forInbox = fn (Document $document) => $document->setAttribute('receive_by_scan', ! $document->isPaperless())
+            ->setAttribute('delinquency_tag', $this->delinquencyTagFor($document, $office))
+            ->unsetRelation('latestDelinquencyTag')
             ->hideConfidentialDetailsFrom($request->user());
         $documents = $query->latest()->paginate(10)->withQueryString()->through($forInbox);
 
@@ -51,7 +54,6 @@ class TransactionController extends Controller
         $focusDocument = $focusDocument ? $forInbox($focusDocument) : null;
 
         // View-only copies sent to this office: it can receive and view them but not act on them.
-        $office = (int) $request->user()->department_id;
         // Confidential documents never get copies, so the visibility rule can apply as is.
         $copies = Document::visibleTo($request->user())->copiedTo($office)
             ->where('status', '!=', 'Completed')
@@ -109,5 +111,24 @@ class TransactionController extends Controller
         $transactions->changePrimary($document, $request->user(), $request->integer('primary_office_id'));
 
         return redirect()->back()->with('success', 'Primary office changed.');
+    }
+
+    /** The City Administrator's latest tag on this document, if it was put on this office's holding. */
+    private function delinquencyTagFor(Document $document, int $office): ?array
+    {
+        $tag = $document->latestDelinquencyTag;
+        if (! $tag || $tag->department_id !== $office) {
+            return null;
+        }
+
+        return [
+            'id' => $tag->id,
+            'tag' => $tag->tag,
+            'label' => $tag->label,
+            'note' => $tag->note,
+            'tagged_by' => $tag->tagger?->name,
+            'tagged_at' => $tag->tagged_at->format('M d, Y g:i A'),
+            'acknowledged' => $tag->acknowledged_at !== null,
+        ];
     }
 }

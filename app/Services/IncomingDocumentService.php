@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\DelinquencyTag;
 use App\Models\DocumentTrail;
 use App\Models\User;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 /**
@@ -58,7 +60,35 @@ class IncomingDocumentService
                     : $this->actionUrl($trail),
             ])->all();
 
-        return ['count' => $query->count(), 'items' => $items];
+        $tags = $this->delinquencyTagsFor($user);
+
+        // Tags first: they are follow-ups from the City Administrator on documents already overdue.
+        return [
+            'count' => $query->count() + $tags->count(),
+            'items' => [...$tags->take(5)->all(), ...$items],
+        ];
+    }
+
+    /** ADM tags the office has not marked as noted, while it still holds the document (FGD Phase 5). */
+    private function delinquencyTagsFor(User $user): Collection
+    {
+        return DelinquencyTag::query()
+            ->where('department_id', $user->department_id)
+            ->whereNull('acknowledged_at')
+            ->whereHas('document', fn ($documents) => $documents->where('state', 1)->where('status', '!=', 'Completed')
+                ->whereColumn('documents.department_id', 'delinquency_tags.department_id'))
+            ->with('document:id,barcode,subject_matter,is_confidential')
+            ->latest('tagged_at')->latest('id')->get()
+            ->map(fn (DelinquencyTag $tag) => [
+                'id' => "tag-{$tag->id}",
+                'barcode' => $tag->document->barcode,
+                'subject_matter' => $tag->document->detailsHiddenFrom($user)
+                    ? 'Confidential document'
+                    : Str::limit((string) $tag->document->subject_matter, 80),
+                'action' => "Delinquent, tagged by ADM: {$tag->label}",
+                'received_at' => $tag->tagged_at,
+                'url' => route('transactions.inbox', ['document' => $tag->document_id]),
+            ]);
     }
 
     private function awaitsPaper(DocumentTrail $trail): bool

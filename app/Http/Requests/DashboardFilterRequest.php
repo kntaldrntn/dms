@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Department;
 use App\Models\Document;
 use App\Services\DashboardReportService;
 use Carbon\Carbon;
@@ -88,5 +89,19 @@ class DashboardFilterRequest extends FormRequest
         $category = $this->string($key)->toString();
 
         return in_array($category, DashboardReportService::TRANSACTION_CATEGORIES, true) ? $category : $default;
+    }
+
+    /** An office picked in the dashboard's by-office table; an unknown id means no office filter. */
+    public function office(): ?Department
+    {
+        $id = $this->integer('office');
+
+        return $id > 0 ? Department::find($id, ['id', 'code', 'name']) : null;
+    }
+
+    /** "xlsx" downloads the report as an Excel file instead of showing the printable page. */
+    public function wantsSpreadsheet(): bool
+    {
+        return $this->string('format')->toString() === 'xlsx';
     }
 }

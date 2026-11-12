@@ -115,6 +115,15 @@ class DocumentController extends Controller
             'trails' => $document->trails,
             // The Primary office first, then every office holding a view-only copy (pivot.copy_role).
             'holders' => $document->holders()->get(['departments.id', 'departments.code', 'departments.name']),
+            // FGD Phase 5: the City Administrator's delinquency tags, newest first, kept as history.
+            'delinquencyTags' => $document->delinquencyTags()->with(['department:id,code', 'tagger:id,name', 'acknowledger:id,name'])->get()
+                ->map(fn ($tag) => [
+                    'id' => $tag->id, 'tag' => $tag->tag, 'label' => $tag->label, 'note' => $tag->note,
+                    'office' => $tag->department?->code, 'tagged_by' => $tag->tagger?->name,
+                    'tagged_at' => $tag->tagged_at->format('M d, Y g:i A'),
+                    'acknowledged_by' => $tag->acknowledger?->name,
+                    'acknowledged_at' => $tag->acknowledged_at?->format('M d, Y g:i A'),
+                ]),
             'canChangePrimary' => request()->user()->can('changePrimary', $document),
             'canChangeCategory' => request()->user()->can('changeCategory', $document),
             'categories' => fn () => TransactionType::where('state', 1)->orderBy('processing_days')->get(['id', 'name', 'processing_days']),

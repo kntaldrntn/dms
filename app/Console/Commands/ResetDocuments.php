@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\DelinquencyTag;
 use App\Models\Document;
 use App\Models\DocumentTrail;
 use Illuminate\Console\Command;
@@ -34,6 +35,7 @@ class ResetDocuments extends Command
         $counts = [
             'documents' => Document::query()->count(),
             'document trail entries' => DocumentTrail::query()->count(),
+            'ADM delinquency tags' => DelinquencyTag::query()->count(),
             'uploaded scans (storage/app/private/documents)' => count($files['documents']),
             'signed files (storage/app/private/signed-documents)' => count($files['signed-documents']),
         ];
@@ -58,6 +60,7 @@ class ResetDocuments extends Command
 
         // Rows first, in one transaction; files only once the rows are gone, so a failed delete leaves both in place.
         DB::transaction(function () {
+            DelinquencyTag::query()->delete();
             DocumentTrail::query()->delete();
             Document::query()->delete();
         });

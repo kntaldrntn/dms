@@ -4,6 +4,7 @@ import { Sidebar, SidebarContent } from '@/components/ui/sidebar';
 import { type NavItem, type NavSection } from '@/types';
 import { usePage } from '@inertiajs/vue3';
 import {
+    AlarmClock,
     BadgeCheck,
     Building2,
     Contact,
@@ -67,6 +68,10 @@ const sections = computed<NavSection[]>(() => {
             ],
         },
         { label: 'Approvals', items: approvals },
+        {
+            label: 'Monitoring',
+            items: page.props.auth.canMonitorDelinquency ? [link('Delinquency Monitor', 'delinquency.index', AlarmClock)] : [],
+        },
         { label: 'Administration', items: administration },
     ].filter((section) => section.items.length > 0);
 });

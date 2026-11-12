@@ -26,6 +26,15 @@ const props = defineProps<{
     summaryCards: Array<any>;
     delinquent: any;
     pipeline: Array<any>;
+    /** Offices with delayed (period) or delinquent (now) documents, worst first. */
+    officeDelays: Array<{
+        id: number;
+        code: string;
+        name: string;
+        delayed: Record<string, number>;
+        delayed_total: number;
+        delinquent: number;
+    }>;
     processingTimes: Array<any>;
 }>();
 
@@ -295,6 +304,68 @@ const toneClass: Record<string, string> = {
                     </div>
                 </div>
             </div>
+
+            <!-- FGD Phase 5: where the delays are, office by office -->
+            <section
+                aria-labelledby="office-delays-heading"
+                class="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)]"
+            >
+                <div class="mb-4 border-b border-slate-100 pb-4">
+                    <h3 id="office-delays-heading" class="text-lg font-bold text-slate-800">Delayed &amp; Delinquent by Office</h3>
+                    <p class="text-xs font-medium text-slate-400">
+                        Delayed: documents of {{ periodLabel }} past their category limit, by the office now holding them. Delinquent: held over the
+                        allowed time right now. Click a number for the list.
+                    </p>
+                </div>
+                <div v-if="officeDelays.length" class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="text-xs uppercase text-slate-500">
+                            <tr class="border-b border-slate-200">
+                                <th scope="col" class="px-3 py-2 text-left font-medium">Office</th>
+                                <th v-for="category in transactionCategories" :key="category" scope="col" class="px-3 py-2 text-center font-medium">
+                                    Delayed · {{ category }}
+                                </th>
+                                <th scope="col" class="px-3 py-2 text-center font-medium">Delayed total</th>
+                                <th scope="col" class="px-3 py-2 text-center font-medium">Delinquent now</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            <tr v-for="office in officeDelays" :key="office.id" class="hover:bg-slate-50">
+                                <th scope="row" class="px-3 py-2 text-left font-normal">
+                                    <span class="font-semibold text-slate-800">{{ office.code }}</span>
+                                    <span class="ml-1.5 text-xs text-slate-500">{{ office.name }}</span>
+                                </th>
+                                <td v-for="category in transactionCategories" :key="category" class="px-3 py-2 text-center">
+                                    <a
+                                        v-if="office.delayed[category] > 0"
+                                        :href="reportUrl({ transaction_category: category, pipeline_status: 'delayed', office: String(office.id) })"
+                                        target="_blank"
+                                        rel="noopener"
+                                        class="rounded px-1.5 font-bold text-orange-700 hover:bg-orange-50 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                                        :title="`Open the delayed ${category} documents of ${office.code} in a new tab`"
+                                        >{{ office.delayed[category] }}</a
+                                    >
+                                    <span v-else class="text-slate-300">0</span>
+                                </td>
+                                <td class="px-3 py-2 text-center font-semibold text-slate-800">{{ office.delayed_total }}</td>
+                                <td class="px-3 py-2 text-center">
+                                    <a
+                                        v-if="office.delinquent > 0"
+                                        :href="reportUrl({ report: 'delinquent', office: String(office.id) })"
+                                        target="_blank"
+                                        rel="noopener"
+                                        class="rounded px-1.5 font-bold text-rose-700 hover:bg-rose-50 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                                        :title="`Open the delinquent documents of ${office.code} in a new tab`"
+                                        >{{ office.delinquent }}</a
+                                    >
+                                    <span v-else class="text-slate-300">0</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p v-else class="py-6 text-center text-sm text-slate-500">No delayed or delinquent documents for {{ periodLabel }}.</p>
+            </section>
 
             <!-- Bottom Section (Average Processing Times) -->
             <div class="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_2px_10px_-3px_rgba(6,81,237,0.03)]">

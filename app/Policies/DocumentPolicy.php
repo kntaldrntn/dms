@@ -2,6 +2,7 @@
 
 namespace App\Policies;
 
+use App\Models\DelinquencyTag;
 use App\Models\Document;
 use App\Models\DocumentTrail;
 use App\Models\User;
@@ -132,6 +133,26 @@ class DocumentPolicy
         return $user->state === 1 && ($user->role === 'system_administrator'
             ? $user->department()->where('state', 1)->exists()
             : $user->department()->where('code', 'ADM')->where('state', 1)->exists());
+    }
+
+    /** FGD Phase 5: the City Administrator's office monitors delinquency for every office (same users as ADM approvals). */
+    public function monitorDelinquency(User $user): bool
+    {
+        return $this->viewAdmApprovals($user);
+    }
+
+    /** Only an open document that is delinquent right now can be tagged. */
+    public function tagDelinquency(User $user, Document $document): bool
+    {
+        return $this->monitorDelinquency($user) && $document->state === 1 && $document->status !== 'Completed'
+            && $document->is_delinquent;
+    }
+
+    /** Any user of the tagged office marks the tag as noted (once: DelinquencyTagService refuses a second time). */
+    public function acknowledgeDelinquencyTag(User $user, Document $document, DelinquencyTag $tag): bool
+    {
+        return $user->state === 1 && $tag->document_id === $document->id
+            && $tag->department_id === (int) $user->department_id;
     }
 
     /** FGD Phase 2c step 1: an ADM user receives a document waiting on City Administrator approval. */
