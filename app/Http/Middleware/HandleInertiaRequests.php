@@ -4,8 +4,10 @@ namespace App\Http\Middleware;
 
 use App\Models\Document;
 use App\Services\IncomingDocumentService;
+use App\Services\SidebarCountService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Http\Request;
+use Inertia\Inertia;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -52,10 +54,16 @@ class HandleInertiaRequests extends Middleware
                 'canViewOcmApprovals' => (bool) $request->user()?->can('viewOcmApprovals', Document::class),
                 // Delinquency Monitor (FGD Phase 5): the City Administrator's office.
                 'canMonitorDelinquency' => (bool) $request->user()?->can('monitorDelinquency', Document::class),
+                // Sidebar office card.
+                'office' => $request->user()?->department?->only(['code', 'name']),
             ],
             'features' => ['paperless' => (bool) config('services.paperless.enabled')],
             // Lazy so the bell's polling can request it alone (`only: ['incoming']`).
             'incoming' => fn () => app(IncomingDocumentService::class)->forUser($request->user()),
+            // Sidebar badges: deferred so they never slow the page itself; refreshed with the bell's poll.
+            'sidebarCounts' => $request->user()
+                ? Inertia::defer(fn () => app(SidebarCountService::class)->forUser($request->user()), 'sidebar')
+                : null,
         ]);
     }
 }

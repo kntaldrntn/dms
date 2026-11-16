@@ -189,7 +189,7 @@ function submitProcess() {
             <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <!-- Receive a paper document: scanning the barcode on the physical copy is the proof it arrived -->
                 <form class="w-full rounded-2xl border border-emerald-200 bg-white p-3 shadow-sm lg:max-w-xl" @submit.prevent="receivePaper">
-                    <label for="receive_paper_barcode" class="mb-1.5 block text-sm font-semibold text-slate-800">Receive a paper document</label>
+                    <label for="receive_paper_barcode" class="mb-1.5 block text-sm font-semibold text-slate-800">Receive a Paper Document</label>
                     <div class="flex gap-2">
                         <div class="relative flex-1">
                             <ScanBarcode class="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-emerald-500" aria-hidden="true" />
@@ -199,7 +199,7 @@ function submitProcess() {
                                 v-model="paperForm.barcode"
                                 type="text"
                                 autocomplete="off"
-                                placeholder="Scan the barcode on the physical document"
+                                placeholder="Scan the barcode on the Physical Document"
                                 aria-describedby="receive_paper_hint"
                                 :aria-invalid="Boolean(paperForm.errors.barcode)"
                                 class="block w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-10 pr-3 font-mono text-sm shadow-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"

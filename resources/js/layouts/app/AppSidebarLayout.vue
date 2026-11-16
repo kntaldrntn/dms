@@ -28,9 +28,9 @@ const isBellOpen = ref(false);
 const incoming = computed(() => (page.props.incoming as { count: number; items: IncomingItem[] } | undefined) ?? { count: 0, items: [] });
 const badgeText = computed(() => (incoming.value.count > 99 ? '99+' : String(incoming.value.count)));
 
-// Refresh only the bell every minute; Inertia pauses polling while the tab is hidden and
-// runs it asynchronously so it never cancels a form submission in progress.
-usePoll(60000, { only: ['incoming'] });
+// Refresh only the bell and the sidebar badges every minute; Inertia pauses polling while the tab is
+// hidden and runs it asynchronously so it never cancels a form submission in progress.
+usePoll(60000, { only: ['incoming', 'sidebarCounts'] });
 
 // Workflow timestamps are stored as Manila wall-clock time, so drop the trailing "Z" before formatting.
 const formatReceived = (value: string | null) => {

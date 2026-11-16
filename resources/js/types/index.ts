@@ -12,6 +12,16 @@ export interface NavItem {
     href: string;
     icon?: any;
     isActive?: boolean;
+    /** Count shown beside the link; "alert" when something there is overdue. null: can show one, nothing waiting now. */
+    badge?: { count: number; tone: 'default' | 'alert'; label: string } | null;
+}
+
+/** Shared deferred prop behind the sidebar badges (SidebarCountService); null where the user cannot see that page. */
+export interface SidebarCounts {
+    transactions: { open: number; delinquent: number };
+    admApprovals: number | null;
+    ocmApprovals: number | null;
+    untaggedDelinquent: number | null;
 }
 
 export interface NavSection {

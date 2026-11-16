@@ -18,25 +18,20 @@ use Inertia\Response;
 /** FGD Phase 5: the City Administrator's office sees every delinquent document and tags it with a follow-up note. */
 class DelinquencyMonitorController extends Controller
 {
-    public function index(Request $request): Response
+    public function index(Request $request, DelinquencyTagService $tags): Response
     {
         $this->authorize('monitorDelinquency', Document::class);
         $user = $request->user();
         $now = Carbon::now('Asia/Manila');
 
         // Every office, whatever the ADM user's own role: monitoring is the point of this page.
-        $documents = Document::with(['department:id,code,name', 'documentType:id,document_code,document_type', 'transactionType:id,name',
-            'latestDelinquencyTag.tagger:id,name', 'latestDelinquencyTag.acknowledger:id,name'])
-            ->where('state', 1)->where('status', '!=', 'Completed')->whereNotNull('department_id')
-            ->get()
-            ->filter(fn (Document $document) => $document->is_delinquent);
+        $documents = $tags->delinquentDocuments(['department:id,code,name', 'documentType:id,document_code,document_type',
+            'transactionType:id,name', 'latestDelinquencyTag.tagger:id,name', 'latestDelinquencyTag.acknowledger:id,name']);
 
         $rows = $documents->map(function (Document $document) use ($user, $now) {
             $heldSince = $document->heldSince();
             $hidden = $document->detailsHiddenFrom($user);
-            $tag = $document->latestDelinquencyTag;
-            // A tag counts for the current holder only; an older tag from a previous office is shown as history.
-            $currentTag = $tag && $tag->department_id === $document->department_id ? $tag : null;
+            $currentTag = DelinquencyTagService::currentTag($document);
 
             return [
                 'id' => $document->id,

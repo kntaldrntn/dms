@@ -7,6 +7,7 @@ use App\Models\Document;
 use App\Models\DocumentTrail;
 use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
@@ -21,6 +22,30 @@ use Illuminate\Validation\ValidationException;
  */
 class DelinquencyTagService
 {
+    /**
+     * Every open document held over its office's allowed time, across all offices.
+     * Delinquency depends on the trail and the office's standard, so it is checked per document in PHP.
+     *
+     * @param  list<string>  $with  relations to eager-load
+     * @return Collection<int, Document>
+     */
+    public function delinquentDocuments(array $with = []): Collection
+    {
+        return Document::with($with)
+            ->where('state', 1)->where('status', '!=', 'Completed')->whereNotNull('department_id')
+            ->get()
+            ->filter(fn (Document $document) => $document->is_delinquent)
+            ->values();
+    }
+
+    /** A tag counts for the office holding the document now; one left by a previous holder is history only. */
+    public static function currentTag(Document $document): ?DelinquencyTag
+    {
+        $tag = $document->latestDelinquencyTag;
+
+        return $tag && $tag->department_id === $document->department_id ? $tag : null;
+    }
+
     public function tag(User $user, Document $document, string $tag, string $note): DelinquencyTag
     {
         return DB::transaction(function () use ($user, $document, $tag, $note) {

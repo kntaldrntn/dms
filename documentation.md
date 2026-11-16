@@ -318,7 +318,46 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
 
 ## 10. Change log
 
-### 2026-11-12 — FGD Phase 5: ADM delinquency tagging, delays by office, Excel reports (Claude Code, uncommitted)
+### 2026-11-16 — Sidebar: count badges, office card, active icon chip (Claude Code, uncommitted)
+- User: "Let's try it" (badges + office card + colour touches; Administration grouping not done). Reference was the
+  MIT-licensed Cleopatra template — ideas only, nothing copied.
+- **Counts:** new `app/Services/SidebarCountService.php`, shared as the **deferred** prop `sidebarCounts` (group
+  `sidebar`, `HandleInertiaRequests`; null for guests), so pages render first. Refreshed with the bell's 60 s poll
+  (`AppSidebarLayout`: `only: ['incoming', 'sidebarCounts']`).
+  - Transactions: open documents in the Office Inbox (same query as `TransactionController::index`); the badge turns
+    red when any of them is delinquent.
+  - ADM / OCM Approvals: documents in that queue (same queries as their pages); null when the user can't see the page.
+  - Delinquency Monitor: delinquent documents whose current holder has no ADM tag yet (red).
+- `DelinquencyTagService::delinquentDocuments()` and `::currentTag()` extracted; `DelinquencyMonitorController` uses them.
+- Shared `auth.office` (code, name) → sidebar footer office card with role; collapses to a code chip.
+- `NavMain.vue`: active item gets a filled blue icon chip (replaces the 3 px bar), icons tint on hover, divider between
+  sections, badge pill (99+), a dot on the icon when collapsed, screen-reader text with the badge's meaning.
+  `NavItem.badge` and `SidebarCounts` types in `resources/js/types/index.ts`.
+- No text shift on page change: `composables/useSidebarCounts.ts` keeps the last counts across visits until the
+  deferred prop arrives, and badge-capable links always reserve the badge space (`badge: null` when 0).
+- Sidebar navigation scrolls without a visible scrollbar: new `.scrollbar-none` utility in `resources/css/app.css`
+  (Prettier already flagged that file at HEAD; not reformatted).
+- Tests: `SidebarCountsTest` (2: deferred load + office card; delinquent inbox badge and untagged monitor count).
+- Checks (2026-11-16): Pest **238 passed (2690 assertions)**; Pint ✅ (changed/new PHP); ESLint ✅; Prettier ✅;
+  `npm run build` ✅; `vue-tsc` shows only the pre-existing `page.props.auth is unknown` / `route().current` kinds in
+  AppSidebar. **Not browser-tested.**
+- Known limit: the monitor count checks delinquency per open document (2 queries each) every minute for ADM users.
+
+### 2026-11-16 — Dashboard polish (Claude Code, uncommitted)
+- User: "Go with that set for now, for the layout redesign hold it". Only `resources/js/pages/Dashboard.vue` changed.
+- Accessibility: the processing-times category select has a visible focus ring again (was `focus:ring-0`); alert
+  cards and pipeline rows get a focus-visible ring; every new-tab link has screen-reader text "(opens … in a new tab)".
+- Correctness: breadcrumb uses `route('dashboard')`; quick ranges use the Manila month (`Intl`, `Asia/Manila`), not the
+  browser clock; `alertCards` / `scopeLabel` / `scopeText` are `computed`.
+- Code quality: props typed (no more `any`); lucide `Clock` replaces the inline SVG; stale comment and `min-h-screen` removed.
+- UX: while a period/category change loads, Generate shows "Loading…", presets and the category select are disabled,
+  and the cards dim (`aria-busy`). Pipeline rows no longer shift on hover. By-office "Delinquent now" uses the same red
+  as the Delinquent card.
+- **Held (user):** top-row layout redesign.
+- Checks (2026-11-16): ESLint ✅, Prettier ✅ (Dashboard.vue); `vue-tsc` reports no errors in Dashboard.vue (other files'
+  pre-existing errors unchanged in kind); `npm run build` ✅; `DashboardOfficeDelaysTest` 4 passed. **Not browser-tested.**
+
+### 2026-11-12 — FGD Phase 5: ADM delinquency tagging, delays by office, Excel reports (Claude Code, committed 2231b97)
 - User: "We can do 2 for now" (Phase 5). Answers: **Tag + note**; **By office table**; **Excel .xlsx**; Claude enabled
   PHP zip ("You enable it").
 - **Environment:** `extension=zip` uncommented in `C:\xampp\php\php.ini` (line 962; backup in the session
