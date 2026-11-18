@@ -2,11 +2,11 @@
 import DeleteConfirmationModal from '@/components/DeleteConfirmationModal.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head, router, useForm } from '@inertiajs/vue3';
-import { Pencil, Plus, Search, Trash2, RotateCcw, History, X } from 'lucide-vue-next';
+import { Head, router, useForm, usePage } from '@inertiajs/vue3';
+import { FileUp, Pencil, Plus, Search, Trash2, RotateCcw, History, X } from 'lucide-vue-next';
 import { Notyf } from 'notyf';
 import 'notyf/notyf.min.css';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 const props = defineProps<{
     users: {
@@ -155,6 +155,38 @@ const form = useForm({
     _method: 'post', // Workaround for file uploads
 });
 
+// PNPKI fields (signature image, signing for the head, Signing column) only matter on the paperless route,
+// which is switched off for now; they come back when DMS_PAPERLESS_ENABLED is on.
+const page = usePage();
+const paperless = computed(() => Boolean((page.props.features as { paperless?: boolean } | undefined)?.paperless));
+const SIGNER_ROLES = ['city_administrator', 'city_mayor', 'department_head', 'system_administrator'];
+const formSigns = computed(() => SIGNER_ROLES.includes(form.role) || (form.role === 'staff' && form.can_sign_for_head));
+
+// FGD levels (slide 9) for the role picker; ADM / OCM / REC roles must be in that office (checked on save).
+const roleGroups = [
+    { label: 'Supervisory Level', roles: [['department_head', 'Department Head'], ['city_administrator', 'City Administrator (ADM office)'], ['city_mayor', 'City Mayor (OCM office)']] },
+    { label: 'Workstation', roles: [['staff', 'Department Staff']] },
+    { label: 'Records Section', roles: [['records_manager', 'Records Manager (REC office)']] },
+    { label: 'System', roles: [['system_administrator', 'System Administrator']] },
+];
+const departmentOptional = computed(() => form.role === 'system_administrator');
+
+// Signature image: picked or dropped; the server validates it again (PNG/JPG).
+const isDraggingSignature = ref(false);
+function chooseSignature(file?: File | null) {
+    if (!file) return;
+    if (!/\.(png|jpe?g)$/i.test(file.name)) {
+        form.setError('signature', 'Upload a PNG or JPG image.');
+        return;
+    }
+    form.signature = file;
+    form.clearErrors('signature');
+}
+function onSignatureDrop(event: DragEvent) {
+    isDraggingSignature.value = false;
+    chooseSignature(event.dataTransfer?.files?.[0]);
+}
+
 function openAddDialog() {
     isEdit.value = false;
     editingId.value = null;
@@ -204,9 +236,20 @@ function reactivateUser(user: any) {
         role: user.role,
         sex: user.sex,
         department_id: user.department_id,
-        state: 1 
-    }, { preserveScroll: true });
+        state: 1
+    }, {
+        preserveScroll: true,
+        // e.g. an older account with no department: say why instead of failing silently.
+        onError: (errors) => {
+            notyf.error(`${user.name} was not reactivated: ${Object.values(errors)[0]} Edit the user to fix it.`);
+        },
+    });
 }
+
+// A file picked for a signer is dropped if the role changes to one that does not sign.
+watch(formSigns, (signs) => {
+    if (!signs) form.signature = null;
+});
 
 function submitForm() {
     if (isEdit.value && editingId.value !== null) {
@@ -334,7 +377,7 @@ const formatRelativeTime = (dateString: string) => {
                                 <th class="px-4 py-2.5 font-bold">User Details</th>
                                 <th class="px-4 py-2.5 font-bold">Role</th>
                                 <th class="px-4 py-2.5 font-bold">Department</th>
-                                <th class="px-4 py-2.5 font-bold">Signing</th>
+                                <th v-if="paperless" class="px-4 py-2.5 font-bold">Signing</th>
                                 <th class="px-4 py-2.5 font-bold">Last Active</th>
                                 <th class="px-4 py-2.5 font-bold">Status</th>
                                 <th class="px-4 py-2.5 text-center font-bold">Actions</th>
@@ -354,12 +397,12 @@ const formatRelativeTime = (dateString: string) => {
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
                                         {{ formatRole(user.role) }}
                                     </span>
-                                    <span v-if="user.can_sign_for_head" class="mt-1 block text-[11px] text-amber-700">Signs for the Department Head</span>
+                                    <span v-if="paperless && user.can_sign_for_head" class="mt-1 block text-[11px] text-amber-700">Signs for the Department Head</span>
                                 </td>
                                 <td class="px-4 py-2 text-slate-600">
                                     {{ user.department?.name || 'No Department' }}
                                 </td>
-                                <td class="px-4 py-2">
+                                <td v-if="paperless" class="px-4 py-2">
                                     <template v-if="user.signing_status">
                                         <span
                                             class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border"
@@ -500,16 +543,13 @@ const formatRelativeTime = (dateString: string) => {
                                 <div>
                                     <label class="mb-1.5 block text-sm font-medium text-slate-700" for="role">System Role</label>
                                     <select v-model="form.role" id="role" class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm" required>
-                                        <option value="staff">Department Staff</option>
-                                        <option value="department_head">Department Head</option>
-                                        <option value="city_administrator">City Administrator</option>
-                                        <option value="city_mayor">City Mayor</option>
-                                        <option value="records_manager">Records Manager</option>
-                                        <option value="system_administrator">System Administrator</option>
+                                        <optgroup v-for="group in roleGroups" :key="group.label" :label="group.label">
+                                            <option v-for="[value, label] in group.roles" :key="value" :value="value">{{ label }}</option>
+                                        </optgroup>
                                     </select>
                                     <p v-if="form.errors.role" class="mt-1 text-xs text-red-500">{{ form.errors.role }}</p>
-                                    <!-- Signing authority: a staff member (e.g. OIC) who may sign in place of the Department Head -->
-                                    <label v-if="form.role === 'staff'" class="mt-2 flex items-start gap-2 text-sm text-slate-700">
+                                    <!-- Signing authority (PNPKI, paperless route only): a staff member (e.g. OIC) who may sign in place of the Department Head -->
+                                    <label v-if="paperless && form.role === 'staff'" class="mt-2 flex items-start gap-2 text-sm text-slate-700">
                                         <input
                                             v-model="form.can_sign_for_head"
                                             type="checkbox"
@@ -526,9 +566,17 @@ const formatRelativeTime = (dateString: string) => {
 
                                 <!-- Department -->
                                 <div>
-                                    <label class="mb-1.5 block text-sm font-medium text-slate-700" for="department_id">Department</label>
-                                    <select v-model="form.department_id" id="department_id" class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm">
-                                        <option value="" disabled>Select Department</option>
+                                    <label class="mb-1.5 block text-sm font-medium text-slate-700" for="department_id">
+                                        Department <span v-if="departmentOptional" class="font-normal text-slate-400">(Optional)</span>
+                                    </label>
+                                    <select
+                                        v-model="form.department_id"
+                                        id="department_id"
+                                        :required="!departmentOptional"
+                                        :aria-invalid="Boolean(form.errors.department_id)"
+                                        class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm"
+                                    >
+                                        <option value="" :disabled="!departmentOptional">{{ departmentOptional ? 'No department' : 'Select Department' }}</option>
                                         <option v-for="dept in departments" :key="dept.id" :value="dept.id">
                                             {{ dept.name }}
                                         </option>
@@ -547,19 +595,51 @@ const formatRelativeTime = (dateString: string) => {
                                     <p v-if="form.errors.sex" class="mt-1 text-xs text-red-500">{{ form.errors.sex }}</p>
                                 </div>
                                 
-                                <!-- Signature image: only the picture on the PNPKI stamp; the certificate is the signer's own upload -->
-                                <div class="col-span-1 md:col-span-2">
-                                    <label class="mb-1.5 block text-sm font-medium text-slate-700" for="signature">
-                                        Signature image for the PNPKI stamp (Optional)
+                                <!-- Signature image: only the picture on the PNPKI stamp; the certificate is the signer's own upload.
+                                     Shown for signers, and only while the paperless route is on. -->
+                                <div v-if="paperless && formSigns" class="col-span-1 md:col-span-2">
+                                    <p class="mb-1.5 block text-sm font-medium text-slate-700">Signature image for the PNPKI stamp (Optional)</p>
+                                    <!-- Same upload area as document intake: a chosen file shows its name with a remove button. -->
+                                    <div v-if="form.signature" class="flex h-[52px] items-center justify-between gap-2 rounded-xl border border-slate-300 px-3">
+                                        <span class="flex min-w-0 items-center gap-1.5 text-sm text-slate-700">
+                                            <FileUp class="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                                            <span class="truncate">{{ form.signature.name }}</span>
+                                        </span>
+                                        <button
+                                            type="button"
+                                            class="rounded p-0.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                                            aria-label="Remove signature image"
+                                            @click="form.signature = null"
+                                        >
+                                            <X class="h-4 w-4" aria-hidden="true" />
+                                        </button>
+                                    </div>
+                                    <label
+                                        v-else
+                                        for="signature"
+                                        class="flex h-[52px] cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed px-3 text-center transition focus-within:ring-2 focus-within:ring-emerald-600"
+                                        :class="[
+                                            isDraggingSignature ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 hover:bg-slate-50',
+                                            form.errors.signature ? 'border-red-500' : '',
+                                        ]"
+                                        @dragover.prevent="isDraggingSignature = true"
+                                        @dragleave.prevent="isDraggingSignature = false"
+                                        @drop.prevent="onSignatureDrop"
+                                    >
+                                        <FileUp class="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                                        <span class="leading-tight">
+                                            <span class="block text-sm font-medium text-slate-700">Choose or drop the signature image</span>
+                                            <span class="block text-xs text-slate-500">PNG/JPG · up to 2 MB · optional</span>
+                                        </span>
+                                        <input
+                                            id="signature"
+                                            type="file"
+                                            accept="image/png, image/jpeg"
+                                            aria-describedby="signature_hint"
+                                            class="sr-only"
+                                            @change="(e) => chooseSignature((e.target as HTMLInputElement).files?.[0])"
+                                        />
                                     </label>
-                                    <input
-                                        @change="e => form.signature = (e.target as HTMLInputElement).files?.[0] || null"
-                                        id="signature"
-                                        type="file"
-                                        aria-describedby="signature_hint"
-                                        accept="image/png, image/jpeg, image/jpg"
-                                        class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100" 
-                                    />
                                     <p id="signature_hint" class="mt-1 text-xs text-slate-500">
                                         A picture of the handwritten signature, shown on the left of the stamp. The PNPKI certificate (.p12) is not uploaded here:
                                         each signer uploads it with their PIN in Settings → Signing certificate, where they can also upload this image themselves.

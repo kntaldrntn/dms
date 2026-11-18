@@ -2,13 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\SaveUserRequest;
 use App\Models\Department;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Storage; // Added for file handling
-use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Cache;
 
@@ -62,7 +61,7 @@ class UserController extends Controller
      */
     private function signingStatus(User $user): ?array
     {
-        if (! in_array($user->role, User::SIGNER_ROLES, true)) {
+        if (! in_array($user->role, User::SIGNER_ROLES, true) && ! $user->can_sign_for_head) {
             return null;
         }
         $validUntil = $user->certificate_path ? $user->certificate_valid_until : null;
@@ -80,19 +79,9 @@ class UserController extends Controller
         ];
     }
 
-    public function store(Request $request)
+    public function store(SaveUserRequest $request)
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|lowercase|email|max:255|unique:' . User::class,
-            'role' => ['required', Rule::in(['staff', 'department_head', 'city_administrator', 'city_mayor', 'records_manager', 'system_administrator'])],
-            'sex' => ['nullable', Rule::in(['Male', 'Female'])],
-            'state' => ['required', 'in:0,1'],
-            'department_id' => 'nullable|exists:departments,id',
-            'password' => ['required', 'confirmed', Rules\Password::defaults()],
-            'signature' => ['nullable', 'image', 'mimes:png,jpg,jpeg', 'max:2048'], // 2MB max limit
-            'can_sign_for_head' => ['sometimes', 'boolean'],
-        ]);
+        $validated = $request->validated();
 
         $signaturePath = null;
         if ($request->hasFile('signature')) {
@@ -105,7 +94,7 @@ class UserController extends Controller
             'role' => $validated['role'],
             'sex' => $validated['sex'] ?? null,
             'state' => $validated['state'] ?? 1,
-            'department_id' => $validated['department_id'],
+            'department_id' => $validated['department_id'] ?? null,
             // Signing for the head is a department staff authority; other roles sign as themselves.
             'can_sign_for_head' => $validated['role'] === 'staff' && ($validated['can_sign_for_head'] ?? false),
             'signature_path' => $signaturePath, // Save the path to DB
@@ -116,24 +105,12 @@ class UserController extends Controller
         return redirect()->back()->with('success', 'User created successfully.');
     }
 
-    public function update(Request $request, User $user)
+    public function update(SaveUserRequest $request, User $user)
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|max:255|unique:users,email,' . $user->id,
-            'role' => ['required', Rule::in(['staff', 'department_head', 'city_administrator', 'city_mayor', 'records_manager', 'system_administrator'])],
-            'sex' => ['nullable', Rule::in(['Male', 'Female'])],
-            'state' => ['required', 'in:0,1'],
-            'department_id' => 'nullable|exists:departments,id',
-            'signature' => ['nullable', 'image', 'mimes:png,jpg,jpeg', 'max:2048'],
-            'can_sign_for_head' => ['sometimes', 'boolean'],
-        ]);
+        $validated = $request->safe()->except(['password', 'signature']);
 
         if ($request->filled('password')) {
-            $request->validate([
-                'password' => ['confirmed', Rules\Password::defaults()]
-            ]);
-            $user->password = Hash::make($request->password);
+            $user->password = Hash::make($request->validated('password'));
         }
 
         $user->fill($validated);

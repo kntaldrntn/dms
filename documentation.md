@@ -318,6 +318,28 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
 
 ## 10. Change log
 
+### 2026-11-18 — User Management follows the FGD offices; PNPKI fields only with paperless (Claude Code, uncommitted)
+- User: "Fix it for now please" after a review against the FGD (slide 9 RBAC, paper-first decision).
+- New `app/Http/Requests/SaveUserRequest.php` (store + update; `UserController` no longer validates inline):
+  - Department required for every role except `system_administrator`.
+  - `city_administrator` must be in ADM, `city_mayor` in OCM, `records_manager` in REC (by department code), since
+    the approval queues and Records intake go by office.
+  - Signature image only for signers (`User::SIGNER_ROLES`, or staff with `can_sign_for_head`).
+  - Blank password on edit keeps the current one (unchanged behaviour, now in the request).
+- Users list: the Signing column also covers staff authorized to sign for the head (was "Does not sign").
+- `users/Index.vue`:
+  - Role picker grouped by FGD level (Supervisory / Workstation / Records Section / System), with the office named
+    for ADM/OCM/REC roles.
+  - Department marked optional only for the System Administrator.
+  - Signing column, "Signs for the Department Head" note, the "May sign for the Department Head" checkbox and the
+    signature upload are shown only while `features.paperless` is on. The upload also needs a signing role.
+  - Signature upload restyled like the intake drop area (dashed box, file name + remove, drag and drop).
+  - Reactivate shows the validation error (e.g. no department) instead of failing silently.
+- Local data checked 2026-11-18: none of the 100 active users break the new rules.
+- Tests: `UserOfficeRulesTest` (7). Checks: Pest **245 passed (2715 assertions)**; Pint ✅ (new files); ESLint ✅;
+  `npm run build` ✅. `users/Index.vue` still has pre-existing Prettier violations (not reformatted).
+  **Not browser-tested.**
+
 ### 2026-11-16 — Sidebar: count badges, office card, active icon chip (Claude Code, uncommitted)
 - User: "Let's try it" (badges + office card + colour touches; Administration grouping not done). Reference was the
   MIT-licensed Cleopatra template — ideas only, nothing copied.
