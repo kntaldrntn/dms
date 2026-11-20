@@ -47,10 +47,6 @@ class UserController extends Controller
             'users' => $users,
             'departments' => $departments,
             'filters' => $request->only(['search']),
-            'flash' => [
-                'success' => session('success'),
-                'error' => session('error')
-            ]
         ]);
     }
 

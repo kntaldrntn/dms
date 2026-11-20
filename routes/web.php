@@ -64,6 +64,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('documents/{document}', [DocumentController::class, 'show'])->name('documents.show');
     Route::get('documents/{document}/attachment', [DocumentController::class, 'attachment'])->name('documents.attachment');
     Route::get('documents/{document}/signed-pdf', [App\Http\Controllers\OcmApprovalController::class, 'previewSigned'])->name('documents.signed-pdf');
+    // Search every document the user may see (ArchiveSearchRequest: DocumentPolicy::viewAny).
+    Route::get('archive', App\Http\Controllers\ArchiveController::class)->name('archive.index');
 
     // 3. DASHBOARD
     Route::get('dashboard', DashboardController::class)->name('dashboard');

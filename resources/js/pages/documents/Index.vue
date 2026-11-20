@@ -8,11 +8,10 @@ import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { Search, Pencil, FastForward, AlertCircle, Clock, Loader2, Sparkles, FileUp, X } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
-import { Notyf } from 'notyf';
-import 'notyf/notyf.min.css';
 import axios from 'axios';
 import { scanIntakeFile } from '@/lib/intakeScan';
 import { barcodeBeingTyped, withChosenBarcode } from '@/lib/linkedDocuments';
+import { notify } from '@/lib/notify';
 
 const props = defineProps<{
     documents: any;
@@ -23,7 +22,6 @@ const props = defineProps<{
     deliveryMethods: Array<{ id: number; delivery_method_name: string }>;
     generatedAccessCode: string;
     filters?: { search?: string };
-    flash?: { success?: string; error?: string };
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -67,12 +65,6 @@ const goToPage = (url: string) => {
     if (!url) return;
     router.get(url, { search: searchTerm.value }, { preserveState: true, preserveScroll: true });
 };
-
-const notyf = new Notyf({ duration: 3000, position: { x: 'right', y: 'top' } });
-watch(() => props.flash, (flash) => {
-    if (flash?.success) notyf.success(flash.success);
-    if (flash?.error) notyf.error(flash.error);
-}, { immediate: true });
 
 const showRoutingModal = ref(false);
 const documentToRoute = ref<any>(null);
@@ -187,7 +179,7 @@ const ACCEPTED_FILE = /\.(pdf|jpe?g|png)$/i;
 function chooseFile(file?: File | null) {
     if (!file || form.is_confidential) return;
     if (!ACCEPTED_FILE.test(file.name)) {
-        notyf.error('Upload a PDF, JPG or PNG file.');
+        notify.error('Upload a PDF, JPG or PNG file.');
         return;
     }
     form.attached_file = file;
@@ -284,10 +276,10 @@ const analyzeFile = async (file: File) => {
         }
 
         analyzedFile.value = file;
-        notyf.success('AI successfully extracted data.');
+        notify.success('AI successfully extracted data.');
     } catch (err: any) {
         analysisError.value = analysisFailureReason(err);
-        notyf.error('AI Analysis failed. Please input manually.');
+        notify.error('AI Analysis failed. Please input manually.');
     } finally {
         isAnalyzing.value = false;
     }
@@ -334,7 +326,7 @@ function submitDocument() {
     // Same rule as the server: a document never stays in the registering office with nowhere to go.
     if (directTo.value === 'departments' && !form.routed_to.length) {
         form.setError('routed_to', NO_DESTINATION);
-        notyf.error('Choose at least one department.');
+        notify.error('Choose at least one department.');
         return;
     }
     form.transform((data) =>
@@ -352,7 +344,7 @@ function submitDocument() {
             analyzedFile.value = null;
         },
         onError: () => {
-            notyf.error('Please check the highlighted fields.');
+            notify.error('Please check the highlighted fields.');
         }
     });
 }

@@ -33,10 +33,6 @@ class DocumentTypeController extends Controller
             'transactionTypes' => TransactionType::where('state', 1)->orderBy('processing_days')->get(['id', 'name']),
             'classifications' => DocumentClassification::where('state', 1)->orderBy('name')->get(['id', 'name']),
             'filters' => $request->only(['search']),
-            'flash' => [
-                'success' => session('success'),
-                'error' => session('error'),
-            ],
         ]);
     }
 

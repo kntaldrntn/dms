@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Light only for now (user decision 2026-11-20): the pages have no dark styles, so native controls stay light too. */
+html {
+    color-scheme: light;
+}
+
 body,
 html {
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
@@ -98,5 +103,28 @@ html {
     }
     .scrollbar-none::-webkit-scrollbar {
         display: none;
+    }
+}
+
+/*
+ * Toasts (vue-sonner): a softer pop-in than the library's full-height slide. A short drop with a slight grow on an
+ * ease-out curve, and a gentle fade-out. Prefixed with the toaster so these win over vue-sonner's own rules.
+ */
+[data-sonner-toaster] [data-sonner-toast] {
+    transition:
+        transform 500ms cubic-bezier(0.16, 1, 0.3, 1),
+        opacity 300ms ease-out,
+        height 400ms cubic-bezier(0.16, 1, 0.3, 1),
+        box-shadow 200ms;
+}
+[data-sonner-toaster] [data-sonner-toast][data-y-position='top']:not([data-mounted='true']) {
+    --y: translateY(-16px) scale(0.95);
+}
+[data-sonner-toaster] [data-sonner-toast][data-removed='true'][data-front='true'][data-swipe-out='false'] {
+    --y: translateY(-8px) scale(0.97);
+}
+@media (prefers-reduced-motion: reduce) {
+    [data-sonner-toaster] [data-sonner-toast] {
+        transition: opacity 200ms;
     }
 }

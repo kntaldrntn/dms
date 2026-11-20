@@ -4,8 +4,8 @@ import OfficePicker from '@/components/OfficePicker.vue';
 import { findStampPlacement } from '@/lib/stampPlacement';
 import { Link, useForm } from '@inertiajs/vue3';
 import { Loader2, X } from 'lucide-vue-next';
-import { Notyf } from 'notyf';
 import { computed, ref } from 'vue';
+import { notify } from '@/lib/notify';
 
 type Office = { id: number; code: string; name: string };
 
@@ -26,7 +26,6 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ close: [] }>();
 
-const notyf = new Notyf({ duration: 5000, position: { x: 'right', y: 'top' } });
 const paperless = computed(() => Boolean(props.document.is_paperless));
 const suggestions = computed(() =>
     Object.fromEntries(
@@ -66,11 +65,11 @@ async function submit() {
             preparingStamp.value = true;
             if (!props.document.stamp_source_url) throw new Error('Paperless approval needs the uploaded PDF.');
             const { placement, measured } = await findStampPlacement(props.document.id, props.document.stamp_source_url);
-            if (measured) notyf.success('A blank lower-page area was measured and used for the signature.');
+            if (measured) notify.success('A blank lower-page area was measured and used for the signature.');
             form.stamp_placement = placement;
         }
     } catch (error: any) {
-        notyf.error(error?.response?.data?.error || error?.message || 'No place for the signature was found on the PDF.');
+        notify.error(error?.response?.data?.error || error?.message || 'No place for the signature was found on the PDF.');
         return;
     } finally {
         preparingStamp.value = false;

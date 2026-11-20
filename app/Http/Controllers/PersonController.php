@@ -27,10 +27,6 @@ class PersonController extends Controller
             'people' => $query->orderBy('last_name')->orderBy('first_name')->paginate(14)->withQueryString(),
             'departments' => Department::where('state', 1)->orderBy('code')->get(['id', 'code', 'name']),
             'filters' => $request->only(['search']),
-            'flash' => [
-                'success' => session('success'),
-                'error' => session('error'),
-            ],
         ]);
     }
 

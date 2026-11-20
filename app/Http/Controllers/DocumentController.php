@@ -51,10 +51,6 @@ class DocumentController extends Controller
             'documents' => $documents, 
             'departments' => Department::where('state', 1)->get(),
             'filters' => $request->only(['search']),
-            'flash' => [
-                'success' => session('success'),
-                'error' => session('error')
-            ],
             'transactionTypes' => TransactionType::where('state', 1)->get(),
             'documentTypes' => $this->intakeDocumentTypes(),
             'classifications' => DocumentClassification::where('state', 1)->get(),

@@ -70,8 +70,6 @@ class TransactionController extends Controller
             'departments' => Department::where('state', 1)->where('id', '!=', $request->user()->department_id)->get(),
             'filters' => $request->only(['barcode']),
             'focusDocument' => $focusDocument,
-            // Receive / Process / Receive copy redirect back here with a message for the toast.
-            'flash' => ['success' => session('success'), 'error' => session('error')],
         ]);
     }
 

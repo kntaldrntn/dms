@@ -4,9 +4,7 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, useForm } from '@inertiajs/vue3';
 import { Mail, Send } from 'lucide-vue-next';
-import { Notyf } from 'notyf';
-import 'notyf/notyf.min.css';
-import { computed, watch } from 'vue';
+import { computed } from 'vue';
 
 interface MailFields {
     host: string | null;
@@ -19,7 +17,6 @@ interface MailFields {
 const props = defineProps<{
     setting: (MailFields & { has_password: boolean; updated_at: string | null; updated_by: string | null }) | null;
     defaults: MailFields & { has_password: boolean };
-    flash?: { success?: string | null };
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Email Settings', href: route('mail-settings.edit') }];
@@ -41,15 +38,6 @@ const passwordPlaceholder = computed(() => {
     return props.defaults.has_password ? 'From the .env file — leave blank to use it' : '';
 });
 
-const notyf = new Notyf({ duration: 3000, position: { x: 'right', y: 'top' } });
-watch(
-    () => props.flash,
-    (flash) => {
-        if (flash?.success) notyf.success(flash.success);
-    },
-    { immediate: true },
-);
-
 function save() {
     form.put(route('mail-settings.update'), { preserveScroll: true, onFinish: () => form.reset('password') });
 }
@@ -68,10 +56,7 @@ const fieldClass =
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="mx-auto flex min-h-screen w-full flex-col gap-6 bg-slate-100 p-6">
-            <div>
-                <h1 class="text-2xl font-bold tracking-tight text-slate-800">Email Settings</h1>
-                <p class="mt-1 text-sm text-slate-500">The account the system sends email from: client status updates and password reset links.</p>
-            </div>
+            <h1 class="sr-only">Email Settings</h1>
 
             <div class="grid max-w-5xl gap-6 lg:grid-cols-[1fr_20rem]">
                 <form class="rounded-lg border border-slate-200 bg-white p-6" @submit.prevent="save">

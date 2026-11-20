@@ -5,8 +5,6 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { Pencil, Plus, RotateCcw, Search, Trash2, X } from 'lucide-vue-next';
-import { Notyf } from 'notyf';
-import 'notyf/notyf.min.css';
 import { ref, watch } from 'vue';
 
 interface Person {
@@ -34,7 +32,6 @@ const props = defineProps<{
     };
     departments: Array<{ id: number; code: string; name: string }>;
     filters?: { search?: string };
-    flash?: { success?: string; error?: string };
 }>();
 
 const searchTerm = ref(props.filters?.search || '');
@@ -54,17 +51,6 @@ const clearSearch = () => {
 const goToPage = (url: string | null) => {
     if (url) router.get(url, { search: searchTerm.value }, { preserveState: true });
 };
-
-const notyf = new Notyf({ duration: 3000, position: { x: 'right', y: 'top' } });
-
-watch(
-    () => props.flash,
-    (flash) => {
-        if (flash?.success) notyf.success(flash.success);
-        if (flash?.error) notyf.error(flash.error);
-    },
-    { immediate: true },
-);
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'People Directory', href: '/people' }];
 
@@ -144,13 +130,8 @@ const labelClass = 'mb-1.5 block text-sm font-medium text-slate-700';
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="mx-auto flex min-h-screen w-full flex-col gap-6 bg-slate-100 p-6">
-            <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-                <div>
-                    <h1 class="text-2xl font-bold tracking-tight text-slate-800">People Directory</h1>
-                    <p class="mt-1 text-sm text-slate-500">
-                        Office heads and frequent signatories. Intake autofill uses this list to complete sender names hidden under signatures.
-                    </p>
-                </div>
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-end">
+                <h1 class="sr-only">People Directory</h1>
 
                 <div class="flex flex-col items-center gap-3 sm:flex-row">
                     <div class="relative w-full sm:w-72">

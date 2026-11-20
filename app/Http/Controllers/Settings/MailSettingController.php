@@ -37,7 +37,6 @@ class MailSettingController extends Controller
                 // Only whether .env has one; the value stays on the server.
                 'has_password' => $settings->envPassword() !== null,
             ],
-            'flash' => ['success' => $request->session()->get('success')],
         ]);
     }
 

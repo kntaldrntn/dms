@@ -6,6 +6,7 @@ import { type NavItem, type NavSection } from '@/types';
 import { usePage } from '@inertiajs/vue3';
 import {
     AlarmClock,
+    Archive,
     BadgeCheck,
     Building2,
     Contact,
@@ -101,6 +102,7 @@ const sections = computed<NavSection[]>(() => {
                 link('Dashboard', 'dashboard', LayoutGrid, undefined, 'dashboard*'),
                 link('New Document', 'documents.index', FilePlus),
                 link('Transactions', 'transactions.inbox', Inbox, transactionsBadge.value),
+                link('Archive', 'archive.index', Archive),
             ],
         },
         { label: 'Approvals', items: approvals },

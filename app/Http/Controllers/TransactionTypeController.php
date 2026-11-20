@@ -27,10 +27,6 @@ class TransactionTypeController extends Controller
         return Inertia::render('transaction-types/Index', [
             'transactiontypes' => $transactiontypes,
             'filters' => $request->only(['search']),
-            'flash' => [
-                'success' => session('success'),
-                'error' => session('error')     
-            ]
         ]);
     }
 

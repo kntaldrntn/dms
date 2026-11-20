@@ -2,15 +2,13 @@
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { CheckCircle2, FastForward, FileSignature, ScanBarcode, Search, Sparkles, X } from 'lucide-vue-next';
-import { Notyf } from 'notyf';
-import 'notyf/notyf.min.css';
 import { computed, onMounted, ref, watch } from 'vue';
+import { notify } from '@/lib/notify';
 
 const props = defineProps<{
     documents: any;
     departments: Array<{ id: number; name: string }>;
     filters?: { barcode?: string };
-    flash?: { success?: string; error?: string };
     // Set when arriving from the notification bell: that row is highlighted (and its Process dialog opens once received).
     focusDocument?: any | null;
     // View-only copies sent to this office (another office is Primary and acts on them).
@@ -29,7 +27,7 @@ function receive(doc: any) {
         {},
         {
             preserveScroll: true,
-            onError: (errors) => notyf.error(String(Object.values(errors)[0] ?? 'The document could not be received.')),
+            onError: (errors) => notify.error(String(Object.values(errors)[0] ?? 'The document could not be received.')),
             onFinish: () => (receivingId.value = null),
         },
     );
@@ -56,7 +54,7 @@ function acknowledgeTag(doc: any) {
         {},
         {
             preserveScroll: true,
-            onError: (errors) => notyf.error(String(Object.values(errors)[0] ?? 'The tag could not be marked as noted.')),
+            onError: (errors) => notify.error(String(Object.values(errors)[0] ?? 'The tag could not be marked as noted.')),
             onFinish: () => (acknowledgingTag.value = null),
         },
     );
@@ -91,16 +89,6 @@ const clearSearch = () => {
     searchTerm.value = '';
     router.get(route('transactions.inbox'));
 };
-
-const notyf = new Notyf({ duration: 3000, position: { x: 'right', y: 'top' } });
-watch(
-    () => props.flash,
-    (flash) => {
-        if (flash?.success) notyf.success(flash.success);
-        if (flash?.error) notyf.error(flash.error);
-    },
-    { immediate: true },
-);
 
 const breadcrumbs = [{ title: 'My Office Inbox', href: '/transactions/inbox' }];
 

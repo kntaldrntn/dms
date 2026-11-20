@@ -34,7 +34,6 @@ class AdmApprovalController extends Controller
             // ADM routes on to OCM (its own option) or to departments; never back to Records.
             'departments' => Department::where('state', 1)->whereNotIn('code', ['REC', 'ADM', 'OCM'])->orderBy('code')->get(['id', 'code', 'name']),
             'hasCertificate' => $user->hasValidCertificate(),
-            'flash' => ['success' => session('success'), 'error' => session('error')],
         ]);
     }
 

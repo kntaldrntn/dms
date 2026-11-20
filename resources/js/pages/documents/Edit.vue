@@ -6,10 +6,9 @@ import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Save, ArrowLeft, Link as LinkIcon, FileUp, Download } from 'lucide-vue-next';
 import { ref, watch } from 'vue';
-import { Notyf } from 'notyf';
-import 'notyf/notyf.min.css';
 import axios from 'axios';
 import { barcodeBeingTyped, linkedDocumentsText, withChosenBarcode } from '@/lib/linkedDocuments';
+import { notify } from '@/lib/notify';
 
 const props = defineProps<{
     document: any;
@@ -24,8 +23,6 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: 'System Documents', href: '/documents' },
     { title: `Edit: ${props.document.barcode}`, href: `/documents/${props.document.id}/edit` },
 ];
-
-const notyf = new Notyf({ duration: 3000, position: { x: 'right', y: 'top' } });
 
 // --- FORM STATE (Pre-filled for editing) ---
 const form = useForm({
@@ -95,7 +92,7 @@ function updateDocument() {
     form.post(route('documents.update', props.document.id), {
         preserveScroll: true,
         onSuccess: () => {
-            notyf.success('Document updated successfully.');
+            notify.success('Document updated successfully.');
         }
     });
 }

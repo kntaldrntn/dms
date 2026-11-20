@@ -18,10 +18,6 @@ const sidebarNavItems: NavItem[] = [
         title: 'Signing certificate',
         href: '/settings/certificate',
     },
-    {
-        title: 'Appearance',
-        href: '/settings/appearance',
-    },
 ];
 
 const currentPath = window.location.pathname;

@@ -29,10 +29,6 @@ class DeliveryMethodController extends Controller
         return Inertia::render('delivery-methods/Index', [
             'deliverymethods' => $deliverymethods,
             'filters' => $request->only(['search']),
-            'flash' => [
-                'success' => session('success'),
-                'error' => session('error')
-            ]
         ]);
     }
 

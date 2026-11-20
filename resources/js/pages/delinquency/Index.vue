@@ -6,9 +6,7 @@ import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Search, Tag as TagIcon } from 'lucide-vue-next';
-import { Notyf } from 'notyf';
-import 'notyf/notyf.min.css';
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 
 type Office = { id: number; code: string; name: string };
 type TagInfo = {
@@ -39,18 +37,7 @@ const props = defineProps<{
     tags: { value: string; label: string }[];
     offices: Office[];
     asOf: string;
-    flash?: { success?: string; error?: string };
 }>();
-
-const notyf = new Notyf({ duration: 5000, position: { x: 'right', y: 'top' } });
-watch(
-    () => props.flash,
-    (flash) => {
-        if (flash?.success) notyf.success(flash.success);
-        if (flash?.error) notyf.error(flash.error);
-    },
-    { immediate: true },
-);
 
 const search = ref('');
 const officeFilter = ref<number | ''>('');
@@ -104,14 +91,8 @@ const fieldClass =
     <Head title="Delinquency Monitor" />
     <AppLayout :breadcrumbs="[{ title: 'Delinquency Monitor', href: '/delinquency-monitor' }]">
         <div class="flex min-h-screen w-full flex-col gap-4 bg-slate-50 p-4">
-            <div class="flex flex-wrap items-end justify-between gap-3">
-                <div>
-                    <h1 class="text-lg font-semibold text-slate-800">Delinquency Monitor</h1>
-                    <p class="text-sm text-slate-500">
-                        Documents an office has held longer than its allowed time (24 hours unless calibrated). Tag each one with a follow-up note:
-                        the office sees it in its inbox and bell.
-                    </p>
-                </div>
+            <div class="flex flex-wrap items-end gap-3 sm:justify-end">
+                <h1 class="sr-only">Delinquency Monitor</h1>
                 <p class="text-xs text-slate-500">
                     As of {{ asOf }} · <strong class="text-slate-700">{{ rows.length }}</strong> delinquent ·
                     <strong class="text-slate-700">{{ untaggedCount }}</strong> not yet tagged

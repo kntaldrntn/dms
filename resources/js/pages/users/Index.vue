@@ -4,9 +4,8 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { FileUp, Pencil, Plus, Search, Trash2, RotateCcw, History, X } from 'lucide-vue-next';
-import { Notyf } from 'notyf';
-import 'notyf/notyf.min.css';
 import { computed, ref, watch } from 'vue';
+import { notify } from '@/lib/notify';
 
 const props = defineProps<{
     users: {
@@ -57,10 +56,6 @@ const props = defineProps<{
     filters?: {
         search?: string;
     };
-    flash?: {
-        success?: string;
-        error?: string;
-    };
 }>();
 
 // Search state
@@ -105,20 +100,6 @@ const goToPage = (url: string) => {
         { preserveState: true, preserveScroll: false },
     );
 };
-
-const notyf = new Notyf({
-    duration: 3000,
-    position: { x: 'right', y: 'top' },
-});
-
-watch(
-    () => props.flash,
-    (flash) => {
-        if (flash?.success) notyf.success(flash.success);
-        if (flash?.error) notyf.error(flash.error);
-    },
-    { immediate: true },
-);
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -241,7 +222,7 @@ function reactivateUser(user: any) {
         preserveScroll: true,
         // e.g. an older account with no department: say why instead of failing silently.
         onError: (errors) => {
-            notyf.error(`${user.name} was not reactivated: ${Object.values(errors)[0]} Edit the user to fix it.`);
+            notify.error(`${user.name} was not reactivated: ${Object.values(errors)[0]} Edit the user to fix it.`);
         },
     });
 }
@@ -332,11 +313,8 @@ const formatRelativeTime = (dateString: string) => {
         <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-100 min-h-screen">
 
             <!-- Header -->
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h1 class="text-2xl font-bold text-slate-800 tracking-tight">System Users</h1>
-                    <p class="text-sm text-slate-500 mt-1">Manage personnel access and roles across departments.</p>
-                </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-4">
+                <h1 class="sr-only">System Users</h1>
 
                 <div class="flex flex-col sm:flex-row items-center gap-3">
                     <!-- Search -->

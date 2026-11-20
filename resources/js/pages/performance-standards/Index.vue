@@ -4,23 +4,19 @@ import { type BreadcrumbItem } from '@/types';
 import { Head, useForm } from '@inertiajs/vue3';
 import { Save, Search } from 'lucide-vue-next';
 import { ref, onMounted, computed } from 'vue';
-import { Notyf } from 'notyf';
-import 'notyf/notyf.min.css';
+import { notify } from '@/lib/notify';
 
 const props = defineProps<{
     departments: Array<{ id: number; name: string }>;
     documentTypes: Array<{ id: number; document_code: string }>;
     existingStandards: Array<{ department_id: number; document_type_id: number; allocated_minutes: number }>;
     defaultMinutes: number;
-    flash?: { success?: string; error?: string };
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Settings', href: '#' },
     { title: 'Performance Standards', href: '/settings/performance-standards' },
 ];
-
-const notyf = new Notyf({ duration: 3000, position: { x: 'right', y: 'top' } });
 
 // Reactive grid state
 const grid = ref<Record<number, Record<number, number>>>({});
@@ -50,13 +46,6 @@ onMounted(() => {
             grid.value[dept.id][doc.id] = existing ? Number(existing.allocated_minutes) : props.defaultMinutes;
         });
     });
-
-    if (props.flash?.success) {
-        notyf.success(props.flash.success);
-    }
-    if (props.flash?.error) {
-        notyf.error(props.flash.error);
-    }
 });
 
 const form = useForm({
@@ -79,7 +68,7 @@ function saveStandards() {
     form.post(route('performance-standards.store'), {
         preserveScroll: true,
         onSuccess: () => {
-            notyf.success('Performance standards updated successfully.');
+            notify.success('Performance standards updated successfully.');
         },
     });
 }
@@ -98,11 +87,8 @@ function saveStandards() {
             </div>
 
             <!-- Header & Actions Toolbar -->
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Office Performance Standards Settings</h1>
-                    <p class="text-sm text-slate-500 mt-1">Configure allocated processing minutes per department and document type (Default: {{ defaultMinutes }} mins = 24 hours, pending CART calibration).</p>
-                </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-4">
+                <h1 class="sr-only">Office Performance Standards Settings</h1>
                 
                 <div class="flex flex-col sm:flex-row items-center gap-3">
                     <!-- Search -->

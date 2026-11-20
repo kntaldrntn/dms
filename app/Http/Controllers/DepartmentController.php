@@ -32,10 +32,6 @@ class DepartmentController extends Controller
         return Inertia::render('departments/Index', [
             'departments' => $departments,
             'filters' => $request->only(['search']),
-            'flash' => [
-                'success' => session('success'),
-                'error' => session('error')     
-            ]
         ]);
     }
 

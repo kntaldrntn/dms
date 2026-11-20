@@ -318,6 +318,71 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
 
 ## 10. Change log
 
+### 2026-11-20 — Archive: search every document, like the old DTS "Transaction" page (Claude Code, uncommitted)
+
+- **Why:** users search past documents the way the old DTS did. The existing "Transactions" tab stays the office
+  inbox; the new tab is named **Archive** (user decision 2026-11-20), with all filters shown and combinable (user choice
+  over the old one-"Search By"-at-a-time style).
+- **What:** `GET /archive` (`archive.index`, `auth` + `verified`, no `working_hours` since it is read-only). Keyword
+  (barcode, subject matter, source name), Status (Ongoing/Completed), Office (Primary, `department_id`), Document Type,
+  Transaction Type, Classification, Delivery Method, Source (Internal/External), Received From/To (Manila days),
+  10/25/50/100 per page. Rows: barcode, date received, doc. type, source, subject, holding offices, status, View →
+  `documents.show`. Scope is `Document::visibleTo` (Workstation: only documents their office handled, never
+  confidential); the keyword matches subject/source only where the user may read them. Rows are built as plain arrays
+  so the model's per-row SLA appends (`is_delinquent`) are not computed.
+- **Files:** new `app/Http/Requests/ArchiveSearchRequest.php` (validation + `viewAny`), `app/Services/ArchiveSearchService.php`,
+  `app/Http/Controllers/ArchiveController.php`, `resources/js/pages/archive/Index.vue`, `tests/Feature/ArchiveSearchTest.php` (4);
+  changed `routes/web.php`, `resources/js/components/AppSidebar.vue` (Archive link under Documents), `resources/js/ziggy.js`.
+- **Checks (2026-11-20):** Pest **251 passed (2820 assertions)**; Pint ✅ (new files); ESLint ✅; Prettier ✅; `npm run build` ✅.
+  **Not browser-tested.** Open: no "Previous Archive" (old DTS data) import; LIKE search on `subject_matter` has no index,
+  fine at current volume but watch it once the old 2,000+ records per year are in.
+
+### 2026-11-20 — Light mode only (Claude Code, uncommitted)
+- User: "Lock it to light mode for now." The starter kit's Settings → Appearance (Light / Dark / System, default
+  System) only switched shadcn components; our pages have no `dark:` styles, so a PC in Windows dark mode got dark
+  dialogs and inputs on light pages.
+- Removed: `settings/appearance` route, `pages/settings/Appearance.vue`, `components/AppearanceTabs.vue`,
+  `composables/useAppearance.ts` (and `initializeTheme()` in `app.ts`), `HandleAppearance` middleware and its
+  registration and cookie exemption in `bootstrap/app.php`, the Settings nav item. `html { color-scheme: light; }` in
+  `app.css`. `ziggy:generate` run.
+- A real dark mode later means `dark:` styles on every page and the header, with contrast checks.
+- Checks: Pest **247 passed**; ESLint ✅; `npm run build` ✅. **Not browser-tested.**
+
+### 2026-11-20 — Page titles removed where the breadcrumb already names the page (Claude Code, uncommitted)
+- User: the title + description at the top of Index pages repeats the header breadcrumb.
+- 12 pages now have only an `sr-only` `<h1>` (screen readers still get a page heading); their toolbars (search, Add
+  buttons, Delinquency "As of" counts) moved to the right: ADM/OCM Approvals, Delinquency Monitor, Delivery Methods,
+  Departments, Document Classifications, Document Types, Email Settings, People, Performance Standards, Transaction
+  Types, Users. Kept: `documents/Show.vue` (title carries the barcode) and `dashboard/Report.vue` (printed title).
+- Help text that went with them (e.g. Performance Standards' "Default: 1440 mins = 24 hours", the ADM/OCM and
+  Delinquency explanations) is no longer on screen.
+- Checks: ESLint ✅ (pages); `npm run build` ✅. **Not browser-tested.**
+
+### 2026-11-20 — Toasts: notyf → vue-sonner, one toast area for the whole app (Claude Code, uncommitted)
+- User: "Let's try" switching to vue-sonner with the clean-up.
+- Dependency: `vue-sonner` 2.0.9 added, `notyf` removed (net zero). Justification: shadcn-vue's own toast library,
+  matching our `components/ui`. Toasts get title + detail, actions, promise states, stacking and pause on hover.
+- `HandleInertiaRequests` now shares `flash` (`success`, `error` from the session) on every page. The 12 controllers
+  that passed `flash` by hand no longer do.
+- New `resources/js/components/FlashToaster.vue`, rendered next to the page in `app.ts` (not inside a layout), so
+  toasts survive page changes and also work on guest pages. It shows server messages; pages call
+  `toast` from `vue-sonner` for browser-side ones.
+- The 16 notyf users (pages + `ApprovalDialog`) lost their `new Notyf`, flash watchers and `flash` props.
+- **Fixed by this:** Delinquency Monitor and Performance Standards watched a `flash` prop their controllers never
+  sent, so their success/error messages never showed. Every page with a redirect message now shows it.
+- Tests: `FlashMessagesTest` (2). Checks (2026-11-20): Pest **247 passed (2756 assertions)**; Pint ✅; ESLint ✅
+  (pages, components, app.ts); `npm run build` ✅; `vue-tsc`: only the pre-existing `vite/client` error in `app.ts`.
+  **Not browser-tested.**
+- Follow-up (user: toasts did not close, and quick actions stacked toasts behind each other):
+  - New `resources/js/lib/notify.ts`; pages use `notify.success/error/info/warning` instead of `toast`.
+    Durations: 5 s for success/info, 8 s for warning/error. Each toast is also dismissed 3 s after its duration,
+    because vue-sonner's pause-on-hover can stick (vue-sonner issue #165, open in 2.0.9; cause read from the issue,
+    not reproduced here).
+  - Softer pop-in in `resources/css/app.css` (short drop + slight grow, ease-out; reduced-motion users get a fade only).
+  - `<Toaster position="top-center" expand :visible-toasts="4">`: top centre below the header (clear of top-right page buttons), listed one under another instead of stacked like cards.
+- **Lockfile note:** `package-lock.json` already had uncommitted user changes; it now also has vue-sonner in and
+  notyf out. A commit of this work needs `package.json` and `package-lock.json`.
+
 ### 2026-11-20 — Header: PH time clock, processing-hours status, clearer account menu (Claude Code, uncommitted)
 - User: make the header clearer for non-technical users; add PH time with seconds left of the bell divider.
 - New `resources/js/components/PhTimeClock.vue`:

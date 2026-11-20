@@ -1,31 +1,19 @@
 <script setup lang="ts">
 import ApprovalDialog from '@/components/ApprovalDialog.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { notify } from '@/lib/notify';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { FileText, Loader2 } from 'lucide-vue-next';
-import { Notyf } from 'notyf';
-import 'notyf/notyf.min.css';
-import { ref, watch } from 'vue';
+import { ref } from 'vue';
 
 type Office = { id: number; code: string; name: string };
 
-const props = defineProps<{
+defineProps<{
     documents: any;
     departments: Office[];
     /** Whether the signed-in approver has a valid PNPKI certificate on file (needed for paperless). */
     hasCertificate: boolean;
-    flash?: { success?: string; error?: string };
 }>();
-
-const notyf = new Notyf({ duration: 5000, position: { x: 'right', y: 'top' } });
-watch(
-    () => props.flash,
-    (flash) => {
-        if (flash?.success) notyf.success(flash.success);
-        if (flash?.error) notyf.error(flash.error);
-    },
-    { immediate: true },
-);
 
 const receivingId = ref<number | null>(null);
 function receive(doc: any) {
@@ -35,7 +23,7 @@ function receive(doc: any) {
         { workflow_version: doc.workflow_version },
         {
             preserveScroll: true,
-            onError: (errors) => notyf.error(String(Object.values(errors)[0] ?? 'The document could not be received.')),
+            onError: (errors) => notify.error(String(Object.values(errors)[0] ?? 'The document could not be received.')),
             onFinish: () => (receivingId.value = null),
         },
     );
@@ -50,12 +38,7 @@ const buttonClass =
     <Head title="OCM Approvals" />
     <AppLayout :breadcrumbs="[{ title: 'OCM Approvals', href: '/ocm-approvals' }]">
         <div class="flex min-h-screen w-full flex-col gap-4 bg-slate-50 p-4">
-            <div>
-                <h1 class="text-lg font-semibold text-slate-800">OCM Approvals</h1>
-                <p class="text-sm text-slate-500">
-                    OCM receives the document. Once the City Mayor has signed it, record the approval and route it to the departments.
-                </p>
-            </div>
+            <h1 class="sr-only">OCM Approvals</h1>
 
             <section class="overflow-x-auto rounded-lg border border-slate-200 bg-white" aria-label="Documents waiting on City Mayor approval">
                 <table class="w-full text-left text-sm text-slate-700">

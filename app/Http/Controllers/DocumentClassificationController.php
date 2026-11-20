@@ -30,10 +30,6 @@ class DocumentClassificationController extends Controller
         return Inertia::render('document-classifications/Index', [
             'classifications' => $classifications,
             'filters' => $request->only(['search']),
-            'flash' => [
-                'success' => session('success'),
-                'error' => session('error')     
-            ]
         ]);
     }
 

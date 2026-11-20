@@ -5,8 +5,6 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { Pencil, Plus, Search, Trash2, RotateCcw, X } from 'lucide-vue-next';
-import { Notyf } from 'notyf';
-import 'notyf/notyf.min.css';
 import { ref, watch } from 'vue';
 
 type SignatureType = 'digital' | 'handwritten' | null;
@@ -43,10 +41,6 @@ const props = defineProps<{
     };
     filters?: {
         search?: string;
-    };
-    flash?: {
-        success?: string;
-        error?: string;
     };
 }>();
 
@@ -103,24 +97,6 @@ const goToPage = (url: string) => {
         },
     );
 };
-
-const notyf = new Notyf({
-    duration: 3000,
-    position: { x: 'right', y: 'top' },
-});
-
-watch(
-    () => props.flash,
-    (flash) => {
-        if (flash?.success) {
-            notyf.success(flash.success);
-        }
-        if (flash?.error) {
-            notyf.error(flash.error);
-        }
-    },
-    { immediate: true },
-);
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -236,11 +212,8 @@ function submitForm() {
         <div class="flex flex-col gap-6 p-6 w-full mx-auto bg-slate-100 min-h-screen">
             
             <!-- Header & Actions Toolbar -->
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h1 class="text-2xl font-bold text-slate-800 tracking-tight">System Document Types</h1>
-                    <p class="text-sm text-slate-500 mt-1">Manage document types and their rulebook: signature, confidentiality, default category and allowed classifications.</p>
-                </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-4">
+                <h1 class="sr-only">System Document Types</h1>
                 
                 <div class="flex flex-col sm:flex-row items-center gap-3">
                     <!-- Search -->

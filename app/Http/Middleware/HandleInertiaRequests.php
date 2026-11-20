@@ -58,6 +58,11 @@ class HandleInertiaRequests extends Middleware
                 'office' => $request->user()?->department?->only(['code', 'name']),
             ],
             'features' => ['paperless' => (bool) config('services.paperless.enabled')],
+            // One-time messages from `redirect()->with('success'|'error', ...)`, shown as toasts by the app layout.
+            'flash' => fn () => [
+                'success' => $request->session()->get('success'),
+                'error' => $request->session()->get('error'),
+            ],
             // Header clock (PhTimeClock) starts from the server's time, not the PC's.
             'serverNow' => fn () => now()->getTimestampMs(),
             // Lazy so the bell's polling can request it alone (`only: ['incoming']`).
