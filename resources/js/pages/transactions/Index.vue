@@ -432,10 +432,13 @@ function submitProcess() {
                 <div v-if="showProcessModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-sm">
                     <div class="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl border border-slate-200 bg-white shadow-xl">
                         <button
+                            type="button"
+                            aria-label="Close"
+                            title="Close"
                             @click="showProcessModal = false"
                             class="absolute right-4 top-4 z-10 rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100"
                         >
-                            <X class="h-5 w-5" />
+                            <X class="h-5 w-5" aria-hidden="true" />
                         </button>
 
                         <div class="border-b border-slate-100 px-6 py-5">
@@ -655,13 +658,6 @@ function submitProcess() {
                         </div>
 
                         <div class="flex justify-end gap-3 rounded-b-2xl border-t border-slate-100 bg-slate-50 px-6 py-4">
-                            <button
-                                type="button"
-                                @click="showProcessModal = false"
-                                class="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-                            >
-                                Cancel
-                            </button>
                             <button
                                 type="submit"
                                 form="processForm"

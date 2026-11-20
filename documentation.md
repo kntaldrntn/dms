@@ -318,6 +318,28 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
 
 ## 10. Change log
 
+### 2026-11-20 — Header: PH time clock, processing-hours status, clearer account menu (Claude Code, uncommitted)
+- User: make the header clearer for non-technical users; add PH time with seconds left of the bell divider.
+- New `resources/js/components/PhTimeClock.vue`:
+  - Shows time with seconds plus "Fri, Nov 20, 2026 · PH Time" (md+).
+  - Ticks from the shared prop `serverNow` (new in `HandleInertiaRequests`, epoch ms), not the PC clock.
+  - (A processing-hours status pill was tried and removed the same day at the user's request.)
+  - No `aria-live` on the clock.
+- `AppSidebarLayout.vue`:
+  - Account button shows initials, plus first name and a chevron on lg+.
+  - Account menu redesigned: initials, name, email; then "Role · Office (CODE)" on its own line; My Profile and
+    Log out as plain menu items.
+  - Current page (last breadcrumb) is bold and larger, not a link.
+  - Esc closes the bell and account menus; the bell has a tooltip and no longer scales on hover.
+- `AppSidebar.vue`: collapsed sidebar drops its outer padding, so icons are centred in the 48 px column.
+- **Cancel buttons removed from every modal** (user: redundant with the X). The X, Esc or a backdrop click closes:
+  ApprovalDialog, RoutingModal, DeleteConfirmationModal, DeleteUser, the registry dialogs (departments, document
+  types, classifications, transaction types, delivery methods, people), Users, the inbox Process modal and the
+  Delinquency tag dialog. Title-only X buttons got `aria-label="Close"`. DeleteUser resets its password field when
+  the dialog closes (the removed Cancel used to do that).
+- Checks (2026-11-20): Pest **245 passed**; Pint ✅; ESLint ✅; Prettier ✅ (PhTimeClock); `npm run build` ✅;
+  `vue-tsc` shows only the pre-existing `page.props.auth is unknown` kind in the layout. **Not browser-tested.**
+
 ### 2026-11-18 — User Management follows the FGD offices; PNPKI fields only with paperless (Claude Code, uncommitted)
 - User: "Fix it for now please" after a review against the FGD (slide 9 RBAC, paper-first decision).
 - New `app/Http/Requests/SaveUserRequest.php` (store + update; `UserController` no longer validates inline):

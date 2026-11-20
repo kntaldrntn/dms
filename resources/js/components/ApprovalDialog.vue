@@ -206,13 +206,6 @@ const fieldClass =
 
             <div class="flex justify-end gap-2 border-t border-slate-200 px-4 py-3">
                 <button
-                    type="button"
-                    class="rounded-md border border-slate-300 px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
-                    @click="emit('close')"
-                >
-                    Cancel
-                </button>
-                <button
                     type="submit"
                     :disabled="form.processing || preparingStamp || (toDepartments && !form.routed_to.length)"
                     class="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"

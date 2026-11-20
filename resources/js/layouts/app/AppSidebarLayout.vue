@@ -4,10 +4,12 @@ import AppShell from '@/components/AppShell.vue';
 import AppSidebar from '@/components/AppSidebar.vue';
 import AppLogo from '@/components/AppLogo.vue';
 import { SidebarTrigger } from '@/components/ui/sidebar';
+import PhTimeClock from '@/components/PhTimeClock.vue';
+import { getInitials } from '@/composables/useInitials';
 import type { BreadcrumbItemType } from '@/types';
-import { ref, computed } from 'vue';
+import { ref, computed, onBeforeUnmount, onMounted } from 'vue';
 import { usePage, usePoll, Link } from '@inertiajs/vue3';
-import { User, LogOut, ChevronRight, Bell, Inbox } from 'lucide-vue-next';
+import { User, LogOut, ChevronDown, ChevronRight, Bell, Inbox } from 'lucide-vue-next';
 
 type IncomingItem = { id: number | string; barcode: string; subject_matter: string; action: string | null; received_at: string | null; url: string };
 
@@ -22,6 +24,19 @@ withDefaults(defineProps<Props>(), {
 const isProfileOpen = ref(false);
 const page = usePage();
 const user = computed(() => page.props.auth.user);
+const office = computed(() => page.props.auth.office as { code: string; name: string } | null);
+const initials = computed(() => getInitials(user.value?.name));
+const firstName = computed(() => user.value?.name?.trim().split(' ')[0] ?? '');
+
+// Esc closes whichever header menu is open.
+const closeMenus = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+        isProfileOpen.value = false;
+        isBellOpen.value = false;
+    }
+};
+onMounted(() => window.addEventListener('keydown', closeMenus));
+onBeforeUnmount(() => window.removeEventListener('keydown', closeMenus));
 
 // Notification bell: documents that arrived at the user's office and nobody there has acted on yet.
 const isBellOpen = ref(false);
@@ -66,11 +81,13 @@ const formatRole = (role: string) => {
                     <SidebarTrigger class="flex h-9 w-9 items-center justify-center rounded-lg border border-white/20 bg-white/5 text-white/80 shadow-sm transition hover:bg-white/15 hover:text-white" />
                     
                     <div class="hidden sm:flex items-center gap-2 text-sm font-medium text-white/80">
+                        <!-- The last crumb is the page the user is on: shown bold and larger, not as a link. -->
                         <template v-for="(item, index) in breadcrumbs" :key="index">
-                            <Link v-if="item.href" :href="item.href" class="hover:text-white transition">
+                            <span v-if="index === breadcrumbs.length - 1" class="text-base font-semibold text-white" aria-current="page">{{ item.title }}</span>
+                            <Link v-else-if="item.href" :href="item.href" class="hover:text-white hover:underline transition">
                                 {{ item.title }}
                             </Link>
-                            <span v-else class="text-white font-semibold">{{ item.title }}</span>
+                            <span v-else>{{ item.title }}</span>
                             <ChevronRight v-if="index < breadcrumbs.length - 1" class="w-4 h-4 text-white/40" />
                         </template>
                     </div>
@@ -78,6 +95,7 @@ const formatRole = (role: string) => {
 
                 <!-- Right Side: Icons & Profile -->
                 <div class="flex items-center gap-4 sm:gap-6">
+                    <PhTimeClock />
                     <div class="hidden sm:block h-6 w-px bg-white/20"></div>
 
                     <!-- Incoming Documents Bell -->
@@ -85,7 +103,8 @@ const formatRole = (role: string) => {
                         <button
                             type="button"
                             @click="isBellOpen = !isBellOpen; isProfileOpen = false"
-                            class="relative flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/5 text-white/90 shadow-sm transition hover:scale-105 hover:bg-white/15 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                            title="Incoming documents"
+                            class="relative flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/5 text-white/90 shadow-sm transition hover:bg-white/15 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
                             :aria-label="incoming.count ? `${incoming.count} incoming document${incoming.count === 1 ? '' : 's'}` : 'No incoming documents'"
                             :aria-expanded="isBellOpen"
                             aria-haspopup="true"
@@ -144,11 +163,20 @@ const formatRole = (role: string) => {
                     <!-- Profile Dropdown -->
                     <div class="relative">
                         <!-- Trigger Icon (Adapted for Custom Dark Theme) -->
-                        <button 
+                        <button
+                            type="button"
+                            :aria-expanded="isProfileOpen"
+                            aria-haspopup="menu"
+                            :aria-label="`Account menu for ${user?.name ?? 'your account'}`"
                             @click="isProfileOpen = !isProfileOpen; isBellOpen = false"
-                            class="flex items-center justify-center h-9 w-9 rounded-full bg-white/5 border border-white/20 text-white/90 shadow-sm focus:outline-none transition transform hover:scale-105 hover:bg-white/15 hover:text-white"
+                            class="flex h-9 items-center gap-2 rounded-full border border-white/30 bg-white/10 pl-0.5 pr-0.5 text-white shadow-sm transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 lg:pr-3"
                         >
-                            <User class="w-4 h-4" />
+                            <span class="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-xs font-bold tracking-wide" aria-hidden="true">
+                                {{ initials || '?' }}
+                            </span>
+                            <!-- Wide screens: the first name and an arrow, so it reads as "my account menu". -->
+                            <span class="hidden max-w-[8rem] truncate text-sm font-medium lg:inline" aria-hidden="true">{{ firstName }}</span>
+                            <ChevronDown class="hidden h-4 w-4 text-white/70 transition lg:block" :class="{ 'rotate-180': isProfileOpen }" aria-hidden="true" />
                         </button>
 
                         <div v-if="isProfileOpen" @click="isProfileOpen = false" class="fixed inset-0 z-40"></div>
@@ -162,38 +190,45 @@ const formatRole = (role: string) => {
                             leave-to-class="transform opacity-0 scale-95"
                         >
                             <!-- The dropdown keeps the original white background so it pops over the workspace -->
-                            <div v-if="isProfileOpen" class="absolute right-0 mt-3 w-72 origin-top-right rounded-2xl bg-white shadow-[0_10px_40px_-10px_rgba(0,0,0,0.1)] border border-slate-100 z-50 overflow-hidden">
-                                
-                                <div class="flex items-center gap-3 p-4 border-b border-slate-100 bg-slate-50/50">
-                                    <div class="flex items-center justify-center h-11 w-11 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-700 shadow-sm">
-                                        <User class="w-5 h-5" />
-                                    </div>
-                                    <div class="flex flex-col">
-                                        <div class="flex items-center gap-2">
-                                            <span class="text-sm font-bold text-slate-800">{{ user?.name }}</span>
-                                            <span class="rounded bg-slate-100 border border-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 uppercase tracking-wider">
-                                                {{ formatRole(user?.role) }}
-                                            </span>
-                                        </div>
-                                        <span class="text-xs text-slate-500 font-medium">{{ user?.email }}</span>
+                            <div
+                                v-if="isProfileOpen"
+                                role="menu"
+                                aria-label="Account"
+                                class="absolute right-0 z-50 mt-3 w-72 origin-top-right overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
+                            >
+                                <!-- Who is signed in: initials, name, email, then role and office on their own line so nothing wraps awkwardly. -->
+                                <div class="flex items-center gap-3 border-b border-slate-100 px-4 py-3">
+                                    <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#265f92] text-sm font-bold text-white" aria-hidden="true">
+                                        {{ initials || '?' }}
+                                    </span>
+                                    <div class="min-w-0">
+                                        <p class="truncate text-sm font-semibold text-slate-800">{{ user?.name }}</p>
+                                        <p class="truncate text-xs text-slate-500">{{ user?.email }}</p>
                                     </div>
                                 </div>
+                                <p class="border-b border-slate-100 bg-slate-50 px-4 py-2 text-xs text-slate-600">
+                                    <span class="font-medium text-slate-700">{{ formatRole(user?.role) }}</span>
+                                    <template v-if="office"> · {{ office.name }} ({{ office.code }})</template>
+                                </p>
 
-                                <div class="py-2 px-3 flex flex-col gap-1 border-b border-slate-100">
-                                    <Link :href="route('profile.edit')" class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-emerald-600 transition">
-                                        <User class="w-4 h-4 text-slate-400" />
+                                <div class="p-1.5">
+                                    <Link
+                                        :href="route('profile.edit')"
+                                        role="menuitem"
+                                        class="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 focus:bg-slate-100 focus:outline-none"
+                                        @click="isProfileOpen = false"
+                                    >
+                                        <User class="h-4 w-4 text-slate-400" aria-hidden="true" />
                                         My Profile
                                     </Link>
-                                </div>
-
-                                <div class="p-4 bg-white">
-                                    <Link 
-                                        :href="route('logout')" 
-                                        method="post" 
-                                        as="button" 
-                                        class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-rose-600 shadow-sm"
+                                    <Link
+                                        :href="route('logout')"
+                                        method="post"
+                                        as="button"
+                                        role="menuitem"
+                                        class="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-red-50 hover:text-red-700 focus:bg-red-50 focus:text-red-700 focus:outline-none"
                                     >
-                                        <LogOut class="w-4 h-4 opacity-50" />
+                                        <LogOut class="h-4 w-4 text-slate-400" aria-hidden="true" />
                                         Log out
                                     </Link>
                                 </div>

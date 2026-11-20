@@ -115,7 +115,8 @@ const sections = computed<NavSection[]>(() => {
 
 <template>
     <Sidebar collapsible="icon" class="border-r border-slate-200 bg-white">
-        <SidebarContent class="scrollbar-none gap-2 px-2 pb-4 pt-20">
+        <!-- Collapsed (48px): no outer padding, so the group padding leaves exactly the 32px icon button, centred. -->
+        <SidebarContent class="scrollbar-none gap-2 px-2 pb-4 pt-20 group-data-[collapsible=icon]:px-0">
             <NavMain :sections="sections" />
         </SidebarContent>
         <!-- Which office the user is working as (the Transactions count is that office's inbox). -->

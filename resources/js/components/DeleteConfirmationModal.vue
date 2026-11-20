@@ -74,7 +74,7 @@ const confirmDelete = () => {
                         <button
                             @click="closeModal"
                             class="absolute top-3 right-3 rounded-full p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-                            title="Close"
+                            title="Close" aria-label="Close"
                         >
                             <X class="h-5 w-5" />
                         </button>
@@ -82,14 +82,6 @@ const confirmDelete = () => {
                 </div>
 
                 <div class="flex flex-col-reverse gap-3 bg-gray-50 px-6 py-4 sm:flex-row sm:justify-end">
-                    <button
-                        type="button"
-                        @click="closeModal"
-                        :disabled="isDeleting"
-                        class="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-                    >
-                        Cancel
-                    </button>
                     <button
                         type="button"
                         @click="confirmDelete"

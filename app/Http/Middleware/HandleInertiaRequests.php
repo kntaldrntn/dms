@@ -58,6 +58,8 @@ class HandleInertiaRequests extends Middleware
                 'office' => $request->user()?->department?->only(['code', 'name']),
             ],
             'features' => ['paperless' => (bool) config('services.paperless.enabled')],
+            // Header clock (PhTimeClock) starts from the server's time, not the PC's.
+            'serverNow' => fn () => now()->getTimestampMs(),
             // Lazy so the bell's polling can request it alone (`only: ['incoming']`).
             'incoming' => fn () => app(IncomingDocumentService::class)->forUser($request->user()),
             // Sidebar badges: deferred so they never slow the page itself; refreshed with the bell's poll.

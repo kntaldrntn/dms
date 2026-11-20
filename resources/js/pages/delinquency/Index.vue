@@ -272,7 +272,6 @@ const fieldClass =
                         </div>
 
                         <DialogFooter>
-                            <Button type="button" variant="secondary" @click="tagging = null">Cancel</Button>
                             <Button type="submit" :disabled="form.processing">Save tag</Button>
                         </DialogFooter>
                     </form>

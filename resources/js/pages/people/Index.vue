@@ -382,13 +382,6 @@ const labelClass = 'mb-1.5 block text-sm font-medium text-slate-700';
 
                         <div class="flex justify-end gap-3 pt-3">
                             <button
-                                type="button"
-                                class="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                                @click="showDialog = false"
-                            >
-                                Cancel
-                            </button>
-                            <button
                                 type="submit"
                                 class="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
                                 :disabled="form.processing"

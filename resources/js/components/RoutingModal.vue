@@ -110,13 +110,6 @@ const submitRouting = () => {
             <div class="flex justify-end gap-2 border-t border-slate-200 px-4 py-3">
                 <button
                     type="button"
-                    class="rounded-md border border-slate-300 px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
-                    @click="closeModal"
-                >
-                    Cancel
-                </button>
-                <button
-                    type="button"
                     :disabled="selectedIds.length === 0 || form.processing"
                     class="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                     @click="submitRouting"

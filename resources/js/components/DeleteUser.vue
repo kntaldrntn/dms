@@ -6,16 +6,7 @@ import { ref } from 'vue';
 import HeadingSmall from '@/components/HeadingSmall.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -50,7 +41,8 @@ const closeModal = () => {
                 <p class="font-medium">Warning</p>
                 <p class="text-sm">Please proceed with caution, this cannot be undone.</p>
             </div>
-            <Dialog>
+            <!-- Closing with the X (or Esc) clears the typed password and any error. -->
+            <Dialog @update:open="(open) => !open && closeModal()">
                 <DialogTrigger as-child>
                     <Button variant="destructive">Delete account</Button>
                 </DialogTrigger>
@@ -71,10 +63,6 @@ const closeModal = () => {
                         </div>
 
                         <DialogFooter>
-                            <DialogClose as-child>
-                                <Button variant="secondary" @click="closeModal"> Cancel </Button>
-                            </DialogClose>
-
                             <Button variant="destructive" :disabled="form.processing">
                                 <button type="submit">Delete account</button>
                             </Button>

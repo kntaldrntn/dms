@@ -429,7 +429,7 @@ function submitForm() {
                         <button
                             @click="showDialog = false"
                             class="absolute top-4 right-4 rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
-                            title="Close"
+                            title="Close" aria-label="Close"
                         >
                             <X class="h-5 w-5" />
                         </button>
@@ -545,13 +545,6 @@ function submitForm() {
                             </fieldset>
 
                             <div class="pt-3 flex justify-end gap-3">
-                                <button
-                                    type="button"
-                                    class="rounded-xl bg-white border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                                    @click="showDialog = false"
-                                >
-                                    Cancel
-                                </button>
                                 <button
                                     type="submit"
                                     class="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
