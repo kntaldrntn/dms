@@ -115,15 +115,15 @@ const linkedBarcodeList = computed<string[]>(() => {
 
 // --- HELPER FUNCTIONS ---
 
+// Timestamps arrive as ISO strings; always show them in Manila time, whatever the browser's zone.
 const formatDateTime = (dateString: string) => {
     if (!dateString) return { date: '', time: '' };
-    const safeString = dateString.replace(' ', 'T').replace('Z', '');
-    const date = new Date(safeString);
+    const date = new Date(dateString);
     if (isNaN(date.getTime())) return { date: 'Invalid Date', time: '' };
-    
+
     return {
-        date: date.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-        time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+        date: date.toLocaleDateString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: '2-digit', year: 'numeric' }),
+        time: date.toLocaleTimeString('en-US', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit' }),
     };
 };
 
@@ -133,26 +133,10 @@ const formatDateStr = (dateString: string) => {
     return `${parsed.date} ${parsed.time}`;
 };
 
-// Workflow timestamps (received_at, released_at, due_date) are saved as Manila wall-clock time, so the
-// helpers above drop the trailing "Z". Framework timestamps (created_at/updated_at) are real UTC because
-// config/app.php uses 'UTC'; convert those to Asia/Manila explicitly.
-const formatUtcDateStr = (dateString: string) => {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid Date';
-    const options = { timeZone: 'Asia/Manila' } as const;
-    const day = date.toLocaleDateString('en-US', { ...options, month: 'short', day: '2-digit', year: 'numeric' });
-    const time = date.toLocaleTimeString('en-US', { ...options, hour: '2-digit', minute: '2-digit' });
-    return `${day} ${time}`;
-};
-
 const calculateDuration = (startStr: string, endStr: string) => {
     if (!startStr || !endStr) return '';
-    const safeStart = startStr.replace(' ', 'T').replace('Z', '');
-    const safeEnd = endStr.replace(' ', 'T').replace('Z', '');
-    
-    const start = new Date(safeStart).getTime();
-    const end = new Date(safeEnd).getTime();
+    const start = new Date(startStr).getTime();
+    const end = new Date(endStr).getTime();
     const diffMs = end - start;
     
     if (isNaN(diffMs)) return '';
@@ -348,7 +332,7 @@ const formatRequiredAction = (action: string) => action.replaceAll('_', ' ').rep
                             <dd class="font-mono text-slate-800">{{ document.access_code }}</dd>
                         </template>
                         <dt class="font-semibold text-slate-700">Date Start:</dt>
-                        <dd class="text-slate-800">{{ formatUtcDateStr(document.created_at) }}</dd>
+                        <dd class="text-slate-800">{{ formatDateStr(document.created_at) }}</dd>
                         <template v-if="document.due_date">
                             <dt class="font-semibold text-slate-700">Date End:</dt>
                             <dd class="text-slate-800">{{ formatDateStr(document.due_date) }}</dd>

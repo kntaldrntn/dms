@@ -32,9 +32,9 @@ class ClientStatusService
             'barcode' => $document->barcode,
             // Confidential documents: the client sees the status only, not what the document is about.
             'subject' => $document->is_confidential ? null : $document->subject_matter,
-            'received_at' => $document->created_at->timezone('Asia/Manila')->format('M j, Y g:i A'),
+            'received_at' => $document->created_at->format('M j, Y g:i A'),
             'status' => $status,
-            'updated_at' => $document->updated_at->timezone('Asia/Manila')->format('M j, Y g:i A'),
+            'updated_at' => $document->updated_at->format('M j, Y g:i A'),
         ];
     }
 

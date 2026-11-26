@@ -47,11 +47,12 @@ const badgeText = computed(() => (incoming.value.count > 99 ? '99+' : String(inc
 // hidden and runs it asynchronously so it never cancels a form submission in progress.
 usePoll(60000, { only: ['incoming', 'sidebarCounts'] });
 
-// Workflow timestamps are stored as Manila wall-clock time, so drop the trailing "Z" before formatting.
 const formatReceived = (value: string | null) => {
     if (!value) return '';
-    const date = new Date(value.replace(' ', 'T').replace('Z', ''));
-    return isNaN(date.getTime()) ? '' : date.toLocaleString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const date = new Date(value);
+    return isNaN(date.getTime())
+        ? ''
+        : date.toLocaleString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 
 const formatRole = (role: string) => {

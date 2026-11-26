@@ -280,6 +280,7 @@ const formatRole = (role: string) => {
 const formatDate = (dateString: string) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleString('en-US', {
+        timeZone: 'Asia/Manila',
         month: 'short',
         day: 'numeric',
         year: 'numeric',
@@ -301,7 +302,7 @@ const formatRelativeTime = (dateString: string) => {
     if (diffInSeconds < 2592000) return `${Math.floor(diffInSeconds / 86400)}d ago`;
     
     // Fall back to actual date if it's over a month old
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return date.toLocaleDateString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', year: 'numeric' });
 };
 </script>
 

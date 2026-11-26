@@ -200,8 +200,7 @@ test('processing times list every document type of the chosen category, with zer
             'transaction_type_id' => $simple->id, 'source_name' => 'Test Client', 'subject_matter' => 'Voucher',
         ])->forceFill([
             'status' => 'Completed',
-            // As the app saves them: created_at in real UTC, completed_at in Manila wall-clock time.
-            'created_at' => Carbon::parse('2026-10-05 00:00:00', 'UTC'),
+            'created_at' => Carbon::parse('2026-10-05 08:00:00', 'Asia/Manila'),
             'completed_at' => Carbon::parse('2026-10-05 08:00:00', 'Asia/Manila')->addDays($days),
         ])->save();
     }
@@ -228,7 +227,7 @@ test('a report row carries its columns, no personal data, and the footer names w
         'barcode' => 'AOC0008027', 'access_code' => 'ACCESS1', 'department_id' => $records->id, 'document_type_id' => $type->id,
         'source_type' => 'External', 'source_name' => 'Astro Alley', 'gender' => 'Male', 'contact_no' => '09170000000',
         'email' => 'astro@example.com', 'subject_matter' => 'AOC on procurement',
-    ])->forceFill(['created_at' => Carbon::parse('2026-10-22 23:30:00', 'Asia/Manila')->utc()])->save();
+    ])->forceFill(['created_at' => Carbon::parse('2026-10-22 23:30:00', 'Asia/Manila')])->save();
 
     $this->actingAs($user)->get(route('dashboard.report', ['report' => 'todo']))
         ->assertInertia(fn (Assert $page) => $page
@@ -259,7 +258,7 @@ test('Workstation staff see only their own department on every card and report; 
         ]);
         $document->forceFill([
             'status' => 'Completed',
-            'created_at' => Carbon::parse('2026-10-05 00:00:00', 'UTC'),
+            'created_at' => Carbon::parse('2026-10-05 08:00:00', 'Asia/Manila'),
             'completed_at' => Carbon::parse('2026-10-05 08:00:00', 'Asia/Manila')->addDays($days),
         ])->save();
         // Registered at Records, then the office held it as Primary.
@@ -298,13 +297,13 @@ test('a From/To period covers several months, even across a year, on the cards a
     $records = Department::create(['code' => 'REC', 'name' => 'Records', 'state' => 1]);
     $user = User::factory()->create(['role' => 'records_manager', 'department_id' => $records->id]);
     $simple = TransactionType::create(['name' => 'Simple', 'processing_days' => 3, 'state' => 1]);
-    // created_at is real UTC: 2025-12-31 23:00 UTC is already January 1 in Manila.
-    foreach (['2025-11-15 02:00:00' => 'NOV', '2025-12-31 23:00:00' => 'JAN', '2026-02-10 02:00:00' => 'FEB', '2026-03-05 02:00:00' => 'MAR'] as $utc => $barcode) {
+    // Months follow Manila time: 07:00 on January 1 in Manila (still December 31 in UTC) is January.
+    foreach (['2025-11-15 10:00:00' => 'NOV', '2026-01-01 07:00:00' => 'JAN', '2026-02-10 10:00:00' => 'FEB', '2026-03-05 10:00:00' => 'MAR'] as $registeredAt => $barcode) {
         Document::create([
             'barcode' => $barcode, 'access_code' => 'ACCESS1', 'department_id' => $records->id, 'transaction_type_id' => $simple->id,
             'source_type' => 'External', 'source_name' => 'Client', 'subject_matter' => 'Range',
             'due_date' => Carbon::parse('2026-12-31 17:00:00', 'Asia/Manila'),
-        ])->forceFill(['created_at' => Carbon::parse($utc, 'UTC')])->save();
+        ])->forceFill(['created_at' => Carbon::parse($registeredAt, 'Asia/Manila')])->save();
     }
 
     $this->actingAs($user)->get(route('dashboard', ['from' => '2025-12', 'to' => '2026-02']))

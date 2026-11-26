@@ -216,11 +216,8 @@ class Document extends Model
     public function heldSince(): Carbon
     {
         $latestTrail = $this->trails()->where('released_to', $this->department_id)->latest()->first();
-        // released_at is Manila wall-clock stored as if UTC, while created_at is true UTC
-        // (documentation.md §7 #19), so each is converted to a real Manila time before diffing.
-        return $latestTrail?->released_at
-            ? Carbon::parse($latestTrail->released_at->format('Y-m-d H:i:s'), 'Asia/Manila')
-            : ($latestTrail?->created_at ?? $this->created_at)->copy()->setTimezone('Asia/Manila');
+
+        return ($latestTrail?->released_at ?? $latestTrail?->created_at ?? $this->created_at)->copy();
     }
 
     /** The Primary office's allowed holding time for this document type (24 h unless calibrated). */

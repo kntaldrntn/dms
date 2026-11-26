@@ -283,7 +283,8 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
     debt (§4); no `typecheck` npm script.
 17. `README.md` still begins with the Laravel starter-kit text; `composer.json` name is `laravel/vue-starter-kit`.
 18. Vite warns about a >500 kB chunk (OCR/PDF libs).
-19. **Mixed timestamps:** app timezone is UTC, so `created_at`/`updated_at` are real UTC while workflow timestamps
+19. ~~**Mixed timestamps.**~~ **Resolved 2026-11-26:** everything is stored in Manila time (see the change log).
+    Former text: app timezone is UTC, so `created_at`/`updated_at` are real UTC while workflow timestamps
     (`received_at`, `released_at`, `due_date`, `completed_at`) are Manila wall-clock stored as if UTC. Frontends and SLA
     math treat them differently (`formatUtcDateStr`, `Document::is_delinquent`, `DashboardReportService::totalDays`).
     ~~Dashboard month filters use `whereMonth('created_at')` in UTC~~ — **fixed 2026-11-05**: the dashboard and its
@@ -300,7 +301,8 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
 5. Commit the signing-authority change (2026-11-04) when the user says so.
 6. Cleanup: #10–#12, #14, `.gitignore` and tsconfig done 2026-11-10. Left: #13 (OpenAI call in the controller,
    hard-coded model) and the 48 `vue-tsc` errors (#16).
-7. Decide the timestamp convention (#19) before further date/SLA work.
+7. ~~Decide the timestamp convention (#19).~~ Done 2026-11-26: Manila time everywhere; run migration
+   `2026_11_26_000000_*` on every other environment.
 8. Later: ~~spreadsheet export of reports~~ (built 2026-11-12); paperless switch-on (test real PNPKI `.p12` files under OpenSSL 3 first).
    With paperless (user decision 2026-11-04): department PNPKI signing in Process — the Department Head or an
    authorized signer (`users.can_sign_for_head`) signs with their own certificate + PIN; record `signed_for_head`.
@@ -317,6 +319,33 @@ Disbursement Voucher, Project Proposal. Seeded by `DocumentTypeRulebookSeeder`, 
   192.168.4.33.
 
 ## 10. Change log
+
+### 2026-11-26 — Every timestamp stored in Manila time (Claude Code, uncommitted)
+**Why:** user decision ("store everything in GMT+8"), resolving §7 #19. Before, `created_at`/`updated_at` were real
+UTC while workflow times were Manila wall-clock saved as if UTC, so every SLA/report calculation had to convert.
+**What changed:**
+- `config/app.php`: `timezone` = `Asia/Manila`. Framework timestamps and `now()` are now Manila time; workflow code
+  that already used `now('Asia/Manila')` writes the same values as before.
+- New migration `2026_11_26_000000_store_utc_timestamps_in_manila_time`: adds 8 hours to the columns Laravel filled
+  in UTC (`created_at`/`updated_at` on the app tables, `login_histories.login_at`, `users.email_verified_at`,
+  `two_factor_confirmed_at`, `certificate_valid_until`). Workflow columns (`received_at`, `released_at`, `due_date`,
+  `completed_at`, `tagged_at`, `acknowledged_at`) are untouched. `down()` subtracts 8 hours. **Run locally
+  2026-11-26** (C003192158 `created_at` 05:41 → 13:41, now matching its registration trail entry).
+- UTC conversions removed: `Document::heldSince()`, `DashboardReportService::periodQuery()/completedWithin()/totalDays()`,
+  `ArchiveSearchService` date filters and row date, `DashboardReportController` row date, `ClientStatusService`,
+  `DocumentTrackingCode`, `MailSettingController`.
+- Pages: dates arrive as ISO instants (Laravel's JSON, `…Z`) and are shown with `timeZone: 'Asia/Manila'`; the
+  "drop the Z" trick is gone. `documents/Show.vue` (`formatUtcDateStr` merged into `formatDateStr`, durations from real
+  instants), `layouts/app/AppSidebarLayout.vue` (bell), `users/Index.vue` (login history).
+- Tests: `DashboardTest` fixtures now use Manila times (they encoded the old UTC mix); new `ManilaTimeTest` (storage +
+  the migration up/down).
+**Checks:** Pest ✅ 253 passed, 2825 assertions; Pint ✅ on the changed service/migration/test files; ESLint ✅ on the
+changed Vue files; build ✅. Browser (preview, Records Manager): document C003192158 shows Date Start 01:41 PM, the same
+as its registration trail entry, and transit 1.74 hrs.
+**Notes:** MySQL here runs at +08:00 (`SYSTEM` = Asia/Singapore); `TIMESTAMP` columns read back what was written, so no
+DB setting is needed. Existing `due_date`s set by Edit/Change category before today were computed from the UTC
+`created_at` and may be 8 h early (new ones are correct). The many explicit `now('Asia/Manila')` calls are now
+redundant but harmless and were left as they are. Other environments must run this migration exactly once.
 
 ### 2026-11-20 — Archive: search every document, like the old DTS "Transaction" page (Claude Code, uncommitted)
 

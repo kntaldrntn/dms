@@ -25,7 +25,7 @@ class MailSettingController extends Controller
             'setting' => $setting ? [
                 ...$setting->only(['host', 'port', 'username', 'from_address', 'from_name']),
                 'has_password' => true,
-                'updated_at' => $setting->updated_at?->timezone('Asia/Manila')->format('M j, Y g:i A'),
+                'updated_at' => $setting->updated_at?->format('M j, Y g:i A'),
                 'updated_by' => $setting->updatedBy?->name,
             ] : null,
             'defaults' => [

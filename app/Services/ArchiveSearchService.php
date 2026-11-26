@@ -43,12 +43,11 @@ class ArchiveSearchService
                 : $query->where('status', '!=', 'Completed');
         }
 
-        // The dates are Manila calendar days; created_at is stored in UTC.
         if (isset($filters['from'])) {
-            $query->where('created_at', '>=', CarbonImmutable::parse($filters['from'], 'Asia/Manila')->startOfDay()->utc());
+            $query->where('created_at', '>=', CarbonImmutable::parse($filters['from'], 'Asia/Manila')->startOfDay());
         }
         if (isset($filters['to'])) {
-            $query->where('created_at', '<=', CarbonImmutable::parse($filters['to'], 'Asia/Manila')->endOfDay()->utc());
+            $query->where('created_at', '<=', CarbonImmutable::parse($filters['to'], 'Asia/Manila')->endOfDay());
         }
 
         return $query->paginate($perPage)->withQueryString()->through(fn (Document $document) => $this->row($document, $user));
@@ -77,7 +76,7 @@ class ArchiveSearchService
         return [
             'id' => $document->id,
             'barcode' => $document->barcode,
-            'received_at' => $document->created_at?->timezone('Asia/Manila')->toIso8601String(),
+            'received_at' => $document->created_at?->toIso8601String(),
             'document_type' => $document->documentType
                 ? ['code' => $document->documentType->document_code, 'name' => $document->documentType->document_type]
                 : null,

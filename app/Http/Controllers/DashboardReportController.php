@@ -51,8 +51,7 @@ class DashboardReportController extends Controller
             return [
                 'id' => $document->id,
                 'details_hidden' => $hidden,
-                // created_at is real UTC; the report reads in Manila time.
-                'date' => $document->created_at->copy()->setTimezone('Asia/Manila')->format('M. d, Y'),
+                'date' => $document->created_at->format('M. d, Y'),
                 'barcode' => $document->barcode,
                 'document_code' => $document->documentType?->document_code,
                 'document_type' => $document->documentType?->document_type,

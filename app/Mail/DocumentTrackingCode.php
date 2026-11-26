@@ -24,7 +24,7 @@ class DocumentTrackingCode extends Mailable
             'accessCode' => $this->document->access_code,
             // Confidential documents: the email must not say what the document is about.
             'subject' => $this->document->is_confidential ? null : $this->document->subject_matter,
-            'receivedAt' => $this->document->created_at->timezone('Asia/Manila')->format('F j, Y g:i A'),
+            'receivedAt' => $this->document->created_at->format('F j, Y g:i A'),
             'trackUrl' => route('login', ['tab' => 'track']),
         ]);
     }

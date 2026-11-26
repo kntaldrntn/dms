@@ -87,19 +87,15 @@ class DashboardReportService
             ->all();
     }
 
-    /**
-     * Active documents registered in the period (Manila bounds), within what the user may see. created_at is
-     * real UTC, so the bounds are converted; a document registered at 07:00 Manila on the 1st counts in that month.
-     */
+    /** Active documents registered in the period (Manila bounds), within what the user may see. */
     public function periodQuery(CarbonImmutable $start, CarbonImmutable $end, User $user): Builder
     {
-        return $this->scopeToUser(Document::whereBetween('created_at', [$start->utc(), $end->utc()])->where('state', 1), $user);
+        return $this->scopeToUser(Document::whereBetween('created_at', [$start, $end])->where('state', 1), $user);
     }
 
-    /** completed_at is saved as Manila wall-clock time, so it is compared with the Manila bounds as written. */
     public function completedWithin(Builder $documents, CarbonImmutable $start, CarbonImmutable $end): Builder
     {
-        return $documents->whereBetween('completed_at', [$start->format('Y-m-d H:i:s'), $end->format('Y-m-d H:i:s')]);
+        return $documents->whereBetween('completed_at', [$start, $end]);
     }
 
     /**
@@ -122,15 +118,10 @@ class DashboardReportService
         };
     }
 
-    /**
-     * Days from registration to completion (or to now while open). created_at is real UTC, but completed_at is
-     * saved as Manila wall-clock time, so it is read back as Manila before the two are compared.
-     */
+    /** Days from registration to completion (or to now while open). */
     public function totalDays(Document $document): float
     {
-        $end = $document->completed_at
-            ? Carbon::parse($document->completed_at->format('Y-m-d H:i:s'), 'Asia/Manila')
-            : Carbon::now('Asia/Manila');
+        $end = $document->completed_at ?? Carbon::now('Asia/Manila');
 
         return max($document->created_at->diffInSeconds($end, false), 0) / 86400;
     }
